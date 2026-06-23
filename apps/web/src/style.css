@@ -81,6 +81,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-panel .bteam{margin-bottom:10px}.ace-panel .bteam:last-child{margin-bottom:0}
 .bhead{display:grid;grid-template-columns:1fr 26px 26px 34px;align-items:center;gap:4px;font-family:var(--label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:0 8px 5px;border-bottom:1px solid var(--line)}
 .bhead.att{color:var(--att)}.bhead.def{color:var(--def)}
+.bbuy{font-family:var(--label);font-size:8px;font-style:normal;letter-spacing:.08em;margin-left:7px;padding:1px 4px;vertical-align:middle;color:var(--muted)}
+.bbuy.full{color:var(--win);box-shadow:inset 0 0 0 1px rgba(59,209,127,.3)}
+.bbuy.force{color:var(--gold);box-shadow:inset 0 0 0 1px rgba(229,181,103,.3)}
+.bbuy.eco{color:var(--muted-2);box-shadow:inset 0 0 0 1px var(--line-2)}
+.bbuy.pistol{color:var(--muted-2);box-shadow:inset 0 0 0 1px var(--line-2)}
 .bhead .blabel{text-align:right;color:var(--muted-2)}
 .brows{display:flex;flex-direction:column}
 .brow{display:grid;grid-template-columns:1fr 26px 26px 34px;align-items:center;gap:4px;padding:5px 8px;font-variant-numeric:tabular-nums;transition:background .15s}

@@ -81,6 +81,7 @@ export class Viewer {
   private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement; private coneBtn!: HTMLElement;
   private scoreA!: HTMLElement; private scoreB!: HTMLElement;        // running score (no spoiler)
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; // true-odds chart
+  private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
 
   constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null) {
     this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav;
@@ -152,7 +153,7 @@ export class Viewer {
     ([0, 1] as const).forEach(ti => {
       const tm = this.tl.teams[ti];
       const sec = el('div', 'bteam');
-      sec.innerHTML = `<div class="bhead ${ti === 0 ? 'att' : 'def'}"><span>${tm.tag}</span><span class="blabel">K</span><span class="blabel">D</span><span class="blabel">+/-</span></div>`;
+      sec.innerHTML = `<div class="bhead ${ti === 0 ? 'att' : 'def'}"><span>${tm.tag}<i class="bbuy"></i></span><span class="blabel">K</span><span class="blabel">D</span><span class="blabel">+/-</span></div>`;
       const rows = el('div', 'brows');
       tm.players.forEach(p => {
         const row = el('div', 'brow');
@@ -165,6 +166,7 @@ export class Viewer {
       sec.appendChild(rows);
       board.appendChild(sec);
       this.boardWraps[ti] = rows;
+      this.buyEls[ti] = sec.querySelector('.bbuy') as HTMLElement;
     });
     rail.appendChild(board);
 
@@ -280,6 +282,15 @@ export class Viewer {
     let s0 = 0, s1 = 0;
     for (let ri = 0; ri < i; ri++) (this.tl.rounds[ri].winner === 0 ? s0++ : s1++);
     this.scoreA.textContent = String(s0); this.scoreB.textContent = String(s1);
+
+    // each team's buy this round
+    ([0, 1] as const).forEach(ti => {
+      const b = r.economy?.buy?.[String(ti) as '0' | '1'];
+      const e = this.buyEls[ti];
+      if (!b) { e.textContent = ''; return; }
+      e.textContent = b.toUpperCase();
+      e.className = 'bbuy ' + b;
+    });
 
     if (r.winPct == null) { this.oddsNow.textContent = ''; return; }
     const pAtk = r.winPct;

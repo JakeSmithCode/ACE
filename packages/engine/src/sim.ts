@@ -254,8 +254,8 @@ function simulateRound(
   const pistol = n === 1 || n === 13;
 
   const buy: Record<'0' | '1', Buy> = {
-    '0': pistol ? 'pistol' : decideBuy(creds['0'], false),
-    '1': pistol ? 'pistol' : decideBuy(creds['1'], false),
+    '0': pistol ? 'pistol' : decideBuy(creds['0'], creds['1'], lossStreak['0']),
+    '1': pistol ? 'pistol' : decideBuy(creds['1'], creds['0'], lossStreak['1']),
   };
 
   // attackers pick a site, weighted by their plan's site bias
@@ -408,10 +408,12 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
       const side = input.teams[0].players.some(p => p.handle === e.killer) ? '0' : '1';
       kills[side]++;
     }
+    const planted = round.events.some(e => e.kind === 'plant');   // only attackers plant
     (['0', '1'] as const).forEach(s => {
       const sideIdx = Number(s) as 0 | 1;
       const won = round.winner === sideIdx;
-      creds[s] = nextCreds(creds[s], won, kills[s], lossStreak[s]);
+      const didPlant = planted && round.attacker === sideIdx;
+      creds[s] = nextCreds(creds[s], round.economy.buy[s], won, kills[s], lossStreak[s], didPlant);
       lossStreak[s] = won ? 0 : Math.min(3, lossStreak[s] + 1);
     });
     idx++;
