@@ -140,3 +140,5 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-grid label span{color:var(--text);font-variant-numeric:tabular-nums}
 .ace-editor .ed-grid input[type=range]{width:100%;accent-color:var(--brand)}
 .ace-editor .ed-grid select{background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:4px 6px;font-family:var(--label);font-size:12px}
+.ace-editor .ed-grid .ed-check{text-transform:none;letter-spacing:0;color:var(--text);display:flex;align-items:center;gap:7px;cursor:pointer}
+.ace-editor .ed-grid .ed-check input{accent-color:var(--brand);width:auto}

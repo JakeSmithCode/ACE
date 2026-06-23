@@ -100,6 +100,7 @@ interface Ag {
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
+  rotatePlan: { pos: Vec2; onDeathOf: string } | null;  // kill point: rotate here when handle dies
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -251,6 +252,13 @@ function resolveRound(
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         hadKill = true;                                 // first blood = info for the defense
+        // kill point: teammates keyed to this death rotate to their next spot now
+        for (const ag of agents) {
+          if (ag.alive && ag.rotatePlan && ag.rotatePlan.onDeathOf === loser.handle) {
+            ag.path = pathfind(nav, posAt(ag, t), ag.rotatePlan.pos);
+            ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED); ag.rotatePlan = null;
+          }
+        }
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
         events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
         break;
@@ -346,45 +354,68 @@ function simulateRound(
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
       // the lurker holds toward the fight (catches unaware rotators); others push to site
       holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-      exposedUntil: -1,
+      exposedUntil: -1, rotatePlan: null,
       form: form.get(p.handle) ?? 0, holdBonus: 0,
       agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
     });
   });
 
-  // defenders set up on their READ, not the actual site — a wrong read is paid
-  // for in rotation time. Stack hardens the read; aggression pushes mids forward
-  // and trades held-angle edge for early picks.
-  const readSite: 'A' | 'B' = defTac.defense.read >= 0 ? 'A' : 'B';
-  const readPt = A.sites[readSite], offPt = A.sites[readSite === 'A' ? 'B' : 'A'];
   const dAgg = defTac.defense.aggression;
-  const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
-  const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
-  const slots: { from: Vec2; site: 'A' | 'B' | 'M' }[] = [];
-  for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, readPt, 30), site: readSite });
-  slots.push({ from: jitter(rng, offPt, 30), site: readSite === 'A' ? 'B' : 'A' });
-  for (let i = 0; i < 5 - onRead - 1; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
-  defTeam.players.forEach((p, i) => {
-    const st = slots[i];
-    const anchor = st.site === site;            // already on the contested site = holding an angle
-    const goal = anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
-    const path = pathfind(nav, st.from, goal);
-    const lo = loadouts.get(p.handle)!;
-    agents.push({
-      p, side: defender, handle: p.handle, path,
-      // anchors are set from the start; rotators HOLD their read until contact,
-      // then rotate with purpose — so a wrong read is paid for in real info time
-      departT: anchor ? 0 : Infinity,
-      arrive: anchor ? 0.12 : arriveTime(path, ROTATE_SPEED),
-      alive: true, deathT: null, deathPos: null,
-      weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
-      holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
-      form: form.get(p.handle) ?? 0,
-      holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
-      agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-      exposedUntil: -1,
+  if (defTac.defense.play) {
+    // AUTHORED play: defenders hold exactly where the owner placed them, and a
+    // kill point (rotate.onDeathOf) re-routes them when the named teammate dies.
+    const byId = new Map(defTeam.players.map(p => [p.id, p] as const));
+    defTeam.players.forEach(p => {
+      const plan = defTac.defense.play!.plans.find(q => q.player === p.id);
+      const pos = plan ? plan.pos : A.sites[site];           // unplanned players hold the site
+      const lo = loadouts.get(p.handle)!;
+      const trigHandle = plan?.rotate ? byId.get(plan.rotate.onDeathOf)?.handle : undefined;
+      agents.push({
+        p, side: defender, handle: p.handle, path: [pos], departT: 0, arrive: 0.12,
+        alive: true, deathT: null, deathPos: null,
+        weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: true,
+        holdDir: unit(pos, A.atkSpawn),
+        form: form.get(p.handle) ?? 0,
+        holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
+        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        exposedUntil: -1,
+        rotatePlan: plan?.rotate && trigHandle ? { pos: plan.rotate.pos, onDeathOf: trigHandle } : null,
+      });
     });
-  });
+  } else {
+    // PROCEDURAL: defenders set up on their READ, not the actual site — a wrong
+    // read is paid for in rotation time. Stack hardens the read; aggression
+    // pushes mids forward and trades held-angle edge for early picks.
+    const readSite: 'A' | 'B' = defTac.defense.read >= 0 ? 'A' : 'B';
+    const readPt = A.sites[readSite], offPt = A.sites[readSite === 'A' ? 'B' : 'A'];
+    const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
+    const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
+    const slots: { from: Vec2; site: 'A' | 'B' | 'M' }[] = [];
+    for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, readPt, 30), site: readSite });
+    slots.push({ from: jitter(rng, offPt, 30), site: readSite === 'A' ? 'B' : 'A' });
+    for (let i = 0; i < 5 - onRead - 1; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
+    defTeam.players.forEach((p, i) => {
+      const st = slots[i];
+      const anchor = st.site === site;            // already on the contested site = holding an angle
+      const goal = anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
+      const path = pathfind(nav, st.from, goal);
+      const lo = loadouts.get(p.handle)!;
+      agents.push({
+        p, side: defender, handle: p.handle, path,
+        // anchors are set from the start; rotators HOLD their read until contact,
+        // then rotate with purpose — so a wrong read is paid for in real info time
+        departT: anchor ? 0 : Infinity,
+        arrive: anchor ? 0.12 : arriveTime(path, ROTATE_SPEED),
+        alive: true, deathT: null, deathPos: null,
+        weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
+        holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
+        form: form.get(p.handle) ?? 0,
+        holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
+        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        exposedUntil: -1, rotatePlan: null,
+      });
+    });
+  }
 
   const events: MatchEvent[] = [];
 

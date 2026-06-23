@@ -51,6 +51,7 @@ export interface Tactics {
   defense: {
     read: number;       // -1 stack B · 0 spread · +1 stack A  (pre-round site read)
     aggression: number; //  0 passive anchors .. 1 aggressive picks / forward holds
+    play?: Play;        // authored positions + kill points; overrides the procedural setup
   };
 }
 
@@ -66,3 +67,17 @@ export const DEFAULT_TACTICS: Tactics = {
  *  A player not listed defaults to their highest-mastery agent (their main), so
  *  — like tactics — every team always has a comp even if the owner sets nothing. */
 export type Comp = Record<string, string>;
+
+/** An authored play: per-player positions on the map, with conditional **kill
+ *  points** — a player holds `pos`, then rotates to `rotate.pos` when the named
+ *  teammate dies (`rotate.onDeathOf`, a player id). This is the cs-manager-style
+ *  "tell players exactly where to go", reactive: lose the bait, the team
+ *  collapses. v1 is a hold + one conditional rotation; it grows from here. */
+export interface PlayerPlan {
+  player: string;                                 // player id
+  pos: Vec2;                                      // where they set up / hold
+  rotate?: { pos: Vec2; onDeathOf: string };      // kill point: rotate here when onDeathOf dies
+}
+export interface Play {
+  plans: PlayerPlan[];                            // one entry per player on this side
+}
