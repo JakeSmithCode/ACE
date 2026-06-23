@@ -41,7 +41,9 @@ Phase 0 (the keystone) works: a real deterministic engine producing full matches
 
 Vision is now wired end to end (roadmap step 1, done): agents have a facing and a ~120° awareness cone; `inView()` composes that cone onto the alpha-mask LOS; a duel only resolves if someone sees the other, and spotting an unaware enemy first is decisive. The viewer renders each agent's wall-clipped vision cone by raycasting the same navmesh. This is correct — keep building on it. Backstabs, off-angles, and retakes should emerge from geometry, never from hand-authored exceptions.
 
-Utility is in (roadmap step 2, partial): abilities fire for real and bend duels through the same geometry — no hand-authored exceptions. Controllers throw `Smoke`s (vision-blocking circles over time); initiators/attacking-duelists throw `Pulse`s (recon/flash that grant the first shot in an area-window). **Smokes are directional: an enemy smoke on the sightline blinds that viewer, never the side that threw it** (`blindedThrough()`). This is the load-bearing decision — it's what makes the `utility` attribute a net positive instead of self-harm (an earlier symmetric model made higher utility *lose* more). Reach/duration scale with the caster's `utility` (0..1), so the stat expresses through play. If you extend utility, preserve that invariant: more utility must help its owner. Still TODO for the "richer match model": the rest of the three-layer player model (match-night form/variance).
+Utility is in (roadmap step 2): abilities fire for real and bend duels through the same geometry — no hand-authored exceptions. Controllers throw `Smoke`s (vision-blocking circles over time); initiators/attacking-duelists throw `Pulse`s (recon/flash that grant the first shot in an area-window). **Smokes are directional: an enemy smoke on the sightline blinds that viewer, never the side that threw it** (`blindedThrough()`). This is the load-bearing decision — it's what makes the `utility` attribute a net positive instead of self-harm (an earlier symmetric model made higher utility *lose* more). Reach/duration scale with the caster's `utility` (0..1), so the stat expresses through play. If you extend utility, preserve that invariant: more utility must help its owner.
+
+Match-night form is in (the match-expression layer of the three-layer model). Each player draws one form edge per match (`FORM_SWING`, in `simulateMatch` so it's held all match), added to their duel edge — same roster, different night. Drawn in a fixed team/player order to stay deterministic; if you add draws before it, the whole stream shifts (that's fine, just regenerate the sample). Keep it bounded and *fair* (DESIGN §2/§18: a bust is a risk you took, never the dice mugging you). The viewer shows it live via the scoreboard (K/D tallied from kill events — no contract change). The third layer's missing piece, *potential behind fog*, belongs to scouting/management (Phase 3), not the engine.
 
 ## A settled contract decision (don't relitigate by accident)
 
@@ -57,6 +59,7 @@ These shape how lethal getting caught off-guard feels; expect to dial them after
 - `FIRST_SHOT` — the edge for seeing an unaware enemy first; the single biggest lever on backstab/retake lethality.
 - `SMOKE_R` / `SMOKE_R_UTIL`, `SMOKE_DUR` / `SMOKE_DUR_UTIL` — smoke size/duration and how hard they scale with utility; the bigger lever on how much space utility buys.
 - `PULSE_R` / `PULSE_R_UTIL`, `PULSE_DUR` / `PULSE_DUR_UTIL` — recon/flash reach and window; the lever on how decisive entries are.
+- `FORM_SWING` — match-night form band (± duel edge per player). Bigger = more star/dud variance night to night; keep it fair and legible, never a mugging.
 
 To re-balance or measure a tuning change, an A/B is easy: gate utility generation, or set every non-utility attribute equal across two rosters and vary only `utility` to confirm the high-utility side wins (~58% of matches at 92 vs 18).
 
@@ -70,6 +73,6 @@ To re-balance or measure a tuning change, an A/B is easy: gate utility generatio
 ## Roadmap (see `DESIGN.md` §17 for detail)
 
 1. **Vision / fog-of-war** — done, both engine and viewer (see above).
-2. **Richer match model** — abilities/utility firing and affecting duels: done (see above). Remaining: the three-layer player model (potential→current→match-night form) expressing through play.
+2. **Richer match model** — abilities/utility firing and affecting duels: done. Match-night form expressing through play: done (scoreboard surfaces it). Remaining piece — *potential behind fog* — is Phase 3 (scouting), not the engine.
 3. **The persistent world** — scheduling, resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
 4. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.

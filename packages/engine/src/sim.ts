@@ -14,6 +14,7 @@ const SPIKE_TIME = 0.34;   // detonation timer after plant (normalized)
 const SPEED = 4200;        // path units traversed per unit round time (sets arrival)
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
+const FORM_SWING = 6;      // match-night form: per-player edge drawn once per match (±)
 
 // utility — abilities express the `utility` attribute by bending duels through
 // the same geometry. Reach/duration scale with the caster's utility (0..1), so
@@ -47,6 +48,7 @@ interface Ag {
   weapon: string;
   anchor: boolean;       // holding an angle vs moving
   holdDir: Vec2;         // unit heading an agent looks down once stationary
+  form: number;          // match-night form: a duel edge constant for the whole match
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -105,8 +107,9 @@ function arriveTime(path: Vec2[]): number {
  *  defender caught the attacker off-guard, 0 when both saw each other. */
 function duel(rng: Rng, atk: Ag, def: Ag, firstShot: -1 | 0 | 1): boolean {
   const A = atk.p.attr, D = def.p.attr;
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4;
+  // .form is each player's match-night layer: same roster, different night
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form;
   const hold = def.anchor ? 6 : 0;                 // defenders holding angles have the advantage
   const surprise = firstShot * FIRST_SHOT;         // seeing first beats being seen
   const noise = rng.range(-13, 13);
@@ -122,6 +125,7 @@ function pickWeapon(rng: Rng, buy: Buy, role: string): string {
 function simulateRound(
   rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
   creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
+  form: Map<string, number>,
 ): Round {
   const defender: 0 | 1 = attacker === 0 ? 1 : 0;
   const A = ANCHORS[input.map]!;
@@ -151,6 +155,7 @@ function simulateRound(
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
       holdDir: unit(spawn, goal),           // attackers push looking toward the site
+      form: form.get(p.handle) ?? 0,
     });
   });
 
@@ -173,6 +178,7 @@ function simulateRound(
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: st.anchor,
       holdDir: unit(goal, A.atkSpawn),      // defenders hold toward the attacker entry
+      form: form.get(p.handle) ?? 0,
     });
   });
 
@@ -294,10 +300,15 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
   const lossStreak: Record<'0' | '1', number> = { '0': 0, '1': 0 };
   const rounds: Round[] = [];
 
+  // the match-night layer: every player draws a form edge once, held all match —
+  // same roster, different night. Drawn in a fixed order to stay deterministic.
+  const form = new Map<string, number>();
+  for (const team of input.teams) for (const p of team.players) form.set(p.handle, rng.range(-FORM_SWING, FORM_SWING));
+
   let idx = 0;
   while (score[0] < 13 && score[1] < 13 && idx < 30) {
     const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
-    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak });
+    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form);
     rounds.push(round);
     score[round.winner]++;
 

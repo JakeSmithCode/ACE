@@ -82,7 +82,9 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 **Utility — in:** abilities fire for real and bend duels through the same geometry. Controllers throw **smokes** that blind the *enemy's* sightline through them (directional — you play around your own), so a team can take space and execute; initiators (**recon**) and attacking duelists (**flash**) **pulse** the contested site to win the first shot on contact. Every effect's reach and duration scale with the caster's `utility` attribute, so the stat finally bites: with all else equal, a high-utility roster wins ~58% of matches. Side balance barely moves — utility shapes *how* you win, not a free win.
 
+**Match-night form — in:** the third layer of the player model. Every player draws a small form edge once per match, held all match — same roster, different night — so a star pops off or goes ice cold, deterministically. The viewer surfaces it with a **live scoreboard** (K/D through the current moment, top fragger highlighted), so you watch the night's form emerge round by round. The remaining layer — *potential behind fog* → current ability — is a scouting/management concern and lands with Phase 3.
+
 Next, in order (see `docs/DESIGN.md` §17):
-1. **Richer match model (cont.)** — the rest of the three-layer player model: potential-behind-fog → current ability → match-night *form*/variance expressing through play.
+1. **More for the engine to chew on** — more maps through the same alpha→navmesh pipeline; richer round variety (defaults, retakes, mid-round reads) so no two rounds feel scripted.
 2. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
 3. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.
