@@ -221,7 +221,7 @@ function simulateRound(
   const spawns: Record<string, Vec2> = {};
   for (const a of agents) {
     spawns[a.handle] = a.path[0];
-    events.push({ t: 0, arrive: a.arrive, kind: 'move', agent: a.handle, path: a.path });
+    events.push({ t: 0, arrive: a.arrive, kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir });
   }
   events.sort((x, y) => x.t - y.t);
 

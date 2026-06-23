@@ -30,10 +30,15 @@ for (let r = 0; r < rows; r++) {
 }
 
 const nav = { width, height, cell: CELL, cols, rows, walk };
-const outDir = resolve(here, '../data');
-mkdirSync(outDir, { recursive: true });
-const outPath = resolve(outDir, `${map}.navmesh.json`);
-writeFileSync(outPath, JSON.stringify(nav));
+const json = JSON.stringify(nav);
 const walkable = walk.reduce((a, b) => a + b, 0);
 console.log(`[navmesh] ${map}: ${width}x${height} -> ${cols}x${rows} grid, ${walkable} walkable cells`);
-console.log(`[navmesh] wrote ${outPath}`);
+
+// the engine reads it from packages/maps/data; the viewer fetches it from
+// apps/web/public to draw vision cones against the same walls. Commit both so a
+// cold clone works without running the pipeline.
+const outDir = resolve(here, '../data');
+mkdirSync(outDir, { recursive: true });
+for (const out of [resolve(outDir, `${map}.navmesh.json`), resolve(here, '../../../apps/web/public', `${map}.navmesh.json`)]) {
+  try { writeFileSync(out, json); console.log(`[navmesh] wrote ${out}`); } catch { /* web app may be absent */ }
+}

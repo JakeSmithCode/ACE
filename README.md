@@ -78,10 +78,9 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 **Phase 0 — the keystone — is in:** a minimal but real deterministic engine that produces full matches (round loop, buy economy, attribute-driven duels resolved on the real navmesh), the map pipeline, and a viewer that renders it on the actual Ascent minimap.
 
-**Vision / fog-of-war — in:** agents carry a facing (down their travel vector while moving, down a held angle once anchored) and a ~120° awareness cone. A duel only happens when at least one agent sees the other through the same alpha-mask LOS, and spotting an unaware enemy first is a decisive duel edge — so backstabs, off-angles, and post-plant retakes now fall out of geometry rather than pure range. `packages/maps/src/navmesh.ts` → `inView()`.
+**Vision / fog-of-war — in, both sides:** agents carry a facing (down their travel vector while moving, down a held angle once anchored) and a ~120° awareness cone. In the *engine*, a duel only happens when at least one agent sees the other through the alpha-mask LOS, and spotting an unaware enemy first is a decisive edge — so backstabs, off-angles, and post-plant retakes fall out of geometry rather than pure range (`packages/maps/src/navmesh.ts` → `inView()`). In the *viewer*, each living agent casts a wall-clipped vision cone raycast against that same navmesh, so you can watch *what each player could see* — and where two cones overlap is exactly where a duel is about to happen (toggle with the **Vision** button). The engine exposes only `move.hold` (the held heading) in the timeline; the viewer reconstructs facing-while-moving from the path.
 
 Next, in order (see `docs/DESIGN.md` §17):
-1. **Vision in the viewer** — draw the cones / fog so a watcher can *see* why a duel was won, not just that it was.
-2. **Richer match model** — abilities, utility, the three-layer player model expressing through play.
-3. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
-4. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.
+1. **Richer match model** — abilities, utility, the three-layer player model expressing through play.
+2. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
+3. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.

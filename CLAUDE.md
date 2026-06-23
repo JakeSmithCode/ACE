@@ -39,11 +39,13 @@ When you touch geometry, reuse these primitives — don't write a second raycast
 
 Phase 0 (the keystone) works: a real deterministic engine producing full matches, the map pipeline, and a viewer rendering it on the actual Ascent minimap.
 
-Vision is now an engine input (roadmap step 1, in progress): agents have a facing and a ~120° awareness cone; `inView()` composes that cone onto the alpha-mask LOS; a duel only resolves if someone sees the other, and spotting an unaware enemy first is decisive. This is correct — keep building on it. Backstabs, off-angles, and retakes should emerge from geometry, never from hand-authored exceptions.
+Vision is now wired end to end (roadmap step 1, done): agents have a facing and a ~120° awareness cone; `inView()` composes that cone onto the alpha-mask LOS; a duel only resolves if someone sees the other, and spotting an unaware enemy first is decisive. The viewer renders each agent's wall-clipped vision cone by raycasting the same navmesh. This is correct — keep building on it. Backstabs, off-angles, and retakes should emerge from geometry, never from hand-authored exceptions.
 
-## Open decision — do not make this by accident
+## A settled contract decision (don't relitigate by accident)
 
-Rendering vision in the viewer needs facing exposed in the timeline (the `move` events, or a per-tick facing track). That's a contract change — surface it and decide deliberately before implementing, rather than quietly bolting a field on. Options worth weighing: facing as a field on `move` events vs. a separate sampled track; how the viewer interpolates facing between samples.
+Rendering vision needed facing in the timeline. The decision made: expose **only `move.hold`** — the unit heading an agent looks down once it reaches the end of its path. Facing *while moving* is the path's own direction, so a consumer reconstructs facing at any `t` from `path` + `arrive` + `hold` (see `facingOf()` in the viewer, which mirrors the engine's `facingAt()`). This was chosen over a per-tick facing track because the engine doesn't model look-arounds — sampling would just store a function the viewer can already derive. It's additive, so `version` stayed `1`. If you ever add genuine mid-path look mechanics, that's when a sampled track earns its keep — and its own `version` bump.
+
+The viewer fetches `apps/web/public/<map>.navmesh.json` (emitted by `pnpm navmesh` alongside the engine's copy) and reuses the engine's exact LOS sampling to clip cones, so what you see matches what the engine resolved. Don't write a second raycaster.
 
 ## Tuning knobs (gameplay feel, not correctness)
 
@@ -61,7 +63,7 @@ These shape how lethal getting caught off-guard feels; expect to dial them after
 
 ## Roadmap (see `DESIGN.md` §17 for detail)
 
-1. **Vision / fog-of-war** — engine input done; viewer rendering pending the facing-in-contract decision above.
+1. **Vision / fog-of-war** — done, both engine and viewer (see above).
 2. **Richer match model** — abilities/utility actually firing and affecting duels; the three-layer player model expressing through play.
 3. **The persistent world** — scheduling, resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
 4. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.

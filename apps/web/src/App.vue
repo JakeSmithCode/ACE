@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
 import type { MatchTimeline } from '@ace/shared';
-import { Viewer } from './viewer';
+import { Viewer, type NavGrid } from './viewer';
 
 const host = ref<HTMLElement | null>(null);
 let viewer: Viewer | null = null;
 
 onMounted(async () => {
-  const tl = (await fetch('/timeline.json').then(r => r.json())) as MatchTimeline;
-  if (host.value) viewer = new Viewer(host.value, tl, '/ascent.png');
+  // the navmesh is optional: cones simply go unclipped (or off) if it's missing
+  const [tl, nav] = await Promise.all([
+    fetch('/timeline.json').then(r => r.json()) as Promise<MatchTimeline>,
+    fetch('/ascent.navmesh.json').then(r => (r.ok ? r.json() : null)).catch(() => null) as Promise<NavGrid | null>,
+  ]);
+  if (host.value) viewer = new Viewer(host.value, tl, '/ascent.png', nav);
 });
 onUnmounted(() => viewer?.destroy());
 </script>

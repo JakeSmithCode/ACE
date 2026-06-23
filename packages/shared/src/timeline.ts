@@ -10,9 +10,13 @@ export interface MatchInput {
 
 export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
 
-/** All event `t` values are normalized 0..1 WITHIN a round. */
+/** All event `t` values are normalized 0..1 WITHIN a round.
+ *  `move.hold` is the unit heading an agent looks down once it reaches the end
+ *  of its path; while travelling its facing is the path's own direction. With
+ *  the path + arrive + hold, a consumer can reconstruct facing at any t — which
+ *  is what the viewer needs to draw vision cones. Additive since v1. */
 export type MatchEvent =
-  | { t: number; arrive: number; kind: 'move'; agent: string; path: Vec2[] }
+  | { t: number; arrive: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2 }
   | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string }
   | { t: number; kind: 'plant'; agent: string; site: 'A' | 'B' }
   | { t: number; kind: 'defuse'; agent: string }

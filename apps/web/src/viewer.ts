@@ -15,34 +15,68 @@ function posAlong(path: Vec2[], frac: number): Vec2 {
   return path[path.length - 1];
 }
 const ease = (p: number) => p * (2 - p);
+const unit = (dx: number, dy: number): Vec2 => { const d = Math.hypot(dx, dy) || 1; return [dx / d, dy / d]; };
+
+/** Heading of a path's final non-degenerate segment — the fallback for `hold`. */
+function headingAtEnd(path: Vec2[]): Vec2 {
+  for (let i = path.length - 1; i > 0; i--) {
+    const dx = path[i][0] - path[i - 1][0], dy = path[i][1] - path[i - 1][1];
+    if (Math.hypot(dx, dy) > 1e-6) return unit(dx, dy);
+  }
+  return [0, -1];
+}
+
+/** Reconstruct where an agent looks at progress `prog`: down its travel vector
+ *  while moving, down its held angle once arrived. Mirrors engine facingAt(). */
+function facingOf(path: Vec2[], arrive: number, hold: Vec2, prog: number): Vec2 {
+  if (prog < arrive - 1e-6) {
+    const here = posAlong(path, ease(prog / arrive));
+    const ahead = posAlong(path, ease(Math.min(1, (prog + 0.02) / arrive)));
+    const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
+    if (Math.hypot(dx, dy) > 1e-6) return unit(dx, dy);
+  }
+  return hold;
+}
+
 const SVG = 'http://www.w3.org/2000/svg';
 const el = (t: string, cls?: string) => { const e = document.createElement(t); if (cls) e.className = cls; return e; };
 const svg = (t: string) => document.createElementNS(SVG, t);
 
+/** The walkability grid the engine pathfinds and raycasts on (packages/maps).
+ *  The viewer fetches it to clip vision cones against the same walls. */
+export interface NavGrid { cell: number; cols: number; rows: number; walk: number[]; }
+
+// Vision tuning — mirrors the engine's duel-time vision (packages/engine/src/sim.ts).
+const VISION = 150;        // cone reach in image units (engine ENGAGE)
+const FOV_HALF = 1.05;     // cone half-angle in radians (~60°, engine FOV)
+const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clipped edge
+
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; deathT: number | null;
-  node: SVGGElement; trail: SVGPolylineElement; tp: string[];
+  hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement;
 }
 
 export class Viewer {
   private tl: MatchTimeline;
   private mapUrl: string;
+  private nav: NavGrid | null;
   private teamOf = new Map<string, 0 | 1>();
   private roundIdx = 0;
   private T = 0; private playing = true; private speed = 1; private last: number | null = null;
   private DUR = 20000; private fired = -1; private ended = false; private raf = 0;
   private agents: VAg[] = [];
   private spikePos: Vec2 | null = null; private spikePlantT = Infinity;
+  private showCones = true;
 
   // dom refs
   private root: HTMLElement;
-  private agLayer!: SVGGElement; private trLayer!: SVGGElement; private spike!: SVGGElement;
+  private agLayer!: SVGGElement; private trLayer!: SVGGElement; private coneLayer!: SVGGElement; private spike!: SVGGElement;
   private feed!: HTMLElement; private feedItems: HTMLElement[] = [];
   private playBtn!: HTMLElement; private timer!: HTMLElement; private seekFill!: HTMLElement; private seekHead!: HTMLElement; private seek!: HTMLElement;
-  private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement;
+  private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement; private coneBtn!: HTMLElement;
 
-  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string) {
-    this.root = root; this.tl = tl; this.mapUrl = mapUrl;
+  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null) {
+    this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav;
     tl.teams.forEach((tm, i) => tm.players.forEach(p => this.teamOf.set(p.handle, i as 0 | 1)));
     this.build();
     this.loadRound(0);
@@ -75,11 +109,13 @@ export class Viewer {
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', '0 0 1000 1000');
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
+    this.coneLayer = svg('g') as SVGGElement; this.coneLayer.setAttribute('class', 'ace-cones');
     this.trLayer = svg('g') as SVGGElement;
     this.spike = svg('g') as SVGGElement; this.spike.setAttribute('class', 'ace-spike');
     this.spike.innerHTML = `<circle class="sp-ring" r="13"></circle><rect class="sp-core" x="-6" y="-6" width="12" height="12" transform="rotate(45)"></rect>`;
     this.agLayer = svg('g') as SVGGElement;
-    s.append(img, scrim, this.trLayer, this.spike, this.agLayer);
+    // cones sit just above the map, beneath trails/agents/spike
+    s.append(img, scrim, this.coneLayer, this.trLayer, this.spike, this.agLayer);
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
@@ -93,6 +129,7 @@ export class Viewer {
         <div class="seek" id="ace-seek"><div class="fill" id="ace-fill"></div><div class="head" id="ace-headd"></div></div>
         <button class="nav" id="ace-next">›</button>
         <button class="speed" id="ace-speed">1×</button>
+        <button class="speed vis on" id="ace-vis" title="Toggle vision cones">◔ Vision</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -119,6 +156,9 @@ export class Viewer {
 
     this.playBtn.onclick = () => { if (this.ended) this.scrubTo(0); this.playing = !this.playing; this.playBtn.textContent = this.playing ? '❚❚' : '▶'; this.last = null; };
     (ctl.querySelector('#ace-speed') as HTMLElement).onclick = (e) => { this.speed = this.speed === 1 ? 2 : 1; (e.target as HTMLElement).textContent = this.speed + '×'; };
+    this.coneBtn = ctl.querySelector('#ace-vis') as HTMLElement;
+    this.coneBtn.onclick = () => { this.showCones = !this.showCones; this.coneBtn.classList.toggle('on', this.showCones); this.render(); };
+    if (!this.nav) { this.showCones = false; this.coneBtn.classList.remove('on'); this.coneBtn.style.display = 'none'; }
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
     (ctl.querySelector('#ace-next') as HTMLElement).onclick = () => this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
     const seekTo = (clientX: number) => { const r = this.seek.getBoundingClientRect(); this.scrubTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width))); };
@@ -141,7 +181,7 @@ export class Viewer {
     const r = this.tl.rounds[i];
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
     this.playBtn.textContent = '❚❚';
-    this.agLayer.innerHTML = ''; this.trLayer.innerHTML = '';
+    this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = '';
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = [];
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
 
@@ -152,12 +192,15 @@ export class Viewer {
     this.agents = r.events.filter(e => e.kind === 'move').map(e => {
       const mv = e as Extract<typeof e, { kind: 'move' }>;
       const side: 'att' | 'def' = this.teamOf.get(mv.agent) === r.attacker ? 'att' : 'def';
+      const cone = svg('path') as SVGPathElement; cone.setAttribute('class', 'ace-cone ' + side); this.coneLayer.appendChild(cone);
       const g = svg('g') as SVGGElement; g.setAttribute('class', 'ace-ag ' + side);
       g.innerHTML = `<circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="hl ${side}" y="-18">${mv.agent}</text>`;
       g.setAttribute('transform', `translate(${mv.path[0][0]},${mv.path[0][1]})`);
       this.agLayer.appendChild(g);
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, deathT: death.get(mv.agent) ?? null, node: g, trail: tr, tp: [] };
+      // older timelines predate `hold`; fall back to the final path heading
+      const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone };
     });
 
     // spike location = planter position at plant time
@@ -201,12 +244,48 @@ export class Viewer {
     }
   }
 
+  // --- vision: clip a facing cone against the same walls the engine sees ----
+  private walkAt(x: number, y: number): boolean {
+    const nav = this.nav!; const c = Math.floor(x / nav.cell), r = Math.floor(y / nav.cell);
+    return c >= 0 && c < nav.cols && r >= 0 && r < nav.rows && nav.walk[r * nav.cols + c] === 1;
+  }
+  /** Furthest distance from p along unit dir that is still visible — i.e. the
+   *  reach of the cone edge. Uses the engine's own LOS sampling (losClear at
+   *  cell*0.6) and only advances while the whole segment stays clear, so the
+   *  cone never sees through a wall the engine wouldn't. */
+  private rayHit(p: Vec2, dir: Vec2): number {
+    const probe = this.nav!.cell * 0.6, n = Math.ceil(VISION / probe);
+    let last = 0;
+    for (let i = 1; i <= n; i++) {
+      const d = Math.min(VISION, i * probe);
+      if (!this.walkAt(p[0] + dir[0] * d, p[1] + dir[1] * d)) break;
+      last = d;
+    }
+    return last;
+  }
+  /** SVG path for the wall-clipped vision cone at p facing unit f. */
+  private conePath(p: Vec2, f: Vec2): string {
+    const base = Math.atan2(f[1], f[0]);
+    let d = `M${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
+    for (let i = 0; i <= CONE_RAYS; i++) {
+      const ang = base - FOV_HALF + (2 * FOV_HALF) * (i / CONE_RAYS);
+      const dir: Vec2 = [Math.cos(ang), Math.sin(ang)];
+      const hit = this.rayHit(p, dir);
+      d += ` L${(p[0] + dir[0] * hit).toFixed(1)} ${(p[1] + dir[1] * hit).toFixed(1)}`;
+    }
+    return d + 'Z';
+  }
+
   private render() {
+    const cones = this.showCones && !!this.nav;
     for (const a of this.agents) {
-      const prog = (a.deathT != null && this.T >= a.deathT) ? a.deathT : this.T;
+      const dead = a.deathT != null && this.T >= a.deathT;
+      const prog = dead ? a.deathT! : this.T;
       const p = posAlong(a.path, ease(Math.min(1, prog / a.arrive)));
       a.node.setAttribute('transform', `translate(${p[0].toFixed(1)},${p[1].toFixed(1)})`);
-      if (!(a.deathT != null && this.T >= a.deathT)) { a.tp.push(`${p[0].toFixed(0)},${p[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
+      if (!dead) { a.tp.push(`${p[0].toFixed(0)},${p[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
+      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.arrive, a.hold, prog))); a.cone.style.display = ''; }
+      else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
     this.seekFill.style.width = (this.T * 100) + '%';
