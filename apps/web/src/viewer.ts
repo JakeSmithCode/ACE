@@ -156,7 +156,7 @@ export class Viewer {
       const rows = el('div', 'brows');
       tm.players.forEach(p => {
         const row = el('div', 'brow');
-        row.innerHTML = `<span class="bh">${p.handle}${p.igl ? '<i class="bigl">IGL</i>' : ''}</span><span class="bk">0</span><span class="bd">0</span><span class="bkd">0</span>`;
+        row.innerHTML = `<span class="bh">${p.handle}${p.agent ? `<i class="bagent">${p.agent}</i>` : ''}${p.igl ? '<i class="bigl">IGL</i>' : ''}</span><span class="bk">0</span><span class="bd">0</span><span class="bkd">0</span>`;
         rows.appendChild(row);
         this.scoreEls.set(p.handle, {
           row, k: row.querySelector('.bk') as HTMLElement, d: row.querySelector('.bd') as HTMLElement, kd: row.querySelector('.bkd') as HTMLElement,

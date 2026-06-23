@@ -1,5 +1,5 @@
 import type {
-  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics,
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState,
 } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
@@ -38,6 +38,38 @@ const TIER: Record<string, number> = {
   Sheriff: 1.6, Ghost: 1.2, Frenzy: 1.1, Classic: 1,
 };
 
+// The fielded agent decides the kit (which utility fires). An agent off a
+// player's pool defaults to the player's natural role.
+const AGENT_ROLES: Record<string, Role> = {
+  Jett: 'duelist', Raze: 'duelist', Neon: 'duelist', Yoru: 'duelist', Phoenix: 'duelist', Reyna: 'duelist', Iso: 'duelist',
+  Sova: 'initiator', Fade: 'initiator', Breach: 'initiator', Skye: 'initiator', KAYO: 'initiator', Gekko: 'initiator',
+  Omen: 'controller', Brimstone: 'controller', Viper: 'controller', Astra: 'controller', Harbor: 'controller', Clove: 'controller',
+  Killjoy: 'sentinel', Cypher: 'sentinel', Chamber: 'sentinel', Sage: 'sentinel', Deadlock: 'sentinel', Vyse: 'sentinel',
+};
+
+/** A player's pick for the match: which agent, how strong it is on this patch,
+ *  how well they play it. Folds into one duel edge + a utility multiplier. */
+interface Loadout { agent: string; role: Role; mastery: number; compEdge: number; utilFactor: number; }
+
+/** A player's main = their highest-mastery agent (name tiebreak, deterministic). */
+function topAgent(p: Player): string {
+  return [...p.agents].sort((a, b) => b.level - a.level || (a.agent < b.agent ? -1 : 1))[0]?.agent ?? 'Jett';
+}
+
+function addLoadouts(into: Map<string, Loadout>, team: Team, comp: Comp | undefined, patch: PatchState): void {
+  for (const p of team.players) {
+    const agent = comp?.[p.id] ?? topAgent(p);
+    const known = p.agents.find(a => a.agent === agent);
+    const mastery = known ? known.level : 45;                 // an off-pool pick is rough
+    const tier = patch.agentTier[agent] ?? 1.0;
+    const role = AGENT_ROLES[agent] ?? p.role;
+    // meta strength + comfort on the agent, as a duel edge (~±5) and util multiplier
+    const compEdge = (tier - 1) * 60 + (mastery - 75) * 0.1;
+    const utilFactor = 0.65 + (mastery / 100) * 0.5;
+    into.set(p.handle, { agent, role, mastery, compEdge, utilFactor });
+  }
+}
+
 interface Ag {
   p: Player;
   side: 0 | 1;
@@ -52,6 +84,9 @@ interface Ag {
   holdDir: Vec2;         // unit heading an agent looks down once stationary
   form: number;          // match-night form: a duel edge constant for the whole match
   holdBonus: number;     // this agent's held-angle edge (0 unless anchoring; scaled by aggression)
+  agentRole: Role;       // role of the fielded agent — decides the kit
+  compEdge: number;      // duel edge from the agent's tier + the player's mastery
+  utilFactor: number;    // utility multiplier from agent mastery
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -110,9 +145,9 @@ function arriveTime(path: Vec2[], speedMul = 1): number {
  *  defender caught the attacker off-guard, 0 when both saw each other. */
 function duel(rng: Rng, atk: Ag, def: Ag, firstShot: -1 | 0 | 1): boolean {
   const A = atk.p.attr, D = def.p.attr;
-  // .form is each player's match-night layer: same roster, different night
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form;
+  // .form is match-night; .compEdge is the fielded agent (tier + mastery)
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge;
   const hold = def.holdBonus;                      // a held angle's edge (set by setup + aggression)
   const surprise = firstShot * FIRST_SHOT;         // seeing first beats being seen
   const noise = rng.range(-13, 13);
@@ -212,7 +247,7 @@ function resolveRound(
 function simulateRound(
   rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
   creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
-  form: Map<string, number>, atkTac: Tactics, defTac: Tactics,
+  form: Map<string, number>, loadouts: Map<string, Loadout>, atkTac: Tactics, defTac: Tactics,
 ): Round {
   const defender: 0 | 1 = attacker === 0 ? 1 : 0;
   const A = ANCHORS[input.map]!;
@@ -239,12 +274,14 @@ function simulateRound(
     const spawn = jitter(rng, A.atkSpawn, 22);
     const goal = jitter(rng, sitePt, 38);
     const path = pathfind(nav, spawn, goal);
+    const lo = loadouts.get(p.handle)!;
     agents.push({
       p, side: attacker, handle: p.handle, path, arrive: arriveTime(path, atkSpeed),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
       holdDir: unit(spawn, goal),           // attackers push looking toward the site
       form: form.get(p.handle) ?? 0, holdBonus: 0,
+      agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
     });
   });
 
@@ -265,6 +302,7 @@ function simulateRound(
     const anchor = st.site === site;            // already on the contested site = holding an angle
     const goal = anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
     const path = pathfind(nav, st.from, goal);
+    const lo = loadouts.get(p.handle)!;
     agents.push({
       p, side: defender, handle: p.handle, path,
       // rotators move cautiously (clearing angles) — a wrong read arrives late
@@ -274,6 +312,7 @@ function simulateRound(
       holdDir: unit(goal, A.atkSpawn),      // defenders hold toward the attacker entry
       form: form.get(p.handle) ?? 0,
       holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
+      agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
     });
   });
 
@@ -283,26 +322,27 @@ function simulateRound(
   // off a sightline (cuts vision for both sides); initiators (recon) and
   // attacking duelists (flash) pulse the contested site to win the first shot
   // on contact. Each effect's reach/duration expresses the caster's `utility`.
+  // the fielded agent (not the player's natural role) decides the kit, so the
+  // comp you pick changes a team's utility profile. Mastery scales each effect.
   const smokes: Smoke[] = [];
   const pulses: Pulse[] = [];
   const choke = lerp(A.mid, sitePt, 0.55);
-  for (const [side, team, isAtk] of [[attacker, atkTeam, true], [defender, defTeam, false]] as const) {
-    team.players.forEach(p => {
-      const u = p.attr.utility / 100;
-      if (p.role === 'controller') {
-        // attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
-        const c = jitter(rng, isAtk ? sitePt : choke, 18);
-        const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
-        smokes.push({ side, c, r: SMOKE_R + SMOKE_R_UTIL * u, t0, t1: t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u });
-        events.push({ t: t0, kind: 'ability', agent: p.handle, ability: 'smoke' });
-      } else if (p.role === 'initiator' || (isAtk && p.role === 'duelist')) {
-        const c = jitter(rng, sitePt, 22);
-        // attackers time the execute to their tempo (fast hits flash earlier)
-        const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
-        pulses.push({ side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
-        events.push({ t: t0, kind: 'ability', agent: p.handle, ability: p.role === 'initiator' ? 'recon' : 'flash' });
-      }
-    });
+  for (const ag of agents) {
+    const isAtk = ag.side === attacker;
+    const u = (ag.p.attr.utility / 100) * ag.utilFactor;
+    if (ag.agentRole === 'controller') {
+      // attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
+      const c = jitter(rng, isAtk ? sitePt : choke, 18);
+      const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
+      smokes.push({ side: ag.side, c, r: SMOKE_R + SMOKE_R_UTIL * u, t0, t1: t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke' });
+    } else if (ag.agentRole === 'initiator' || (isAtk && ag.agentRole === 'duelist')) {
+      const c = jitter(rng, sitePt, 22);
+      // attackers time the execute to their tempo (fast hits flash earlier)
+      const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
+      pulses.push({ side: ag.side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash' });
+    }
   }
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
@@ -349,11 +389,16 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
 
   const tactics: [Tactics, Tactics] = input.tactics ?? [DEFAULT_TACTICS, DEFAULT_TACTICS];
 
+  // each player's fielded agent for the match (their pick, or their main) — held
+  // all match. Decides their kit, a duel edge (tier + mastery), and util scaling.
+  const loadouts = new Map<string, Loadout>();
+  input.teams.forEach((team, ti) => addLoadouts(loadouts, team, input.comp?.[ti], input.patch));
+
   let idx = 0;
   while (score[0] < 13 && score[1] < 13 && idx < 30) {
     const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
     const defender: 0 | 1 = attacker === 0 ? 1 : 0;
-    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, tactics[attacker], tactics[defender]);
+    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, loadouts, tactics[attacker], tactics[defender]);
     rounds.push(round);
     score[round.winner]++;
 
@@ -374,7 +419,7 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
 
   const meta = (t: Team) => ({
     id: t.id, tag: t.tag, name: t.name,
-    players: t.players.map(p => ({ id: p.id, handle: p.handle, role: p.role, igl: p.igl })),
+    players: t.players.map(p => ({ id: p.id, handle: p.handle, role: p.role, igl: p.igl, agent: loadouts.get(p.handle)?.agent })),
   });
 
   return {

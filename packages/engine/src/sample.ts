@@ -7,7 +7,8 @@ const mk = (
 ): Player => ({
   id, handle, role, igl, age,
   attr: { aim: a, movement: m, gameSense: g, utility: u, clutch: c, entry: e },
-  agents: agents.map(agent => ({ agent, level: 70 + (a % 25) })),
+  // first agent listed is the player's main (highest mastery); pool drops off after
+  agents: agents.map((agent, i) => ({ agent, level: Math.max(45, 90 - i * 15 - (a % 6)) })),
 });
 
 // Team 0 — slightly higher ceiling, star entry duelist, veteran IGL sentinel.

@@ -59,3 +59,8 @@ export const DEFAULT_TACTICS: Tactics = {
   attack: { siteBias: 0, tempo: 0.5 },
   defense: { read: 0, aggression: 0.4 },
 };
+
+/** A team's comp for a match: which agent each player fields, keyed by player id.
+ *  A player not listed defaults to their highest-mastery agent (their main), so
+ *  — like tactics — every team always has a comp even if the owner sets nothing. */
+export type Comp = Record<string, string>;

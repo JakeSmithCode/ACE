@@ -1,4 +1,4 @@
-import type { MapId, Vec2, PatchState, Team, Tactics } from './models.js';
+import type { MapId, Vec2, PatchState, Team, Tactics, Comp } from './models.js';
 
 /** What the engine takes in. Deterministic given identical input. */
 export interface MatchInput {
@@ -7,6 +7,7 @@ export interface MatchInput {
   teams: [Team, Team];
   patch: PatchState;
   tactics?: [Tactics, Tactics];  // per-team plan; a neutral default is used if absent
+  comp?: [Comp, Comp];           // per-team agent picks; players default to their main
 }
 
 export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
@@ -40,7 +41,7 @@ export interface Round {
   events: MatchEvent[];
 }
 
-export interface PlayerMeta { id: string; handle: string; role: string; igl?: boolean; }
+export interface PlayerMeta { id: string; handle: string; role: string; igl?: boolean; agent?: string; }
 export interface TeamMeta { id: string; tag: string; name: string; players: PlayerMeta[]; }
 
 /** The single most important artifact: engine output, viewer input. */
