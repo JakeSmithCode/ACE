@@ -16,7 +16,9 @@ const SPEED = 4200;        // path units traversed per unit round time (sets arr
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 const FORM_SWING = 6;      // match-night form: per-player edge drawn once per match (±)
-const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
+const HOLD_BONUS = 9;      // a held angle's duel edge (an anchor on their spot)
+const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
+const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 
 // utility — abilities express the `utility` attribute by bending duels through
 // the same geometry. Reach/duration scale with the caster's utility (0..1), so
@@ -92,6 +94,7 @@ interface Ag {
   agentRole: Role;       // role of the fielded agent — decides the kit
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
+  exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -146,15 +149,14 @@ function arriveTime(path: Vec2[], speedMul = 1): number {
 }
 
 /** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
- *  `firstShot` is +1 when the attacker spotted an unaware defender, -1 when the
- *  defender caught the attacker off-guard, 0 when both saw each other. */
-function duel(rng: Rng, atk: Ag, def: Ag, firstShot: -1 | 0 | 1): boolean {
+ *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
+ *  / pulse / trade), -ve favours the defender. */
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number): boolean {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery)
   const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge;
   const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge;
   const hold = def.holdBonus;                      // a held angle's edge (set by setup + aggression)
-  const surprise = firstShot * FIRST_SHOT;         // seeing first beats being seen
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - hold + surprise + noise) / 18);
   return rng.chance(p);
@@ -212,15 +214,23 @@ function resolveRound(
         const aSeesD = !blindedThrough(attacker, pa, pd, t) && inView(nav, pa, fa, pd, ENGAGE, FOV);
         const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
         if (!aSeesD && !dSeesA) continue;              // mutual blindside, no LOS, or both smoked — no fight
-        let firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
+        let surprise = aSeesD === dSeesA ? 0 : (aSeesD ? FIRST_SHOT : -FIRST_SHOT);
         // recon/flash overrides who gets the first shot inside its pulse
         const atkPulse = pulseFor(attacker, pd, t), defPulse = pulseFor(defender, pa, t);
-        if (atkPulse && !defPulse) firstShot = 1;
-        else if (defPulse && !atkPulse) firstShot = -1;
-        const atkWins = duel(rng, a, d, firstShot);
+        if (atkPulse && !defPulse) surprise = FIRST_SHOT;
+        else if (defPulse && !atkPulse) surprise = -FIRST_SHOT;
+        // trade: a teammate punishes a just-exposed killer they can see — the
+        // single biggest reason spacing and support play matter. A moderate edge
+        // that never weakens an already-larger advantage the same way.
+        const aCanTrade = d.exposedUntil >= t && aSeesD;
+        const dCanTrade = a.exposedUntil >= t && dSeesA;
+        if (aCanTrade && !dCanTrade) surprise = Math.max(surprise, TRADE_EDGE);
+        else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
+        const atkWins = duel(rng, a, d, surprise);
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
+        winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
         events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
         break;
@@ -299,6 +309,7 @@ function simulateRound(
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
       // the lurker holds toward the fight (catches unaware rotators); others push to site
       holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
+      exposedUntil: -1,
       form: form.get(p.handle) ?? 0, holdBonus: 0,
       agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
     });
@@ -332,6 +343,7 @@ function simulateRound(
       form: form.get(p.handle) ?? 0,
       holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
       agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+      exposedUntil: -1,
     });
   });
 
@@ -368,7 +380,7 @@ function simulateRound(
   // the match rng, so the canonical timeline stays byte-identical.
   let atkForkWins = 0;
   for (let i = 0; i < FORKS; i++) {
-    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null }));
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1 }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }

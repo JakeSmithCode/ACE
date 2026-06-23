@@ -74,6 +74,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-panel .kill .vc{text-decoration:line-through}
 .ace-panel .kill .att{color:var(--att)}.ace-panel .kill .def{color:var(--def)}
 .ace-panel .kill .wp{font-family:var(--label);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);flex:1;text-align:center}
+.ace-panel .kill .trade{color:var(--win);font-size:13px;margin-right:-2px;title:trade}
 .ace-panel .kill.event{justify-content:center;color:var(--gold);font-family:var(--label);font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-left-color:var(--gold);background:rgba(229,181,103,.07)}
 .ace-panel .empty{color:var(--muted-2);font-size:13px;font-style:italic;padding:8px 2px}
 .ace-panel .devnote{font-size:11.5px;line-height:1.6;color:var(--muted)}.ace-panel .devnote b{color:var(--text)}

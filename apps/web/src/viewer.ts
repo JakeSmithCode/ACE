@@ -77,6 +77,7 @@ export class Viewer {
   private root: HTMLElement;
   private agLayer!: SVGGElement; private trLayer!: SVGGElement; private coneLayer!: SVGGElement; private spike!: SVGGElement;
   private feed!: HTMLElement; private feedItems: HTMLElement[] = [];
+  private lastKill = new Map<string, number>();   // killer handle -> t, for tagging trades
   private playBtn!: HTMLElement; private timer!: HTMLElement; private seekFill!: HTMLElement; private seekHead!: HTMLElement; private seek!: HTMLElement;
   private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement; private coneBtn!: HTMLElement;
   private scoreA!: HTMLElement; private scoreB!: HTMLElement;        // running score (no spoiler)
@@ -241,7 +242,7 @@ export class Viewer {
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
     this.playBtn.textContent = '❚❚';
     this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = '';
-    this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = [];
+    this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
 
     // deaths
@@ -310,7 +311,7 @@ export class Viewer {
   private scrubTo(frac: number) {
     const r = this.tl.rounds[this.roundIdx];
     this.T = frac; this.fired = -1; this.ended = false;
-    this.feed.innerHTML = ''; this.feedItems = []; this.spike.classList.remove('on');
+    this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
     r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant') && e.t <= frac) this.fire(e); });
     this.fired = frac;
@@ -325,7 +326,11 @@ export class Viewer {
       const d = el('div', 'kill');
       const kc = this.teamOf.get(e.killer) === this.tl.rounds[this.roundIdx].attacker ? 'att' : 'def';
       const vc = kc === 'att' ? 'def' : 'att';
-      d.innerHTML = `<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>`;
+      // a trade: this kill drops someone who themselves killed in the last ~3s
+      const lk = this.lastKill.get(e.victim);
+      const traded = lk != null && e.t - lk <= 0.04;
+      this.lastKill.set(e.killer, e.t);
+      d.innerHTML = `${traded ? '<span class="trade">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>`;
       this.feed.appendChild(d); this.feedItems.push(d);
       while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
       const v = this.agents.find(a => a.handle === e.victim); if (v) v.node.classList.add('dead');
