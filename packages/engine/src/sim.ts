@@ -3,7 +3,7 @@ import type {
 } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
-import { loadNavmesh, ANCHORS, pathfind, losClear, posAlong, type Navmesh } from '@ace/maps';
+import { loadNavmesh, ANCHORS, pathfind, inView, posAlong, type Navmesh } from '@ace/maps';
 
 // ---- tuning ----------------------------------------------------------------
 const STEP = 0.015;        // simulation tick (normalized round time)
@@ -12,6 +12,8 @@ const PLANT_R = 75;        // "on site" radius
 const SITE_R = 130;        // "contesting site" radius
 const SPIKE_TIME = 0.34;   // detonation timer after plant (normalized)
 const SPEED = 4200;        // path units traversed per unit round time (sets arrival)
+const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
+const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 
 const WEAPONS: Record<Buy, string[]> = {
   full: ['Vandal', 'Phantom', 'Operator', 'Vandal', 'Phantom'],
@@ -35,14 +37,34 @@ interface Ag {
   deathPos: Vec2 | null;
   weapon: string;
   anchor: boolean;       // holding an angle vs moving
+  holdDir: Vec2;         // unit heading an agent looks down once stationary
 }
 
 const ease = (p: number) => p * (2 - p);
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+function unit(from: Vec2, to: Vec2): Vec2 {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const d = Math.hypot(dx, dy) || 1;
+  return [dx / d, dy / d];
+}
+
 function posAt(a: Ag, t: number): Vec2 {
   if (a.deathT != null && t >= a.deathT) return a.deathPos!;
   return posAlong(a.path, ease(Math.min(1, t / a.arrive)));
+}
+
+/** Where an agent is looking at time t: down their travel vector while moving,
+ *  and down their held angle (holdDir) once they've arrived or stopped. */
+function facingAt(a: Ag, t: number): Vec2 {
+  if (a.deathT != null && t >= a.deathT) return a.holdDir;
+  if (t < a.arrive - 1e-6) {
+    const here = posAt(a, t);
+    const ahead = posAt(a, Math.min(a.arrive, t + STEP));
+    const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
+    if (Math.hypot(dx, dy) > 1e-6) return unit(here, ahead);
+  }
+  return a.holdDir;
 }
 
 function jitter(rng: Rng, p: Vec2, amt: number): Vec2 {
@@ -55,14 +77,17 @@ function arriveTime(path: Vec2[]): number {
   return Math.max(0.1, Math.min(0.92, 0.1 + len / SPEED));
 }
 
-/** Resolve one attacker-vs-defender duel. Returns true if the attacker wins. */
-function duel(rng: Rng, atk: Ag, def: Ag): boolean {
+/** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
+ *  `firstShot` is +1 when the attacker spotted an unaware defender, -1 when the
+ *  defender caught the attacker off-guard, 0 when both saw each other. */
+function duel(rng: Rng, atk: Ag, def: Ag, firstShot: -1 | 0 | 1): boolean {
   const A = atk.p.attr, D = def.p.attr;
   const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4;
   const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4;
-  const hold = def.anchor ? 9 : 0;                 // defenders holding angles have the advantage
+  const hold = def.anchor ? 6 : 0;                 // defenders holding angles have the advantage
+  const surprise = firstShot * FIRST_SHOT;         // seeing first beats being seen
   const noise = rng.range(-13, 13);
-  const p = sigmoid((atkEdge - defEdge - hold + noise) / 18);
+  const p = sigmoid((atkEdge - defEdge - hold + surprise + noise) / 18);
   return rng.chance(p);
 }
 
@@ -102,6 +127,7 @@ function simulateRound(
       p, side: attacker, handle: p.handle, path, arrive: arriveTime(path),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
+      holdDir: unit(spawn, goal),           // attackers push looking toward the site
     });
   });
 
@@ -123,6 +149,7 @@ function simulateRound(
       arrive: st.anchor ? 0.12 : arriveTime(path),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: st.anchor,
+      holdDir: unit(goal, A.atkSpawn),      // defenders hold toward the attacker entry
     });
   });
 
@@ -147,16 +174,21 @@ function simulateRound(
     resolvedThisStep.clear();
     const liveA = atk(), liveD = def();
 
-    // engagements: first opposing pair within range + line of sight resolves
+    // engagements: a pair only fights if at least one sees the other. Whoever
+    // spots an unaware enemy first carries a decisive first-shot advantage.
     for (const a of liveA) {
       if (!a.alive) continue;
-      const pa = posAt(a, t);
+      const pa = posAt(a, t), fa = facingAt(a, t);
       for (const d of liveD) {
         if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
         const pd = posAt(d, t);
         if (dist(pa, pd) > ENGAGE) continue;
-        if (!losClear(nav, pa, pd)) continue;
-        const atkWins = duel(rng, a, d);
+        const fd = facingAt(d, t);
+        const aSeesD = inView(nav, pa, fa, pd, ENGAGE, FOV);
+        const dSeesA = inView(nav, pd, fd, pa, ENGAGE, FOV);
+        if (!aSeesD && !dSeesA) continue;              // mutual blindside or no LOS — no fight
+        const firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
+        const atkWins = duel(rng, a, d, firstShot);
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);

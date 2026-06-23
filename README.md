@@ -78,8 +78,10 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 **Phase 0 — the keystone — is in:** a minimal but real deterministic engine that produces full matches (round loop, buy economy, attribute-driven duels resolved on the real navmesh), the map pipeline, and a viewer that renders it on the actual Ascent minimap.
 
+**Vision / fog-of-war — in:** agents carry a facing (down their travel vector while moving, down a held angle once anchored) and a ~120° awareness cone. A duel only happens when at least one agent sees the other through the same alpha-mask LOS, and spotting an unaware enemy first is a decisive duel edge — so backstabs, off-angles, and post-plant retakes now fall out of geometry rather than pure range. `packages/maps/src/navmesh.ts` → `inView()`.
+
 Next, in order (see `docs/DESIGN.md` §17):
-1. **Vision / fog-of-war** — raycast the same alpha mask for sightlines + occlusion; feed who-sees-whom into duel resolution.
+1. **Vision in the viewer** — draw the cones / fog so a watcher can *see* why a duel was won, not just that it was.
 2. **Richer match model** — abilities, utility, the three-layer player model expressing through play.
 3. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
 4. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.

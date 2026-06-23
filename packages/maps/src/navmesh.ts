@@ -106,6 +106,25 @@ export function losClear(nav: Navmesh, a: Vec2, b: Vec2): boolean {
   return true;
 }
 
+/** Can a viewer at `from`, facing unit vector `dir`, see `to`?
+ *  True when `to` is within `range`, inside the half-angle `halfFov` cone,
+ *  and not occluded by a wall. This is the fog-of-war primitive: it composes
+ *  range + a facing cone on top of the same alpha-mask LOS the navmesh uses,
+ *  so "who sees whom" obeys the real geometry of the map. */
+export function inView(
+  nav: Navmesh, from: Vec2, dir: Vec2, to: Vec2, range: number, halfFov: number,
+): boolean {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const d = Math.hypot(dx, dy);
+  if (d > range) return false;
+  if (d > 1e-6) {
+    // dir is assumed unit-length; dot of the bearing against facing == cos(angle)
+    const cos = (dx * dir[0] + dy * dir[1]) / d;
+    if (cos < Math.cos(halfFov)) return false;
+  }
+  return losClear(nav, from, to);
+}
+
 function smooth(nav: Navmesh, pts: Vec2[]): Vec2[] {
   if (pts.length < 3) return pts;
   const out: Vec2[] = [pts[0]]; let i = 0;
