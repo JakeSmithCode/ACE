@@ -34,6 +34,7 @@ export interface Round {
   method: RoundMethod;
   site: 'A' | 'B';
   economy: RoundEconomy;
+  winPct: number;                    // P(attacker wins) for THIS setup, by re-simulating the round
   spawns: Record<string, Vec2>;      // agent handle -> spawn point
   events: MatchEvent[];
 }

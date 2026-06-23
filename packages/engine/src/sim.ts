@@ -122,6 +122,90 @@ function pickWeapon(rng: Rng, buy: Buy, role: string): string {
   return rng.pick(pool);
 }
 
+const FORKS = 120;         // counterfactual re-runs per round → its true odds
+// a stable, match-independent seed for fork (n, i); never drawn from the match rng
+function forkSeed(seed: number, n: number, i: number): number {
+  return ((seed * 0x9e3779b1) ^ (n * 0x85ebca77) ^ ((i + 1) * 0xc2b2ae3d)) >>> 0;
+}
+
+/** Resolve a round from a fixed setup with a given rng: the tick loop, plant,
+ *  and terminal conditions. Pure over (agents, smokes, pulses, rng) — so the
+ *  same setup can be replayed on throwaway rng to measure its odds. Agents are
+ *  mutated (alive/death), so callers pass a throwaway copy for forks. */
+function resolveRound(
+  agents: Ag[], smokes: Smoke[], pulses: Pulse[], nav: Navmesh,
+  sitePt: Vec2, site: 'A' | 'B', attacker: 0 | 1, defender: 0 | 1, rng: Rng,
+): { winner: 0 | 1; method: RoundMethod; events: MatchEvent[] } {
+  // a smoke is directional: it blinds the ENEMY's vision through it, not the
+  // side that threw it (you play around your own smoke).
+  const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
+    smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && segDist(p1, p2, s.c) <= s.r);
+  const pulseFor = (s: 0 | 1, p: Vec2, t: number): boolean =>
+    pulses.some(u => u.side === s && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
+  const atk = () => agents.filter(a => a.side === attacker && a.alive);
+  const def = () => agents.filter(a => a.side === defender && a.alive);
+
+  const events: MatchEvent[] = [];
+  let planted = false, plantBy = '';
+  let detonateAt = Infinity;
+  let winner: 0 | 1 | null = null;
+  let method: RoundMethod = 'time';
+
+  const resolvedThisStep = new Set<string>();
+  for (let t = 0; t <= 1 + 1e-9; t += STEP) {
+    resolvedThisStep.clear();
+    const liveA = atk(), liveD = def();
+
+    // engagements: a pair only fights if at least one sees the other. Whoever
+    // spots an unaware enemy first carries a decisive first-shot advantage.
+    for (const a of liveA) {
+      if (!a.alive) continue;
+      const pa = posAt(a, t), fa = facingAt(a, t);
+      for (const d of liveD) {
+        if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
+        const pd = posAt(d, t);
+        if (dist(pa, pd) > ENGAGE) continue;
+        const fd = facingAt(d, t);
+        const aSeesD = !blindedThrough(attacker, pa, pd, t) && inView(nav, pa, fa, pd, ENGAGE, FOV);
+        const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
+        if (!aSeesD && !dSeesA) continue;              // mutual blindside, no LOS, or both smoked — no fight
+        let firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
+        // recon/flash overrides who gets the first shot inside its pulse
+        const atkPulse = pulseFor(attacker, pd, t), defPulse = pulseFor(defender, pa, t);
+        if (atkPulse && !defPulse) firstShot = 1;
+        else if (defPulse && !atkPulse) firstShot = -1;
+        const atkWins = duel(rng, a, d, firstShot);
+        const loser = atkWins ? d : a;
+        const winnerAg = atkWins ? a : d;
+        loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
+        resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
+        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
+        break;
+      }
+    }
+
+    // plant: an attacker controls the site
+    if (!planted) {
+      const atkAtSite = atk().filter(a => dist(posAt(a, t), sitePt) < PLANT_R);
+      const defAtSite = def().filter(d => dist(posAt(d, t), sitePt) < SITE_R);
+      if (atkAtSite.length >= 1 && (defAtSite.length === 0 || (t > 0.5 && atk().length > def().length))) {
+        planted = true; plantBy = atkAtSite[0].handle;
+        detonateAt = Math.min(0.99, t + SPIKE_TIME);
+        events.push({ t, kind: 'plant', agent: plantBy, site });
+      }
+    }
+
+    // terminal conditions
+    if (def().length === 0) { winner = attacker; method = planted ? 'detonation' : 'elimination'; break; }
+    if (atk().length === 0) { winner = defender; method = planted ? 'defuse' : 'elimination'; break; }
+    if (planted && t >= detonateAt) { winner = attacker; method = 'detonation'; break; }
+    if (t >= 1) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; break; }
+  }
+  if (winner === null) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; }
+
+  return { winner, method, events };
+}
+
 function simulateRound(
   rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
   creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
@@ -182,9 +266,6 @@ function simulateRound(
     });
   });
 
-  const atk = () => agents.filter(a => a.side === attacker && a.alive);
-  const def = () => agents.filter(a => a.side === defender && a.alive);
-
   const events: MatchEvent[] = [];
 
   // utility fires for real and bends duels through geometry. Controllers smoke
@@ -211,71 +292,19 @@ function simulateRound(
       }
     });
   }
-  // a smoke is directional: it blinds the ENEMY's vision through it, not the
-  // side that threw it (you play around your own smoke). So utility is a real
-  // edge — bigger/longer smokes deny the other team more space.
-  const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
-    smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && segDist(p1, p2, s.c) <= s.r);
-  const pulseFor = (s: 0 | 1, p: Vec2, t: number): boolean =>
-    pulses.some(u => u.side === s && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
-
-  let planted = false, plantBy = '';
-  let detonateAt = Infinity;
-  let winner: 0 | 1 | null = null;
-  let method: RoundMethod = 'time';
-
-  const resolvedThisStep = new Set<string>();
-  for (let t = 0; t <= 1 + 1e-9; t += STEP) {
-    resolvedThisStep.clear();
-    const liveA = atk(), liveD = def();
-
-    // engagements: a pair only fights if at least one sees the other. Whoever
-    // spots an unaware enemy first carries a decisive first-shot advantage.
-    for (const a of liveA) {
-      if (!a.alive) continue;
-      const pa = posAt(a, t), fa = facingAt(a, t);
-      for (const d of liveD) {
-        if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
-        const pd = posAt(d, t);
-        if (dist(pa, pd) > ENGAGE) continue;
-        const fd = facingAt(d, t);
-        // an enemy smoke on the sightline blinds that viewer (but not the thrower)
-        const aSeesD = !blindedThrough(attacker, pa, pd, t) && inView(nav, pa, fa, pd, ENGAGE, FOV);
-        const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
-        if (!aSeesD && !dSeesA) continue;              // mutual blindside, no LOS, or both smoked — no fight
-        let firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
-        // recon/flash overrides who gets the first shot inside its pulse
-        const atkPulse = pulseFor(attacker, pd, t), defPulse = pulseFor(defender, pa, t);
-        if (atkPulse && !defPulse) firstShot = 1;
-        else if (defPulse && !atkPulse) firstShot = -1;
-        const atkWins = duel(rng, a, d, firstShot);
-        const loser = atkWins ? d : a;
-        const winnerAg = atkWins ? a : d;
-        loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
-        resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
-        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
-        break;
-      }
-    }
-
-    // plant: an attacker controls the site
-    if (!planted) {
-      const atkAtSite = atk().filter(a => dist(posAt(a, t), sitePt) < PLANT_R);
-      const defAtSite = def().filter(d => dist(posAt(d, t), sitePt) < SITE_R);
-      if (atkAtSite.length >= 1 && (defAtSite.length === 0 || (t > 0.5 && atk().length > def().length))) {
-        planted = true; plantBy = atkAtSite[0].handle;
-        detonateAt = Math.min(0.99, t + SPIKE_TIME);
-        events.push({ t, kind: 'plant', agent: plantBy, site });
-      }
-    }
-
-    // terminal conditions
-    if (def().length === 0) { winner = attacker; method = planted ? 'detonation' : 'elimination'; break; }
-    if (atk().length === 0) { winner = defender; method = planted ? 'defuse' : 'elimination'; break; }
-    if (planted && t >= detonateAt) { winner = attacker; method = 'detonation'; break; }
-    if (t >= 1) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; break; }
+  // Counterfactual forks: replay this exact setup on throwaway rng to measure
+  // how often the attacker wins — the round's true odds. These never draw from
+  // the match rng, so the canonical timeline stays byte-identical.
+  let atkForkWins = 0;
+  for (let i = 0; i < FORKS; i++) {
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null }));
+    const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, new Rng(forkSeed(input.seed, n, i)));
+    if (fr.winner === attacker) atkForkWins++;
   }
-  if (winner === null) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; }
+
+  // Canonical resolution draws from the match rng (same order as ever).
+  const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, rng);
+  events.push(...res.events);
 
   // emit one move event per agent (full path + arrival); viewer freezes on death
   const spawns: Record<string, Vec2> = {};
@@ -286,8 +315,9 @@ function simulateRound(
   events.sort((x, y) => x.t - y.t);
 
   return {
-    n, attacker, winner, method, site,
+    n, attacker, winner: res.winner, method: res.method, site,
     economy: buildEconomy(buy, creds),
+    winPct: atkForkWins / FORKS,
     spawns, events,
   };
 }

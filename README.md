@@ -84,7 +84,9 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 **Match-night form — in:** the third layer of the player model. Every player draws a small form edge once per match, held all match — same roster, different night — so a star pops off or goes ice cold, deterministically. The viewer surfaces it with a **live scoreboard** (K/D through the current moment, top fragger highlighted), so you watch the night's form emerge round by round. The remaining layer — *potential behind fog* → current ability — is a scouting/management concern and lands with Phase 3.
 
+**True Odds — in (the thesis, made literal):** because a match is a *pure function* of its inputs, the engine re-simulates every round's exact setup 120× on throwaway RNG to compute its real win chance — then the viewer shows which of your wins were robbery and which losses were chokes. No esports manager has done this, because no other match engine is deterministic enough to. The counterfactual forks never touch the match RNG, so the canonical timeline stays byte-identical; only an additive `winPct` rides along on each round (version still `1`). The viewer plots a per-round odds chart (favoured team, actual winner, upsets flagged) with a live verdict — *"79% NCT favoured · MRD stole it."*
+
 Next, in order (see `docs/DESIGN.md` §17):
-1. **More for the engine to chew on** — more maps through the same alpha→navmesh pipeline; richer round variety (defaults, retakes, mid-round reads) so no two rounds feel scripted.
-2. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
-3. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.
+1. **Watch the fork** — the forks already exist as data; let the viewer *play* an alternate timeline of a round, not just score it. The interrogability bet, fully realized.
+2. **More for the engine to chew on** — more maps through the same alpha→navmesh pipeline; richer round variety (defaults, retakes, mid-round reads).
+3. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
