@@ -1,0 +1,67 @@
+Orientation and guardrails for working in this repo. Read this before changing engine or contract code.
+
+## What ACE is
+
+An asynchronous, server-authoritative Valorant esports management sim. You own a club; you set rosters/comps/tactics ahead of time; a deterministic engine resolves every scheduled match on a tick; you watch matches back on a 2D viewer. A match is a pure function of `(rosters, tactics, patch, seed)`, so "live" and "replay" are the same stored data, and any round can be rewound and re-simulated. Full design: `docs/DESIGN.md`.
+
+The bet: we don't compete on 3D fidelity, we compete on **interrogability** — a tactical instrument you can rewind, fork, and x-ray.
+
+## The one rule that everything depends on: determinism
+
+The engine is pure. Same input → byte-identical output, forever.
+
+- **No `Math.random()`. Ever.** Use the seeded PRNG in `packages/engine/src/rng.ts` (mulberry32). Thread the `Rng` instance through; never create a second source of randomness.
+- **No `Date.now()`, no `performance.now()`, no wall-clock, no I/O** inside `simulateMatch` or anything it calls.
+- **No iteration-order nondeterminism.** Don't rely on `Object.keys` order across engines, `Set`/`Map` insertion quirks, or floating-point that varies by platform in a way that branches the sim. Sort explicitly where order matters.
+- If you add a system that needs "randomness," it draws from `rng`. If it needs "time," it uses the round's normalized `t` (0..1).
+
+**How to verify after any engine change:** run `pnpm sim -- --seed 42` twice and diff the output — it must be byte-identical. Then run a spread of seeds and confirm every match completes (a side reaches 13) and the ending-method mix looks sane. Determinism breaking is the highest-severity bug in this codebase; it silently kills replays, debugging, and server resolution.
+
+## The spine: the timeline contract
+
+`packages/shared/src/timeline.ts` defines `MatchInput` → `MatchTimeline`. The engine emits it; the viewer reads it. Neither side may know anything about the other beyond this shape.
+
+- Treat the contract as an API. Changing it is a real decision, not a convenience — it ripples to the engine (producer) and the viewer (consumer) at once.
+- Adding a field is usually safe (consumers ignore unknowns). Changing/removing a field, or changing the meaning of `t`, is breaking — update both sides and bump thinking about `version`.
+- Event `t` is normalized 0..1 within its round. Keep it that way.
+
+## The map pipeline (and why it's elegant)
+
+A map's official minimap (`displayIcon`) is also its collision data: the alpha channel is the walkability mask — opaque = floor, transparent = wall. `packages/maps`:
+
+- `scripts/build-navmesh.ts` reads alpha → a coarse walkable grid → `data/<map>.navmesh.json`.
+- `src/navmesh.ts` runs A* on that grid (`pathfind`), plus the LOS/vision primitives (`losClear`, `inView`).
+- To add a map: drop its `displayIcon` in `assets/`, rerun `pnpm navmesh`. No hand-tracing. Everything downstream (routing, vision, future heatmaps) operates in the same 1000×1000 image space, so it all lines up for free.
+
+When you touch geometry, reuse these primitives — don't write a second raycaster or a second notion of "walkable."
+
+## Current state
+
+Phase 0 (the keystone) works: a real deterministic engine producing full matches, the map pipeline, and a viewer rendering it on the actual Ascent minimap.
+
+Vision is now an engine input (roadmap step 1, in progress): agents have a facing and a ~120° awareness cone; `inView()` composes that cone onto the alpha-mask LOS; a duel only resolves if someone sees the other, and spotting an unaware enemy first is decisive. This is correct — keep building on it. Backstabs, off-angles, and retakes should emerge from geometry, never from hand-authored exceptions.
+
+## Open decision — do not make this by accident
+
+Rendering vision in the viewer needs facing exposed in the timeline (the `move` events, or a per-tick facing track). That's a contract change — surface it and decide deliberately before implementing, rather than quietly bolting a field on. Options worth weighing: facing as a field on `move` events vs. a separate sampled track; how the viewer interpolates facing between samples.
+
+## Tuning knobs (gameplay feel, not correctness)
+
+These shape how lethal getting caught off-guard feels; expect to dial them after watching matches back. Keep them named constants, not magic numbers scattered in logic:
+
+- `FOV` (cone half-angle, ~60°) — how much peripheral awareness an agent has.
+- `FIRST_SHOT` — the edge for seeing an unaware enemy first; the single biggest lever on backstab/retake lethality.
+
+## Conventions
+
+- Monorepo: pnpm + turbo. Packages are consumed as source via path mapping (`@ace/shared`, `@ace/maps`, `@ace/engine`) — tsx runs the engine, Vite bundles the app — so packages have no separate compile step; their "build" is a typecheck (`tsc --noEmit`). Don't add `rootDir`/`outDir` emit back to them, and don't commit `.js`/`.d.ts` next to `.ts` source (the web build is `vue-tsc --noEmit && vite build` specifically to avoid emitting those).
+- Commit artifacts that make a cold clone work: the committed sample `apps/web/public/timeline.json` and `packages/maps/data/*.navmesh.json` are intentional so `pnpm install && pnpm dev` works without running the engine first. Regenerate them when their inputs change.
+- Before opening a PR / finishing a task: `pnpm typecheck` green, `pnpm sim` deterministic across two runs and complete across several seeds, `pnpm build` green.
+- TypeScript strict is on (incl. `noUnusedLocals`) — no dead variables.
+
+## Roadmap (see `DESIGN.md` §17 for detail)
+
+1. **Vision / fog-of-war** — engine input done; viewer rendering pending the facing-in-contract decision above.
+2. **Richer match model** — abilities/utility actually firing and affecting duels; the three-layer player model expressing through play.
+3. **The persistent world** — scheduling, resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
+4. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.
