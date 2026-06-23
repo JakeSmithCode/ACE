@@ -56,6 +56,11 @@ function topAgent(p: Player): string {
   return [...p.agents].sort((a, b) => b.level - a.level || (a.agent < b.agent ? -1 : 1))[0]?.agent ?? 'Jett';
 }
 
+/** Default entry = the team's best opening duelist (entry attr, id tiebreak). */
+function bestEntry(team: Team): string {
+  return [...team.players].sort((a, b) => b.attr.entry - a.attr.entry || (a.id < b.id ? -1 : 1))[0].id;
+}
+
 function addLoadouts(into: Map<string, Loadout>, team: Team, comp: Comp | undefined, patch: PatchState): void {
   for (const p of team.players) {
     const agent = comp?.[p.id] ?? topAgent(p);
@@ -262,24 +267,38 @@ function simulateRound(
   const pA = Math.max(0.08, Math.min(0.92, 0.5 + atkTac.attack.siteBias * 0.42));
   const site: 'A' | 'B' = rng.chance(pA) ? 'A' : 'B';
   const sitePt = A.sites[site];
+  const otherPt = A.sites[site === 'A' ? 'B' : 'A'];
 
   const atkTeam = input.teams[attacker];
   const defTeam = input.teams[defender];
   const agents: Ag[] = [];
 
+  // per-player attack roles (the manager's plan, beyond the team dials): the
+  // ENTRY leads the push (arrives first, takes opening contact); the LURK peels
+  // to a flank and holds for picks on rotators + a late man-advantage. Entry
+  // defaults to the best opening duelist; lurk only if the plan names one.
+  const entryId = atkTac.attack.entry ?? bestEntry(atkTeam);
+  const lurkId = atkTac.attack.lurk;
+  const lurkPt = lerp(A.mid, otherPt, 0.4);     // a flank hold between mid and the off-site
+
   // attackers: stack at spawn, execute the chosen site. Tempo sets the pace —
   // a fast hit reaches site sooner; a slow default arrives later (more map control).
   const atkSpeed = 0.8 + atkTac.attack.tempo * 0.5;
   atkTeam.players.forEach(p => {
+    const isLurk = p.id === lurkId;
+    const isEntry = !isLurk && p.id === entryId;
     const spawn = jitter(rng, A.atkSpawn, 22);
-    const goal = jitter(rng, sitePt, 38);
+    const goal = jitter(rng, isLurk ? lurkPt : sitePt, isLurk ? 30 : 38);
     const path = pathfind(nav, spawn, goal);
     const lo = loadouts.get(p.handle)!;
     agents.push({
-      p, side: attacker, handle: p.handle, path, arrive: arriveTime(path, atkSpeed),
+      p, side: attacker, handle: p.handle, path,
+      // the entry leads (15% faster); the lurker peels off at normal pace
+      arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
-      holdDir: unit(spawn, goal),           // attackers push looking toward the site
+      // the lurker holds toward the fight (catches unaware rotators); others push to site
+      holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
       form: form.get(p.handle) ?? 0, holdBonus: 0,
       agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
     });

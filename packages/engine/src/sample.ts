@@ -40,13 +40,13 @@ export const PATCH: PatchState = {
   agentTier: { Jett: 1.05, Raze: 1.02, Sova: 1.0, Omen: 1.04, Killjoy: 1.0, Viper: 1.03 },
 };
 
-// Nocturne play fast and aggressive, leaning A; they hold forward and read A.
+// Nocturne play fast and aggressive, leaning A; VESPER entries, WRAITH lurks.
 export const NCT_TACTICS: Tactics = {
-  attack: { siteBias: 0.4, tempo: 0.75 },
+  attack: { siteBias: 0.4, tempo: 0.75, entry: 'nct-vesper', lurk: 'nct-wraith' },
   defense: { read: 0.35, aggression: 0.6 },
 };
-// Meridian play patient defaults, leaning B; they anchor passively, no committed read.
+// Meridian play patient defaults, leaning B; CINDER entries, no lurk (standard 5-stack).
 export const MRD_TACTICS: Tactics = {
-  attack: { siteBias: -0.3, tempo: 0.3 },
+  attack: { siteBias: -0.3, tempo: 0.3, entry: 'mrd-cinder' },
   defense: { read: -0.15, aggression: 0.25 },
 };

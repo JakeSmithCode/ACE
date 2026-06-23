@@ -45,6 +45,8 @@ export interface Tactics {
   attack: {
     siteBias: number;   // -1 always B · 0 balanced · +1 always A
     tempo: number;      //  0 slow default (take map control) .. 1 fast execute (rush)
+    entry?: string;     // player id who leads the push (defaults to the best opening duelist)
+    lurk?: string;      // player id who peels off to lurk a flank for picks + late info
   };
   defense: {
     read: number;       // -1 stack B · 0 spread · +1 stack A  (pre-round site read)
