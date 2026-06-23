@@ -17,6 +17,13 @@ function posAlong(path: Vec2[], frac: number): Vec2 {
 const ease = (p: number) => p * (2 - p);
 const unit = (dx: number, dy: number): Vec2 => { const d = Math.hypot(dx, dy) || 1; return [dx / d, dy / d]; };
 
+/** Position respecting a hold-then-move: stays at path[0] until departT, then
+ *  travels over `arrive`. Mirrors the engine's posAt. */
+function posWithDepart(path: Vec2[], departT: number, arrive: number, prog: number): Vec2 {
+  if (prog <= departT) return path[0] ?? [0, 0];
+  return posAlong(path, ease(Math.min(1, (prog - departT) / arrive)));
+}
+
 /** Heading of a path's final non-degenerate segment — the fallback for `hold`. */
 function headingAtEnd(path: Vec2[]): Vec2 {
   for (let i = path.length - 1; i > 0; i--) {
@@ -27,11 +34,13 @@ function headingAtEnd(path: Vec2[]): Vec2 {
 }
 
 /** Reconstruct where an agent looks at progress `prog`: down its travel vector
- *  while moving, down its held angle once arrived. Mirrors engine facingAt(). */
-function facingOf(path: Vec2[], arrive: number, hold: Vec2, prog: number): Vec2 {
-  if (prog < arrive - 1e-6) {
-    const here = posAlong(path, ease(prog / arrive));
-    const ahead = posAlong(path, ease(Math.min(1, (prog + 0.02) / arrive)));
+ *  while moving, down its held angle while holding or once arrived. Mirrors
+ *  engine facingAt(). */
+function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number): Vec2 {
+  const moveEnd = departT + arrive;
+  if (prog > departT && prog < moveEnd - 1e-6) {
+    const here = posWithDepart(path, departT, arrive, prog);
+    const ahead = posWithDepart(path, departT, arrive, Math.min(moveEnd, prog + 0.02));
     const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
     if (Math.hypot(dx, dy) > 1e-6) return unit(dx, dy);
   }
@@ -52,7 +61,7 @@ const FOV_HALF = 1.05;     // cone half-angle in radians (~60°, engine FOV)
 const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clipped edge
 
 interface VAg {
-  handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; deathT: number | null;
+  handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
   hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement;
 }
 
@@ -260,14 +269,14 @@ export class Viewer {
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone };
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone };
     });
 
     // spike location = planter position at plant time
     const plant = r.events.find(e => e.kind === 'plant') as Extract<Round['events'][number], { kind: 'plant' }> | undefined;
     if (plant) {
       const planter = this.agents.find(a => a.handle === plant.agent);
-      if (planter) { this.spikePlantT = plant.t; this.spikePos = posAlong(planter.path, ease(Math.min(1, plant.t / planter.arrive))); }
+      if (planter) { this.spikePlantT = plant.t; this.spikePos = posWithDepart(planter.path, planter.departT, planter.arrive, plant.t); }
     }
 
     this.roundLabel.textContent = `Round ${r.n} · ${this.tl.teams[r.attacker].tag} attacking ${r.site}`;
@@ -413,10 +422,10 @@ export class Viewer {
     for (const a of this.agents) {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      const p = posAlong(a.path, ease(Math.min(1, prog / a.arrive)));
+      const p = posWithDepart(a.path, a.departT, a.arrive, prog);
       a.node.setAttribute('transform', `translate(${p[0].toFixed(1)},${p[1].toFixed(1)})`);
       if (!dead) { a.tp.push(`${p[0].toFixed(0)},${p[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
-      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.arrive, a.hold, prog))); a.cone.style.display = ''; }
+      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.departT, a.arrive, a.hold, prog))); a.cone.style.display = ''; }
       else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);

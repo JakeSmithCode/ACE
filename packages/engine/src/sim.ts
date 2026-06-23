@@ -16,9 +16,10 @@ const SPEED = 4200;        // path units traversed per unit round time (sets arr
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 const FORM_SWING = 6;      // match-night form: per-player edge drawn once per match (±)
-const HOLD_BONUS = 9;      // a held angle's duel edge (an anchor on their spot)
+const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
+const ROTATE_SPEED = 0.85; // a rotator's travel speed once it has info and moves with purpose
 
 // utility — abilities express the `utility` attribute by bending duels through
 // the same geometry. Reach/duration scale with the caster's utility (0..1), so
@@ -82,7 +83,8 @@ interface Ag {
   side: 0 | 1;
   handle: string;
   path: Vec2[];
-  arrive: number;        // round-time at which the agent reaches path end
+  departT: number;       // round-time the agent starts moving (Infinity = holding for info)
+  arrive: number;        // travel duration once moving (reaches path end at departT + arrive)
   alive: boolean;
   deathT: number | null;
   deathPos: Vec2 | null;
@@ -122,16 +124,18 @@ function segDist(a: Vec2, b: Vec2, c: Vec2): number {
 
 function posAt(a: Ag, t: number): Vec2 {
   if (a.deathT != null && t >= a.deathT) return a.deathPos!;
-  return posAlong(a.path, ease(Math.min(1, t / a.arrive)));
+  if (t <= a.departT) return a.path[0];            // holding at start (e.g. a rotator on info-hold)
+  return posAlong(a.path, ease(Math.min(1, (t - a.departT) / a.arrive)));
 }
 
 /** Where an agent is looking at time t: down their travel vector while moving,
- *  and down their held angle (holdDir) once they've arrived or stopped. */
+ *  and down their held angle (holdDir) while holding or once arrived. */
 function facingAt(a: Ag, t: number): Vec2 {
   if (a.deathT != null && t >= a.deathT) return a.holdDir;
-  if (t < a.arrive - 1e-6) {
+  const moveEnd = a.departT + a.arrive;
+  if (t > a.departT && t < moveEnd - 1e-6) {
     const here = posAt(a, t);
-    const ahead = posAt(a, Math.min(a.arrive, t + STEP));
+    const ahead = posAt(a, Math.min(moveEnd, t + STEP));
     const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
     if (Math.hypot(dx, dy) > 1e-6) return unit(here, ahead);
   }
@@ -195,10 +199,19 @@ function resolveRound(
   let detonateAt = Infinity;
   let winner: 0 | 1 | null = null;
   let method: RoundMethod = 'time';
+  let hadKill = false, contactT = Infinity;
 
   const resolvedThisStep = new Set<string>();
   for (let t = 0; t <= 1 + 1e-9; t += STEP) {
     resolvedThisStep.clear();
+
+    // contact: the defense learns the hit on the first kill or the first attacker
+    // reaching the site — only then do the info-held rotators commit and rotate.
+    if (contactT === Infinity && (hadKill || atk().some(a => dist(posAt(a, t), sitePt) < SITE_R))) {
+      contactT = t;
+      for (const ag of agents) if (ag.departT === Infinity) ag.departT = t;
+    }
+
     const liveA = atk(), liveD = def();
 
     // engagements: a pair only fights if at least one sees the other. Whoever
@@ -231,6 +244,7 @@ function resolveRound(
         const winnerAg = atkWins ? a : d;
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
+        hadKill = true;                                 // first blood = info for the defense
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
         events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
         break;
@@ -302,7 +316,7 @@ function simulateRound(
     const path = pathfind(nav, spawn, goal);
     const lo = loadouts.get(p.handle)!;
     agents.push({
-      p, side: attacker, handle: p.handle, path,
+      p, side: attacker, handle: p.handle, path, departT: 0,
       // the entry leads (15% faster); the lurker peels off at normal pace
       arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
       alive: true, deathT: null, deathPos: null,
@@ -335,11 +349,13 @@ function simulateRound(
     const lo = loadouts.get(p.handle)!;
     agents.push({
       p, side: defender, handle: p.handle, path,
-      // rotators move cautiously (clearing angles) — a wrong read arrives late
-      arrive: anchor ? 0.12 : arriveTime(path, 0.6),
+      // anchors are set from the start; rotators HOLD their read until contact,
+      // then rotate with purpose — so a wrong read is paid for in real info time
+      departT: anchor ? 0 : Infinity,
+      arrive: anchor ? 0.12 : arriveTime(path, ROTATE_SPEED),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
-      holdDir: unit(goal, A.atkSpawn),      // defenders hold toward the attacker entry
+      holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
       form: form.get(p.handle) ?? 0,
       holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
       agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
@@ -393,7 +409,8 @@ function simulateRound(
   const spawns: Record<string, Vec2> = {};
   for (const a of agents) {
     spawns[a.handle] = a.path[0];
-    events.push({ t: 0, arrive: a.arrive, kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir });
+    // a rotator that never got contact held all round → departT clamps to 1
+    events.push({ t: 0, arrive: a.arrive, departT: Math.min(1, a.departT), kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir });
   }
   events.sort((x, y) => x.t - y.t);
 
