@@ -2,6 +2,8 @@ import { writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { MatchInput, MapId } from '@ace/shared';
+// node-only loader, imported directly (never reaches the browser bundle)
+import { loadNavmesh } from '../../maps/src/load.js';
 import { simulateMatch } from './sim.js';
 import { NOCTURNE, MERIDIAN, PATCH, NCT_TACTICS, MRD_TACTICS } from './sample.js';
 
@@ -17,7 +19,7 @@ const seed = parseInt(flag('seed', '42'), 10);
 const map = flag('map', 'ascent') as MapId;
 
 const input: MatchInput = { seed, map, teams: [NOCTURNE, MERIDIAN], patch: PATCH, tactics: [NCT_TACTICS, MRD_TACTICS] };
-const tl = simulateMatch(input);
+const tl = simulateMatch(input, loadNavmesh(map));
 
 for (const o of [resolve(process.cwd(), 'timeline.json'), resolve(here, '../../../apps/web/public/timeline.json')]) {
   try { writeFileSync(o, JSON.stringify(tl)); console.log('wrote', o); } catch (e) { /* web app may be absent */ }

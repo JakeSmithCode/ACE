@@ -4,7 +4,7 @@ import type {
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
-import { loadNavmesh, ANCHORS, pathfind, inView, posAlong, type Navmesh } from '@ace/maps';
+import { ANCHORS, pathfind, inView, posAlong, type Navmesh } from '@ace/maps';
 
 // ---- tuning ----------------------------------------------------------------
 const STEP = 0.015;        // simulation tick (normalized round time)
@@ -299,6 +299,7 @@ function simulateRound(
   rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
   creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
   form: Map<string, number>, loadouts: Map<string, Loadout>, atkTac: Tactics, defTac: Tactics,
+  forks: number,
 ): Round {
   const defender: 0 | 1 = attacker === 0 ? 1 : 0;
   const A = ANCHORS[input.map]!;
@@ -417,7 +418,7 @@ function simulateRound(
   // how often the attacker wins — the round's true odds. These never draw from
   // the match rng, so the canonical timeline stays byte-identical.
   let atkForkWins = 0;
-  for (let i = 0; i < FORKS; i++) {
+  for (let i = 0; i < forks; i++) {
     const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1 }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
@@ -439,14 +440,16 @@ function simulateRound(
   return {
     n, attacker, winner: res.winner, method: res.method, site,
     economy: buildEconomy(buy, creds),
-    winPct: atkForkWins / FORKS,
+    winPct: forks > 0 ? atkForkWins / forks : 0,
     spawns, events,
   };
 }
 
-export function simulateMatch(input: MatchInput): MatchTimeline {
+/** Resolve a full match. `nav` is injected (the caller fetches/loads it) so the
+ *  engine stays pure and runs in the browser as well as node. `forks` controls
+ *  the true-odds re-sim count (fewer = faster, for live editing). */
+export function simulateMatch(input: MatchInput, nav: Navmesh, forks = FORKS): MatchTimeline {
   const rng = new Rng(input.seed);
-  const nav = loadNavmesh(input.map);
   const score: [number, number] = [0, 0];
   const creds: Record<'0' | '1', number> = { '0': 800, '1': 800 };
   const lossStreak: Record<'0' | '1', number> = { '0': 0, '1': 0 };
@@ -468,7 +471,7 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
   while (score[0] < 13 && score[1] < 13 && idx < 30) {
     const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
     const defender: 0 | 1 = attacker === 0 ? 1 : 0;
-    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, loadouts, tactics[attacker], tactics[defender]);
+    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, loadouts, tactics[attacker], tactics[defender], forks);
     rounds.push(round);
     score[round.winner]++;
 

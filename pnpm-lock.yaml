@@ -23,6 +23,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@ace/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@ace/maps':
+        specifier: workspace:*
+        version: link:../../packages/maps
       '@ace/shared':
         specifier: workspace:*
         version: link:../../packages/shared

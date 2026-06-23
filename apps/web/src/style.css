@@ -121,3 +121,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ocol.cur{background:rgba(255,255,255,.12)}
 .ocol.cur::after{content:"";position:absolute;inset:-2px;border:1px solid var(--text);border-radius:2px}
 @media (max-width:980px){.ace-stage{grid-template-columns:1fr}}
+
+/* tactics editor */
+.ace-top .crumb-r{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--brand);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4}}
+.ace-editor{background:var(--bg-2);border-bottom:1px solid var(--line);padding:12px 22px;display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+.ace-editor .ed-seed{display:flex;flex-direction:column;gap:8px}
+.ace-editor .ed-seed label{font-family:var(--label);font-size:10px;letter-spacing:.12em;color:var(--muted-2)}
+.ace-editor .ed-seed input{width:96px;background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:6px 8px;font-family:var(--display);font-size:16px}
+.ace-editor .ed-seed button{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.08em;padding:5px;cursor:pointer}
+.ace-editor .ed-score{font-family:var(--display);font-weight:700;font-size:24px;font-variant-numeric:tabular-nums;margin-top:2px}
+.ace-editor .ed-teams{display:flex;gap:24px;flex:1;flex-wrap:wrap}
+.ace-editor .ed-team{flex:1;min-width:300px}
+.ace-editor .ed-tag{font-family:var(--display);font-weight:700;font-size:15px;margin-bottom:8px}
+.ace-editor .ed-team.att .ed-tag{color:var(--att)}.ace-editor .ed-team.def .ed-tag{color:var(--def)}
+.ace-editor .ed-grid{display:grid;grid-template-columns:120px 1fr;gap:7px 12px;align-items:center}
+.ace-editor .ed-grid label{font-family:var(--label);font-size:10.5px;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;display:flex;justify-content:space-between}
+.ace-editor .ed-grid label span{color:var(--text);font-variant-numeric:tabular-nums}
+.ace-editor .ed-grid input[type=range]{width:100%;accent-color:var(--brand)}
+.ace-editor .ed-grid select{background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:4px 6px;font-family:var(--label);font-size:12px}
