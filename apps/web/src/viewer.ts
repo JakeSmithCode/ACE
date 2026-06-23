@@ -322,7 +322,7 @@ export class Viewer {
     this.T = frac; this.fired = -1; this.ended = false;
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
-    r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant') && e.t <= frac) this.fire(e); });
+    r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e); });
     this.fired = frac;
     if (this.feedItems.length === 0) this.feed.innerHTML = '<div class="empty">Round in progress…</div>';
     this.boardDirty = false; this.updateBoard(frac);
@@ -348,6 +348,11 @@ export class Viewer {
       this.spike.classList.add('on');
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
       const d = el('div', 'kill event'); d.textContent = `◆ Spike planted · ${e.site} site`;
+      this.feed.appendChild(d); this.feedItems.push(d);
+    } else if (e.kind === 'defuse') {
+      this.spike.classList.remove('on');
+      if (this.feedItems.length === 0) this.feed.innerHTML = '';
+      const d = el('div', 'kill event defuse'); d.textContent = `◇ Spike defused · ${e.agent}`;
       this.feed.appendChild(d); this.feedItems.push(d);
     }
   }
@@ -444,7 +449,7 @@ export class Viewer {
     if (this.playing && !this.ended) {
       this.T += (dt / this.DUR) * this.speed;
       const r = this.tl.rounds[this.roundIdx];
-      r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant') && e.t > this.fired && this.T >= e.t) this.fire(e); });
+      r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t > this.fired && this.T >= e.t) this.fire(e); });
       this.fired = this.T;
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
       if (this.T >= 1) { this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; }

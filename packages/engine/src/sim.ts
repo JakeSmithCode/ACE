@@ -12,6 +12,9 @@ const ENGAGE = 150;        // duel range in image units
 const PLANT_R = 75;        // "on site" radius
 const SITE_R = 130;        // "contesting site" radius
 const SPIKE_TIME = 0.34;   // detonation timer after plant (normalized)
+const DEFUSE_R = 90;       // how close a defender must be to the spike to defuse it
+const DEFUSE_TIME = 0.10;  // uncontested time on the spike needed to defuse (normalized)
+const POSTPLANT_HOLD = 10;  // post-plant the attackers hold the crossfire — the hold edge flips to them
 const SPEED = 4200;        // path units traversed per unit round time (sets arrival)
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
@@ -155,14 +158,14 @@ function arriveTime(path: Vec2[], speedMul = 1): number {
 /** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
  *  / pulse / trade), -ve favours the defender. */
-function duel(rng: Rng, atk: Ag, def: Ag, surprise: number): boolean {
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number): boolean {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery)
   const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge;
   const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge;
-  const hold = def.holdBonus;                      // a held angle's edge (set by setup + aggression)
+  // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
-  const p = sigmoid((atkEdge - defEdge - hold + surprise + noise) / 18);
+  const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
   return rng.chance(p);
 }
 
@@ -197,6 +200,7 @@ function resolveRound(
   const events: MatchEvent[] = [];
   let planted = false, plantBy = '';
   let detonateAt = Infinity;
+  let plantPos: Vec2 | null = null, defuseStart = -1;
   let winner: 0 | 1 | null = null;
   let method: RoundMethod = 'time';
   let hadKill = false, contactT = Infinity;
@@ -239,7 +243,9 @@ function resolveRound(
         const dCanTrade = a.exposedUntil >= t && dSeesA;
         if (aCanTrade && !dCanTrade) surprise = Math.max(surprise, TRADE_EDGE);
         else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
-        const atkWins = duel(rng, a, d, surprise);
+        // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
+        const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
+        const atkWins = duel(rng, a, d, surprise, holdEdge);
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
@@ -256,9 +262,25 @@ function resolveRound(
       const atkAtSite = atk().filter(a => dist(posAt(a, t), sitePt) < PLANT_R);
       const defAtSite = def().filter(d => dist(posAt(d, t), sitePt) < SITE_R);
       if (atkAtSite.length >= 1 && (defAtSite.length === 0 || (t > 0.5 && atk().length > def().length))) {
-        planted = true; plantBy = atkAtSite[0].handle;
+        planted = true; plantBy = atkAtSite[0].handle; plantPos = posAt(atkAtSite[0], t);
         detonateAt = Math.min(0.99, t + SPIKE_TIME);
         events.push({ t, kind: 'plant', agent: plantBy, site });
+      }
+    }
+
+    // retake: post-plant, a defender who reaches the spike with no attacker
+    // contesting the site channels a defuse — defenders must clear it, then hold it.
+    if (planted && plantPos) {
+      const defuser = def().find(d => dist(posAt(d, t), plantPos!) < DEFUSE_R);
+      const contested = atk().some(a => dist(posAt(a, t), plantPos!) < SITE_R);
+      if (defuser && !contested) {
+        if (defuseStart < 0) defuseStart = t;
+        if (t - defuseStart >= DEFUSE_TIME) {
+          events.push({ t, kind: 'defuse', agent: defuser.handle });
+          winner = defender; method = 'defuse'; break;
+        }
+      } else {
+        defuseStart = -1;   // contested or stepped off — channel interrupted
       }
     }
 
