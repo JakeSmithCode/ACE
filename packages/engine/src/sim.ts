@@ -1,6 +1,7 @@
 import type {
-  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team,
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics,
 } from '@ace/shared';
+import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
 import { loadNavmesh, ANCHORS, pathfind, inView, posAlong, type Navmesh } from '@ace/maps';
@@ -15,6 +16,7 @@ const SPEED = 4200;        // path units traversed per unit round time (sets arr
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 const FORM_SWING = 6;      // match-night form: per-player edge drawn once per match (±)
+const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 
 // utility — abilities express the `utility` attribute by bending duels through
 // the same geometry. Reach/duration scale with the caster's utility (0..1), so
@@ -49,6 +51,7 @@ interface Ag {
   anchor: boolean;       // holding an angle vs moving
   holdDir: Vec2;         // unit heading an agent looks down once stationary
   form: number;          // match-night form: a duel edge constant for the whole match
+  holdBonus: number;     // this agent's held-angle edge (0 unless anchoring; scaled by aggression)
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -96,10 +99,10 @@ function jitter(rng: Rng, p: Vec2, amt: number): Vec2 {
   return [p[0] + rng.range(-amt, amt), p[1] + rng.range(-amt, amt)];
 }
 
-function arriveTime(path: Vec2[]): number {
+function arriveTime(path: Vec2[], speedMul = 1): number {
   let len = 0;
   for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);
-  return Math.max(0.1, Math.min(0.92, 0.1 + len / SPEED));
+  return Math.max(0.1, Math.min(0.92, 0.1 + len / (SPEED * speedMul)));
 }
 
 /** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
@@ -110,7 +113,7 @@ function duel(rng: Rng, atk: Ag, def: Ag, firstShot: -1 | 0 | 1): boolean {
   // .form is each player's match-night layer: same roster, different night
   const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form;
   const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form;
-  const hold = def.anchor ? 6 : 0;                 // defenders holding angles have the advantage
+  const hold = def.holdBonus;                      // a held angle's edge (set by setup + aggression)
   const surprise = firstShot * FIRST_SHOT;         // seeing first beats being seen
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - hold + surprise + noise) / 18);
@@ -209,7 +212,7 @@ function resolveRound(
 function simulateRound(
   rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
   creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
-  form: Map<string, number>,
+  form: Map<string, number>, atkTac: Tactics, defTac: Tactics,
 ): Round {
   const defender: 0 | 1 = attacker === 0 ? 1 : 0;
   const A = ANCHORS[input.map]!;
@@ -220,49 +223,57 @@ function simulateRound(
     '1': pistol ? 'pistol' : decideBuy(creds['1'], false),
   };
 
-  // attackers pick a site (entry-fraggers lean to direct sites)
-  const site: 'A' | 'B' = rng.chance(0.52) ? 'A' : 'B';
+  // attackers pick a site, weighted by their plan's site bias
+  const pA = Math.max(0.08, Math.min(0.92, 0.5 + atkTac.attack.siteBias * 0.42));
+  const site: 'A' | 'B' = rng.chance(pA) ? 'A' : 'B';
   const sitePt = A.sites[site];
-  const otherPt = A.sites[site === 'A' ? 'B' : 'A'];
 
   const atkTeam = input.teams[attacker];
   const defTeam = input.teams[defender];
   const agents: Ag[] = [];
 
-  // attackers: stack at spawn, execute the chosen site
-  atkTeam.players.forEach((p, i) => {
+  // attackers: stack at spawn, execute the chosen site. Tempo sets the pace —
+  // a fast hit reaches site sooner; a slow default arrives later (more map control).
+  const atkSpeed = 0.8 + atkTac.attack.tempo * 0.5;
+  atkTeam.players.forEach(p => {
     const spawn = jitter(rng, A.atkSpawn, 22);
     const goal = jitter(rng, sitePt, 38);
     const path = pathfind(nav, spawn, goal);
     agents.push({
-      p, side: attacker, handle: p.handle, path, arrive: arriveTime(path),
+      p, side: attacker, handle: p.handle, path, arrive: arriveTime(path, atkSpeed),
       alive: true, deathT: null, deathPos: null,
       weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
       holdDir: unit(spawn, goal),           // attackers push looking toward the site
-      form: form.get(p.handle) ?? 0,
+      form: form.get(p.handle) ?? 0, holdBonus: 0,
     });
   });
 
-  // defenders: 2 anchor the hit site, 1 holds the off-site, 2 hold mid then rotate in
-  const defStarts: { from: Vec2; anchor: boolean }[] = [
-    { from: jitter(rng, sitePt, 30), anchor: true },
-    { from: jitter(rng, sitePt, 30), anchor: true },
-    { from: jitter(rng, otherPt, 30), anchor: false },
-    { from: jitter(rng, A.mid, 34), anchor: false },
-    { from: jitter(rng, A.mid, 34), anchor: false },
-  ];
+  // defenders set up on their READ, not the actual site — a wrong read is paid
+  // for in rotation time. Stack hardens the read; aggression pushes mids forward
+  // and trades held-angle edge for early picks.
+  const readSite: 'A' | 'B' = defTac.defense.read >= 0 ? 'A' : 'B';
+  const readPt = A.sites[readSite], offPt = A.sites[readSite === 'A' ? 'B' : 'A'];
+  const dAgg = defTac.defense.aggression;
+  const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
+  const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
+  const slots: { from: Vec2; site: 'A' | 'B' | 'M' }[] = [];
+  for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, readPt, 30), site: readSite });
+  slots.push({ from: jitter(rng, offPt, 30), site: readSite === 'A' ? 'B' : 'A' });
+  for (let i = 0; i < 5 - onRead - 1; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
   defTeam.players.forEach((p, i) => {
-    const st = defStarts[i];
-    // anchors barely move; everyone else rotates toward the contested site
-    const goal = st.anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
+    const st = slots[i];
+    const anchor = st.site === site;            // already on the contested site = holding an angle
+    const goal = anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
     const path = pathfind(nav, st.from, goal);
     agents.push({
       p, side: defender, handle: p.handle, path,
-      arrive: st.anchor ? 0.12 : arriveTime(path),
+      // rotators move cautiously (clearing angles) — a wrong read arrives late
+      arrive: anchor ? 0.12 : arriveTime(path, 0.6),
       alive: true, deathT: null, deathPos: null,
-      weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: st.anchor,
+      weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
       holdDir: unit(goal, A.atkSpawn),      // defenders hold toward the attacker entry
       form: form.get(p.handle) ?? 0,
+      holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
     });
   });
 
@@ -286,7 +297,8 @@ function simulateRound(
         events.push({ t: t0, kind: 'ability', agent: p.handle, ability: 'smoke' });
       } else if (p.role === 'initiator' || (isAtk && p.role === 'duelist')) {
         const c = jitter(rng, sitePt, 22);
-        const t0 = (isAtk ? 0.30 : 0.16) + rng.range(0, 0.12);
+        // attackers time the execute to their tempo (fast hits flash earlier)
+        const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
         pulses.push({ side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
         events.push({ t: t0, kind: 'ability', agent: p.handle, ability: p.role === 'initiator' ? 'recon' : 'flash' });
       }
@@ -335,10 +347,13 @@ export function simulateMatch(input: MatchInput): MatchTimeline {
   const form = new Map<string, number>();
   for (const team of input.teams) for (const p of team.players) form.set(p.handle, rng.range(-FORM_SWING, FORM_SWING));
 
+  const tactics: [Tactics, Tactics] = input.tactics ?? [DEFAULT_TACTICS, DEFAULT_TACTICS];
+
   let idx = 0;
   while (score[0] < 13 && score[1] < 13 && idx < 30) {
     const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
-    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form);
+    const defender: 0 | 1 = attacker === 0 ? 1 : 0;
+    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, tactics[attacker], tactics[defender]);
     rounds.push(round);
     score[round.winner]++;
 

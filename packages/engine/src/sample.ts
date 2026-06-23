@@ -1,4 +1,4 @@
-import type { Team, PatchState, Player, Role } from '@ace/shared';
+import type { Team, PatchState, Player, Role, Tactics } from '@ace/shared';
 
 const mk = (
   id: string, handle: string, role: Role, age: number,
@@ -37,4 +37,15 @@ export const MERIDIAN: Team = {
 export const PATCH: PatchState = {
   version: '9.11',
   agentTier: { Jett: 1.05, Raze: 1.02, Sova: 1.0, Omen: 1.04, Killjoy: 1.0, Viper: 1.03 },
+};
+
+// Nocturne play fast and aggressive, leaning A; they hold forward and read A.
+export const NCT_TACTICS: Tactics = {
+  attack: { siteBias: 0.4, tempo: 0.75 },
+  defense: { read: 0.35, aggression: 0.6 },
+};
+// Meridian play patient defaults, leaning B; they anchor passively, no committed read.
+export const MRD_TACTICS: Tactics = {
+  attack: { siteBias: -0.3, tempo: 0.3 },
+  defense: { read: -0.15, aggression: 0.25 },
 };

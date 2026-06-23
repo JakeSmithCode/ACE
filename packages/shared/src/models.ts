@@ -38,3 +38,24 @@ export interface PatchState {
   version: string;
   agentTier: Record<string, number>; // agent -> strength multiplier (~1.0)
 }
+
+/** A team's pre-match plan — the manager's lever, resolved by the engine (DESIGN §6).
+ *  Every field is a normalized dial; the engine reads them into round play. */
+export interface Tactics {
+  attack: {
+    siteBias: number;   // -1 always B · 0 balanced · +1 always A
+    tempo: number;      //  0 slow default (take map control) .. 1 fast execute (rush)
+  };
+  defense: {
+    read: number;       // -1 stack B · 0 spread · +1 stack A  (pre-round site read)
+    aggression: number; //  0 passive anchors .. 1 aggressive picks / forward holds
+  };
+}
+
+/** The house default play set. Every team always has tactics — an owner authors
+ *  their own, and a club with none (or a bot-run club) falls back to this so a
+ *  match never lacks a plan. Balanced and unsurprising on purpose. */
+export const DEFAULT_TACTICS: Tactics = {
+  attack: { siteBias: 0, tempo: 0.5 },
+  defense: { read: 0, aggression: 0.4 },
+};

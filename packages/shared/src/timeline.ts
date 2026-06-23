@@ -1,4 +1,4 @@
-import type { MapId, Vec2, PatchState, Team } from './models.js';
+import type { MapId, Vec2, PatchState, Team, Tactics } from './models.js';
 
 /** What the engine takes in. Deterministic given identical input. */
 export interface MatchInput {
@@ -6,6 +6,7 @@ export interface MatchInput {
   map: MapId;
   teams: [Team, Team];
   patch: PatchState;
+  tactics?: [Tactics, Tactics];  // per-team plan; a neutral default is used if absent
 }
 
 export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
