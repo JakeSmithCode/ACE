@@ -5,14 +5,15 @@ import type { Navmesh } from '@ace/maps';
 import type { Play } from '@ace/shared';
 import { simulateMatch, NOCTURNE, MERIDIAN, PATCH, NCT_TACTICS, MRD_TACTICS } from '@ace/engine';
 import { Viewer } from './viewer';
+import PlayEditor from './PlayEditor.vue';
 
 const MAP = 'ascent';
 const FORKS = 50;                 // fewer than the CLI's 120 — snappier live re-sim
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
-// a sample authored DEFENSE play for a team: one player baits mid, two rotate to
-// A when he dies (a "kill point"). The seed of the cs-manager-style play editor.
-function killPointPlay(t: Team): Play {
+// a starter DEFENSE play to drop a team into the editor with: one player baits
+// mid, two rotate to A when he dies (a "kill point"). The author then drags.
+function starterPlay(t: Team): Play {
   const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
   const bait = p3;
   return { plans: [
@@ -30,9 +31,23 @@ const score = ref<[number, number]>([0, 0]);
 const teams: [Team, Team] = [NOCTURNE, MERIDIAN];
 const seed = ref(42);
 const tactics = reactive<[Tactics, Tactics]>([clone(NCT_TACTICS), clone(MRD_TACTICS)]);
-const kp = reactive([false, false]);   // per-team: run the sample kill-point defense play
-function toggleKp(i: number) {
-  tactics[i].defense.play = kp[i] ? killPointPlay(teams[i]) : undefined;
+const authoring = ref<number | null>(null);   // which team's defense play is open in the drag editor
+
+// open/close the drag editor for team i; seed a starter play the first time
+function toggleAuthor(i: number) {
+  if (authoring.value === i) { authoring.value = null; return; }
+  if (!tactics[i].defense.play) tactics[i].defense.play = starterPlay(teams[i]);
+  authoring.value = i;
+}
+// clear the authored play → team falls back to the procedural read
+function clearPlay(i: number) {
+  tactics[i].defense.play = undefined;
+  if (authoring.value === i) authoring.value = null;
+  schedule();
+}
+// the editor emitted a new Play (drag / kill-point edit) → store + re-sim
+function onPlay(i: number, play: Play) {
+  tactics[i].defense.play = play;
   schedule();
 }
 
@@ -102,10 +117,32 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
               <option :value="undefined">— none —</option>
               <option v-for="p in teams[i].players" :key="p.id" :value="p.id">{{ p.handle }}</option>
             </select>
-            <label>Kill-point play</label>
-            <label class="ed-check"><input type="checkbox" v-model="kp[i]" @change="toggleKp(i)" /> bait mid · rotate A on death</label>
+            <label>Defense play</label>
+            <div class="ed-play">
+              <button class="ed-author" :class="{ on: authoring === i }" @click="toggleAuthor(i)">
+                {{ authoring === i ? '✎ editing…' : tactics[i].defense.play ? '✎ edit play' : '✎ author play' }}
+              </button>
+              <button v-if="tactics[i].defense.play" class="ed-clear" @click="clearPlay(i)">clear</button>
+              <span v-else class="ed-proc">procedural read</span>
+            </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="authoring !== null" class="ed-canvas">
+        <div class="ed-canvas-head">
+          <span class="ed-tag" :class="authoring === 0 ? 'att' : 'def'">{{ teams[authoring].tag }}</span>
+          defense play — drag to place · <b>{{ teams[authoring].name }}</b> defending
+          <button class="ed-close" @click="authoring = null">done</button>
+        </div>
+        <PlayEditor
+          :key="authoring"
+          :team="teams[authoring]"
+          :map-url="`/${MAP}.png`"
+          :side="authoring === 0 ? 'att' : 'def'"
+          :play="tactics[authoring].defense.play!"
+          @update="(p) => onPlay(authoring!, p)"
+        />
       </div>
     </div>
 
