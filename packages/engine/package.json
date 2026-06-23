@@ -1,0 +1,20 @@
+{
+  "name": "@ace/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sim": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@ace/shared": "workspace:*",
+    "@ace/maps": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2"
+  }
+}

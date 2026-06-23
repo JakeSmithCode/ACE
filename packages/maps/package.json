@@ -1,0 +1,21 @@
+{
+  "name": "@ace/maps",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "navmesh": "tsx scripts/build-navmesh.ts ascent"
+  },
+  "dependencies": {
+    "@ace/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,247 @@
+import type {
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team,
+} from '@ace/shared';
+import { Rng, sigmoid } from './rng.js';
+import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
+import { loadNavmesh, ANCHORS, pathfind, losClear, posAlong, type Navmesh } from '@ace/maps';
+
+// ---- tuning ----------------------------------------------------------------
+const STEP = 0.015;        // simulation tick (normalized round time)
+const ENGAGE = 150;        // duel range in image units
+const PLANT_R = 75;        // "on site" radius
+const SITE_R = 130;        // "contesting site" radius
+const SPIKE_TIME = 0.34;   // detonation timer after plant (normalized)
+const SPEED = 4200;        // path units traversed per unit round time (sets arrival)
+
+const WEAPONS: Record<Buy, string[]> = {
+  full: ['Vandal', 'Phantom', 'Operator', 'Vandal', 'Phantom'],
+  force: ['Spectre', 'Bulldog', 'Sheriff', 'Marshal'],
+  eco: ['Classic', 'Ghost', 'Sheriff'],
+  pistol: ['Ghost', 'Classic', 'Sheriff', 'Frenzy'],
+};
+const TIER: Record<string, number> = {
+  Operator: 3.2, Vandal: 3, Phantom: 3, Bulldog: 2.2, Spectre: 2.1, Marshal: 2,
+  Sheriff: 1.6, Ghost: 1.2, Frenzy: 1.1, Classic: 1,
+};
+
+interface Ag {
+  p: Player;
+  side: 0 | 1;
+  handle: string;
+  path: Vec2[];
+  arrive: number;        // round-time at which the agent reaches path end
+  alive: boolean;
+  deathT: number | null;
+  deathPos: Vec2 | null;
+  weapon: string;
+  anchor: boolean;       // holding an angle vs moving
+}
+
+const ease = (p: number) => p * (2 - p);
+const dist = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+function posAt(a: Ag, t: number): Vec2 {
+  if (a.deathT != null && t >= a.deathT) return a.deathPos!;
+  return posAlong(a.path, ease(Math.min(1, t / a.arrive)));
+}
+
+function jitter(rng: Rng, p: Vec2, amt: number): Vec2 {
+  return [p[0] + rng.range(-amt, amt), p[1] + rng.range(-amt, amt)];
+}
+
+function arriveTime(path: Vec2[]): number {
+  let len = 0;
+  for (let i = 1; i < path.length; i++) len += dist(path[i - 1], path[i]);
+  return Math.max(0.1, Math.min(0.92, 0.1 + len / SPEED));
+}
+
+/** Resolve one attacker-vs-defender duel. Returns true if the attacker wins. */
+function duel(rng: Rng, atk: Ag, def: Ag): boolean {
+  const A = atk.p.attr, D = def.p.attr;
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4;
+  const hold = def.anchor ? 9 : 0;                 // defenders holding angles have the advantage
+  const noise = rng.range(-13, 13);
+  const p = sigmoid((atkEdge - defEdge - hold + noise) / 18);
+  return rng.chance(p);
+}
+
+function pickWeapon(rng: Rng, buy: Buy, role: string): string {
+  const pool = WEAPONS[buy];
+  return rng.pick(pool);
+}
+
+function simulateRound(
+  rng: Rng, input: MatchInput, nav: Navmesh, n: number, attacker: 0 | 1,
+  creds: Record<'0' | '1', number>, lossStreak: Record<'0' | '1', number>,
+): Round {
+  const defender: 0 | 1 = attacker === 0 ? 1 : 0;
+  const A = ANCHORS[input.map]!;
+  const pistol = n === 1 || n === 13;
+
+  const buy: Record<'0' | '1', Buy> = {
+    '0': pistol ? 'pistol' : decideBuy(creds['0'], false),
+    '1': pistol ? 'pistol' : decideBuy(creds['1'], false),
+  };
+
+  // attackers pick a site (entry-fraggers lean to direct sites)
+  const site: 'A' | 'B' = rng.chance(0.52) ? 'A' : 'B';
+  const sitePt = A.sites[site];
+  const otherPt = A.sites[site === 'A' ? 'B' : 'A'];
+
+  const atkTeam = input.teams[attacker];
+  const defTeam = input.teams[defender];
+  const agents: Ag[] = [];
+
+  // attackers: stack at spawn, execute the chosen site
+  atkTeam.players.forEach((p, i) => {
+    const spawn = jitter(rng, A.atkSpawn, 22);
+    const goal = jitter(rng, sitePt, 38);
+    const path = pathfind(nav, spawn, goal);
+    agents.push({
+      p, side: attacker, handle: p.handle, path, arrive: arriveTime(path),
+      alive: true, deathT: null, deathPos: null,
+      weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
+    });
+  });
+
+  // defenders: 2 anchor the hit site, 1 holds the off-site, 2 hold mid then rotate in
+  const defStarts: { from: Vec2; anchor: boolean }[] = [
+    { from: jitter(rng, sitePt, 30), anchor: true },
+    { from: jitter(rng, sitePt, 30), anchor: true },
+    { from: jitter(rng, otherPt, 30), anchor: false },
+    { from: jitter(rng, A.mid, 34), anchor: false },
+    { from: jitter(rng, A.mid, 34), anchor: false },
+  ];
+  defTeam.players.forEach((p, i) => {
+    const st = defStarts[i];
+    // anchors barely move; everyone else rotates toward the contested site
+    const goal = st.anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
+    const path = pathfind(nav, st.from, goal);
+    agents.push({
+      p, side: defender, handle: p.handle, path,
+      arrive: st.anchor ? 0.12 : arriveTime(path),
+      alive: true, deathT: null, deathPos: null,
+      weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: st.anchor,
+    });
+  });
+
+  const atk = () => agents.filter(a => a.side === attacker && a.alive);
+  const def = () => agents.filter(a => a.side === defender && a.alive);
+
+  const events: MatchEvent[] = [];
+  // flavour: one recon/util cue from initiators/controllers on the executing team
+  atkTeam.players.forEach(p => {
+    if (p.role === 'initiator' || p.role === 'controller') {
+      events.push({ t: rng.range(0.22, 0.34), kind: 'ability', agent: p.handle, ability: p.role === 'initiator' ? 'recon' : 'smokes' });
+    }
+  });
+
+  let planted = false, plantBy = '';
+  let detonateAt = Infinity;
+  let winner: 0 | 1 | null = null;
+  let method: RoundMethod = 'time';
+
+  const resolvedThisStep = new Set<string>();
+  for (let t = 0; t <= 1 + 1e-9; t += STEP) {
+    resolvedThisStep.clear();
+    const liveA = atk(), liveD = def();
+
+    // engagements: first opposing pair within range + line of sight resolves
+    for (const a of liveA) {
+      if (!a.alive) continue;
+      const pa = posAt(a, t);
+      for (const d of liveD) {
+        if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
+        const pd = posAt(d, t);
+        if (dist(pa, pd) > ENGAGE) continue;
+        if (!losClear(nav, pa, pd)) continue;
+        const atkWins = duel(rng, a, d);
+        const loser = atkWins ? d : a;
+        const winnerAg = atkWins ? a : d;
+        loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
+        resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
+        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
+        break;
+      }
+    }
+
+    // plant: an attacker controls the site
+    if (!planted) {
+      const atkAtSite = atk().filter(a => dist(posAt(a, t), sitePt) < PLANT_R);
+      const defAtSite = def().filter(d => dist(posAt(d, t), sitePt) < SITE_R);
+      if (atkAtSite.length >= 1 && (defAtSite.length === 0 || (t > 0.5 && atk().length > def().length))) {
+        planted = true; plantBy = atkAtSite[0].handle;
+        detonateAt = Math.min(0.99, t + SPIKE_TIME);
+        events.push({ t, kind: 'plant', agent: plantBy, site });
+      }
+    }
+
+    // terminal conditions
+    if (def().length === 0) { winner = attacker; method = planted ? 'detonation' : 'elimination'; break; }
+    if (atk().length === 0) { winner = defender; method = planted ? 'defuse' : 'elimination'; break; }
+    if (planted && t >= detonateAt) { winner = attacker; method = 'detonation'; break; }
+    if (t >= 1) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; break; }
+  }
+  if (winner === null) { winner = planted ? attacker : defender; method = planted ? 'detonation' : 'time'; }
+
+  // emit one move event per agent (full path + arrival); viewer freezes on death
+  const spawns: Record<string, Vec2> = {};
+  for (const a of agents) {
+    spawns[a.handle] = a.path[0];
+    events.push({ t: 0, arrive: a.arrive, kind: 'move', agent: a.handle, path: a.path });
+  }
+  events.sort((x, y) => x.t - y.t);
+
+  return {
+    n, attacker, winner, method, site,
+    economy: buildEconomy(buy, creds),
+    spawns, events,
+  };
+}
+
+export function simulateMatch(input: MatchInput): MatchTimeline {
+  const rng = new Rng(input.seed);
+  const nav = loadNavmesh(input.map);
+  const score: [number, number] = [0, 0];
+  const creds: Record<'0' | '1', number> = { '0': 800, '1': 800 };
+  const lossStreak: Record<'0' | '1', number> = { '0': 0, '1': 0 };
+  const rounds: Round[] = [];
+
+  let idx = 0;
+  while (score[0] < 13 && score[1] < 13 && idx < 30) {
+    const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
+    const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak });
+    rounds.push(round);
+    score[round.winner]++;
+
+    // economy update
+    const kills: Record<'0' | '1', number> = { '0': 0, '1': 0 };
+    for (const e of round.events) if (e.kind === 'kill') {
+      const side = input.teams[0].players.some(p => p.handle === e.killer) ? '0' : '1';
+      kills[side]++;
+    }
+    (['0', '1'] as const).forEach(s => {
+      const sideIdx = Number(s) as 0 | 1;
+      const won = round.winner === sideIdx;
+      creds[s] = nextCreds(creds[s], won, kills[s], lossStreak[s]);
+      lossStreak[s] = won ? 0 : Math.min(3, lossStreak[s] + 1);
+    });
+    idx++;
+  }
+
+  const meta = (t: Team) => ({
+    id: t.id, tag: t.tag, name: t.name,
+    players: t.players.map(p => ({ id: p.id, handle: p.handle, role: p.role, igl: p.igl })),
+  });
+
+  return {
+    version: 1,
+    seed: input.seed,
+    map: input.map,
+    patch: input.patch.version,
+    teams: [meta(input.teams[0]), meta(input.teams[1])],
+    finalScore: score,
+    rounds,
+  };
+}
