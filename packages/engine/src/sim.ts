@@ -15,6 +15,15 @@ const SPEED = 4200;        // path units traversed per unit round time (sets arr
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 
+// utility — abilities express the `utility` attribute by bending duels through
+// the same geometry. Reach/duration scale with the caster's utility (0..1), so
+// a util-stacked comp buys space and entries. Tune after watching matches back.
+const SMOKE_R = 58, SMOKE_R_UTIL = 46;       // smoke radius (image units): 58..104
+const SMOKE_T0 = 0.15, SMOKE_JITTER = 0.10;  // when a smoke blooms (normalized t)
+const SMOKE_DUR = 0.20, SMOKE_DUR_UTIL = 0.18;
+const PULSE_R = 84, PULSE_R_UTIL = 70;       // recon/flash reach: 84..154
+const PULSE_DUR = 0.07, PULSE_DUR_UTIL = 0.10;
+
 const WEAPONS: Record<Buy, string[]> = {
   full: ['Vandal', 'Phantom', 'Operator', 'Vandal', 'Phantom'],
   force: ['Spectre', 'Bulldog', 'Sheriff', 'Marshal'],
@@ -42,11 +51,25 @@ interface Ag {
 
 const ease = (p: number) => p * (2 - p);
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const lerp = (a: Vec2, b: Vec2, f: number): Vec2 => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+
+/** A vision-blocking smoke and a first-shot-granting recon/flash pulse — the
+ *  two ways utility reaches into a round. Both are pure geometry over time. */
+interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
+interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
 
 function unit(from: Vec2, to: Vec2): Vec2 {
   const dx = to[0] - from[0], dy = to[1] - from[1];
   const d = Math.hypot(dx, dy) || 1;
   return [dx / d, dy / d];
+}
+
+/** Shortest distance from point c to segment a..b (for smoke-vs-sightline). */
+function segDist(a: Vec2, b: Vec2, c: Vec2): number {
+  const abx = b[0] - a[0], aby = b[1] - a[1];
+  const ab2 = abx * abx + aby * aby || 1;
+  const t = Math.max(0, Math.min(1, ((c[0] - a[0]) * abx + (c[1] - a[1]) * aby) / ab2));
+  return Math.hypot(c[0] - (a[0] + abx * t), c[1] - (a[1] + aby * t));
 }
 
 function posAt(a: Ag, t: number): Vec2 {
@@ -157,12 +180,38 @@ function simulateRound(
   const def = () => agents.filter(a => a.side === defender && a.alive);
 
   const events: MatchEvent[] = [];
-  // flavour: one recon/util cue from initiators/controllers on the executing team
-  atkTeam.players.forEach(p => {
-    if (p.role === 'initiator' || p.role === 'controller') {
-      events.push({ t: rng.range(0.22, 0.34), kind: 'ability', agent: p.handle, ability: p.role === 'initiator' ? 'recon' : 'smokes' });
-    }
-  });
+
+  // utility fires for real and bends duels through geometry. Controllers smoke
+  // off a sightline (cuts vision for both sides); initiators (recon) and
+  // attacking duelists (flash) pulse the contested site to win the first shot
+  // on contact. Each effect's reach/duration expresses the caster's `utility`.
+  const smokes: Smoke[] = [];
+  const pulses: Pulse[] = [];
+  const choke = lerp(A.mid, sitePt, 0.55);
+  for (const [side, team, isAtk] of [[attacker, atkTeam, true], [defender, defTeam, false]] as const) {
+    team.players.forEach(p => {
+      const u = p.attr.utility / 100;
+      if (p.role === 'controller') {
+        // attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
+        const c = jitter(rng, isAtk ? sitePt : choke, 18);
+        const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
+        smokes.push({ side, c, r: SMOKE_R + SMOKE_R_UTIL * u, t0, t1: t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u });
+        events.push({ t: t0, kind: 'ability', agent: p.handle, ability: 'smoke' });
+      } else if (p.role === 'initiator' || (isAtk && p.role === 'duelist')) {
+        const c = jitter(rng, sitePt, 22);
+        const t0 = (isAtk ? 0.30 : 0.16) + rng.range(0, 0.12);
+        pulses.push({ side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
+        events.push({ t: t0, kind: 'ability', agent: p.handle, ability: p.role === 'initiator' ? 'recon' : 'flash' });
+      }
+    });
+  }
+  // a smoke is directional: it blinds the ENEMY's vision through it, not the
+  // side that threw it (you play around your own smoke). So utility is a real
+  // edge — bigger/longer smokes deny the other team more space.
+  const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
+    smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && segDist(p1, p2, s.c) <= s.r);
+  const pulseFor = (s: 0 | 1, p: Vec2, t: number): boolean =>
+    pulses.some(u => u.side === s && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
 
   let planted = false, plantBy = '';
   let detonateAt = Infinity;
@@ -184,10 +233,15 @@ function simulateRound(
         const pd = posAt(d, t);
         if (dist(pa, pd) > ENGAGE) continue;
         const fd = facingAt(d, t);
-        const aSeesD = inView(nav, pa, fa, pd, ENGAGE, FOV);
-        const dSeesA = inView(nav, pd, fd, pa, ENGAGE, FOV);
-        if (!aSeesD && !dSeesA) continue;              // mutual blindside or no LOS — no fight
-        const firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
+        // an enemy smoke on the sightline blinds that viewer (but not the thrower)
+        const aSeesD = !blindedThrough(attacker, pa, pd, t) && inView(nav, pa, fa, pd, ENGAGE, FOV);
+        const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
+        if (!aSeesD && !dSeesA) continue;              // mutual blindside, no LOS, or both smoked — no fight
+        let firstShot: -1 | 0 | 1 = aSeesD === dSeesA ? 0 : (aSeesD ? 1 : -1);
+        // recon/flash overrides who gets the first shot inside its pulse
+        const atkPulse = pulseFor(attacker, pd, t), defPulse = pulseFor(defender, pa, t);
+        if (atkPulse && !defPulse) firstShot = 1;
+        else if (defPulse && !atkPulse) firstShot = -1;
         const atkWins = duel(rng, a, d, firstShot);
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;

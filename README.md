@@ -80,7 +80,9 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 **Vision / fog-of-war — in, both sides:** agents carry a facing (down their travel vector while moving, down a held angle once anchored) and a ~120° awareness cone. In the *engine*, a duel only happens when at least one agent sees the other through the alpha-mask LOS, and spotting an unaware enemy first is a decisive edge — so backstabs, off-angles, and post-plant retakes fall out of geometry rather than pure range (`packages/maps/src/navmesh.ts` → `inView()`). In the *viewer*, each living agent casts a wall-clipped vision cone raycast against that same navmesh, so you can watch *what each player could see* — and where two cones overlap is exactly where a duel is about to happen (toggle with the **Vision** button). The engine exposes only `move.hold` (the held heading) in the timeline; the viewer reconstructs facing-while-moving from the path.
 
+**Utility — in:** abilities fire for real and bend duels through the same geometry. Controllers throw **smokes** that blind the *enemy's* sightline through them (directional — you play around your own), so a team can take space and execute; initiators (**recon**) and attacking duelists (**flash**) **pulse** the contested site to win the first shot on contact. Every effect's reach and duration scale with the caster's `utility` attribute, so the stat finally bites: with all else equal, a high-utility roster wins ~58% of matches. Side balance barely moves — utility shapes *how* you win, not a free win.
+
 Next, in order (see `docs/DESIGN.md` §17):
-1. **Richer match model** — abilities, utility, the three-layer player model expressing through play.
+1. **Richer match model (cont.)** — the rest of the three-layer player model: potential-behind-fog → current ability → match-night *form*/variance expressing through play.
 2. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2).
 3. **Tactics editor** — same map + navmesh, but you author the execute instead of watching it.
