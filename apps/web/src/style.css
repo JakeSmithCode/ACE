@@ -158,13 +158,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
 .pe-map{width:380px;height:380px;flex:none;background:#0a0e13;border:1px solid var(--line-2);touch-action:none;cursor:default}
 .pe-map.routing{cursor:crosshair}
+.pe-map.cap{animation:peShake .3s}
+@keyframes peShake{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
 .pe-scrim{fill:rgba(14,20,27,.34)}
 .pe-route{fill:none;stroke:var(--brand);stroke-width:2.4;stroke-dasharray:2 8;stroke-linecap:round;opacity:.55}
 .pe-route.active{opacity:1;stroke-dasharray:none;stroke-width:3}
+.pe-link.active{stroke-dasharray:none;opacity:1;stroke-width:3}
 .pe-mark.wp{cursor:grab}
 .pe-wp-dot{fill:rgba(34,211,238,.5);stroke:var(--brand);stroke-width:2}
+.pe-wp-dot.gold{fill:rgba(229,181,103,.5);stroke:var(--gold)}
 .pe-wp-ix{fill:#06121a;font-family:var(--label);font-size:12px;font-weight:700;text-anchor:middle}
 .pe-mark.hold.sel .pe-dot{stroke-width:4;filter:drop-shadow(0 0 5px var(--brand))}
+.pe-hint b.full{color:var(--def)}
 .pe-link{stroke:var(--gold);stroke-width:2.4;stroke-dasharray:7 7;opacity:.8}
 .pe-mark{cursor:grab}.pe-mark:active{cursor:grabbing}
 .pe-mark .pe-dot{stroke-width:3}
@@ -184,6 +189,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-rt-btn.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
 .pe-rt-btn i{font-style:normal;background:rgba(34,211,238,.25);color:var(--text);border-radius:8px;padding:0 5px;font-size:9px}
 .pe-rt-btn.on i{background:rgba(6,18,26,.3);color:var(--bg)}
+.pe-rt-btn.gold:hover{border-color:var(--gold)}
+.pe-rt-btn.gold.on{background:var(--gold);border-color:var(--gold)}
+.pe-rt-btn.gold i{background:rgba(229,181,103,.25)}
 .pe-rt-clear{background:transparent;border:none;color:var(--muted-2);font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
 .pe-rt-clear:hover{color:var(--def)}
 .pe-name{font-weight:700;min-width:74px}.pe-name.att{color:var(--att)}.pe-name.def{color:var(--def)}

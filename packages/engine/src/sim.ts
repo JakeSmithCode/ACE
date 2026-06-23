@@ -100,7 +100,7 @@ interface Ag {
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
-  rotatePlan: { pos: Vec2; onDeathOf: string } | null;  // kill point: rotate here when handle dies
+  rotatePlan: { pos: Vec2; onDeathOf: string; route?: Vec2[] } | null;  // kill point: rotate here when handle dies
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -252,10 +252,12 @@ function resolveRound(
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         hadKill = true;                                 // first blood = info for the defense
-        // kill point: teammates keyed to this death rotate to their next spot now
+        // kill point: teammates keyed to this death rotate to their next spot now.
+        // an authored rotation route is walked verbatim; otherwise A* finds the way.
         for (const ag of agents) {
           if (ag.alive && ag.rotatePlan && ag.rotatePlan.onDeathOf === loser.handle) {
-            ag.path = pathfind(nav, posAt(ag, t), ag.rotatePlan.pos);
+            const rp = ag.rotatePlan, here = posAt(ag, t);
+            ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
             ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED); ag.rotatePlan = null;
           }
         }
@@ -385,7 +387,7 @@ function simulateRound(
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1,
-        rotatePlan: plan?.rotate && trigHandle ? { pos: plan.rotate.pos, onDeathOf: trigHandle } : null,
+        rotatePlan: plan?.rotate && trigHandle ? { pos: plan.rotate.pos, onDeathOf: trigHandle, route: plan.rotate.route } : null,
       });
     });
   } else {

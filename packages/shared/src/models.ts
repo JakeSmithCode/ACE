@@ -80,8 +80,19 @@ export interface PlayerPlan {
   player: string;                                 // player id
   pos: Vec2;                                      // where they set up / hold (the destination)
   route?: Vec2[];                                 // optional waypoints walked before reaching pos
-  rotate?: { pos: Vec2; onDeathOf: string };      // kill point: rotate here when onDeathOf dies
+  rotate?: {                                      // kill point: rotate when onDeathOf dies
+    pos: Vec2;                                    //   the spot to collapse onto
+    onDeathOf: string;                            //   trigger: this teammate's death (a player id)
+    route?: Vec2[];                               //   optional authored path for the rotation itself
+  };
 }
 export interface Play {
   plans: PlayerPlan[];                            // one entry per player on this side
 }
+
+/** Cap on authored waypoints per route. A play is a *sketch*, not turn-by-turn
+ *  micro: a handful of points routes a player around the map without letting an
+ *  owner script every footstep (and keeps the engine's path arrays bounded). The
+ *  editor enforces it; the hold route and a kill-point's rotation route each get
+ *  their own budget. */
+export const MAX_ROUTE_WAYPOINTS = 5;
