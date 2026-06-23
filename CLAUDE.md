@@ -29,9 +29,11 @@ The engine is pure. Same input → byte-identical output, forever.
 
 A map's official minimap (`displayIcon`) is also its collision data: the alpha channel is the walkability mask — opaque = floor, transparent = wall. `packages/maps`:
 
-- `scripts/build-navmesh.ts` reads alpha → a coarse walkable grid → `data/<map>.navmesh.json`.
+- `scripts/build-navmesh.ts` reads alpha → a coarse walkable grid → `data/<map>.navmesh.json` (and a copy in `apps/web/public/` for the viewer).
 - `src/navmesh.ts` runs A* on that grid (`pathfind`), plus the LOS/vision primitives (`losClear`, `inView`).
-- To add a map: drop its `displayIcon` in `assets/`, rerun `pnpm navmesh`. No hand-tracing. Everything downstream (routing, vision, future heatmaps) operates in the same 1000×1000 image space, so it all lines up for free.
+- To add a map: drop its `displayIcon` in `assets/` (and `apps/web/public/` so the viewer can show it), add anchors in `src/anchors.ts`, rerun `pnpm navmesh:all`. No hand-tracing. Everything downstream (routing, vision, future heatmaps) operates in the same 1000×1000 image space, so it all lines up for free.
+
+**All 11 official maps are in** (navmesh + anchors): ascent, abyss, bind, breeze, fracture, haven, icebox, lotus, pearl, split, sunset. `pnpm sim -- --map <id>` resolves any of them; the viewer loads assets by `timeline.map`. But **only Ascent's anchors are tuned** — the rest are first-pass `atkSpawn`/`mid` eyeballed from the asset pack's site centers, so they complete + render but play unbalanced. Two known causes to fix when tuning: (1) `SPEED`/`ROTATE_SPEED` are calibrated to Ascent's scale, so far-apart-site maps (fracture, bind, breeze) let attackers plant before rotations land → detonation-heavy/attacker-sided; (2) `MapAnchors.sites` is `{A,B}` only — Haven and Lotus field two of their three sites until the engine models N sites (`siteBias`/`read` are binary today). Don't assume a non-Ascent map is balanced.
 
 When you touch geometry, reuse these primitives — don't write a second raycaster or a second notion of "walkable."
 

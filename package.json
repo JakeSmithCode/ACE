@@ -8,6 +8,7 @@
     "build": "turbo run build",
     "dev": "pnpm --filter @ace/web dev",
     "navmesh": "tsx packages/maps/scripts/build-navmesh.ts ascent",
+    "navmesh:all": "for m in abyss ascent bind breeze fracture haven icebox lotus pearl split sunset; do tsx packages/maps/scripts/build-navmesh.ts $m; done",
     "sim": "tsx packages/engine/src/cli.ts",
     "typecheck": "turbo run typecheck"
   },

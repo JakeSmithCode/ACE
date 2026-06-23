@@ -7,12 +7,10 @@ const host = ref<HTMLElement | null>(null);
 let viewer: Viewer | null = null;
 
 onMounted(async () => {
-  // the navmesh is optional: cones simply go unclipped (or off) if it's missing
-  const [tl, nav] = await Promise.all([
-    fetch('/timeline.json').then(r => r.json()) as Promise<MatchTimeline>,
-    fetch('/ascent.navmesh.json').then(r => (r.ok ? r.json() : null)).catch(() => null) as Promise<NavGrid | null>,
-  ]);
-  if (host.value) viewer = new Viewer(host.value, tl, '/ascent.png', nav);
+  const tl = (await fetch('/timeline.json').then(r => r.json())) as MatchTimeline;
+  // map assets are loaded by the timeline's map id, so any simulated map renders
+  const nav = (await fetch(`/${tl.map}.navmesh.json`).then(r => (r.ok ? r.json() : null)).catch(() => null)) as NavGrid | null;
+  if (host.value) viewer = new Viewer(host.value, tl, `/${tl.map}.png`, nav);
 });
 onUnmounted(() => viewer?.destroy());
 </script>
