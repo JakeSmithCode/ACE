@@ -43,10 +43,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag .ring{stroke-width:2.5;fill:rgba(8,14,20,.85)}
 .ace-ag .ring.att{stroke:var(--att)}.ace-ag .ring.def{stroke:var(--def)}
 .ace-ag .core.att{fill:var(--att)}.ace-ag .core.def{fill:var(--def)}
-.ace-ag .hl{font-family:var(--label);font-size:15px;font-weight:600;letter-spacing:.04em;text-anchor:middle;paint-order:stroke;stroke:#05090d;stroke-width:3.5px}
+.ace-ag .hl{font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.02em;text-anchor:middle;paint-order:stroke;stroke:#05090d;stroke-width:3px;opacity:.92}
 .ace-ag .hl.att{fill:#cdf5fc}.ace-ag .hl.def{fill:#ffd2d8}
 .ace-ag.dead{opacity:.3}
-.ace-ag.dead .ring{stroke:var(--muted-2)!important}.ace-ag.dead .core{fill:var(--muted-2)!important}.ace-ag.dead .hl{fill:var(--muted-2)!important}
+.ace-ag.dead .ring{stroke:var(--muted-2)!important}.ace-ag.dead .core{fill:var(--muted-2)!important}.ace-ag.dead .hl{display:none}
 .ace-spike{opacity:0}.ace-spike.on{opacity:1}.ace-spike .sp-core{fill:var(--live)}.ace-spike .sp-ring{fill:none;stroke:var(--live);stroke-width:3}
 .ace-controls{margin-top:14px;background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:14px 16px}
 .ace-controls .row{display:flex;align-items:center;gap:12px}
