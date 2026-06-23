@@ -68,14 +68,18 @@ export const DEFAULT_TACTICS: Tactics = {
  *  — like tactics — every team always has a comp even if the owner sets nothing. */
 export type Comp = Record<string, string>;
 
-/** An authored play: per-player positions on the map, with conditional **kill
- *  points** — a player holds `pos`, then rotates to `rotate.pos` when the named
- *  teammate dies (`rotate.onDeathOf`, a player id). This is the cs-manager-style
- *  "tell players exactly where to go", reactive: lose the bait, the team
- *  collapses. v1 is a hold + one conditional rotation; it grows from here. */
+/** An authored play: per-player positions on the map, with an optional **route**
+ *  (the path walked to the hold) and conditional **kill points** — a player
+ *  holds `pos`, then rotates to `rotate.pos` when the named teammate dies
+ *  (`rotate.onDeathOf`, a player id). This is the cs-manager-style "tell players
+ *  exactly where to go", reactive: lose the bait, the team collapses. A route is
+ *  the ordered waypoints travelled *before* reaching `pos` — `[...route, pos]` is
+ *  the full path, so an empty/absent route means they start already on the hold.
+ *  A longer route is a real tradeoff: the player is set up later. */
 export interface PlayerPlan {
   player: string;                                 // player id
-  pos: Vec2;                                      // where they set up / hold
+  pos: Vec2;                                      // where they set up / hold (the destination)
+  route?: Vec2[];                                 // optional waypoints walked before reaching pos
   rotate?: { pos: Vec2; onDeathOf: string };      // kill point: rotate here when onDeathOf dies
 }
 export interface Play {

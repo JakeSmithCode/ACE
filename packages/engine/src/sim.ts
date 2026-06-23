@@ -362,16 +362,22 @@ function simulateRound(
 
   const dAgg = defTac.defense.aggression;
   if (defTac.defense.play) {
-    // AUTHORED play: defenders hold exactly where the owner placed them, and a
-    // kill point (rotate.onDeathOf) re-routes them when the named teammate dies.
+    // AUTHORED play: defenders hold exactly where the owner placed them, walk an
+    // optional authored route to get there, and a kill point (rotate.onDeathOf)
+    // re-routes them when the named teammate dies.
     const byId = new Map(defTeam.players.map(p => [p.id, p] as const));
     defTeam.players.forEach(p => {
       const plan = defTac.defense.play!.plans.find(q => q.player === p.id);
       const pos = plan ? plan.pos : A.sites[site];           // unplanned players hold the site
       const lo = loadouts.get(p.handle)!;
       const trigHandle = plan?.rotate ? byId.get(plan.rotate.onDeathOf)?.handle : undefined;
+      // a route is the waypoints walked into the hold; [...route, pos] is the full
+      // path. No route = start already set on the hold (the original behaviour).
+      const route = plan?.route?.length ? plan.route : null;
+      const path = route ? [...route, pos] : [pos];
       agents.push({
-        p, side: defender, handle: p.handle, path: [pos], departT: 0, arrive: 0.12,
+        p, side: defender, handle: p.handle, path, departT: 0,
+        arrive: route ? arriveTime(path) : 0.12,            // a longer route = set up later
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: true,
         holdDir: unit(pos, A.atkSpawn),
