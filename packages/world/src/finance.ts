@@ -20,7 +20,13 @@ export function seasonIncome(rank: number, n: number): { sponsor: number; prize:
 /** Where a club's bank starts — bigger clubs are richer (and pay more). */
 export const startingBalance = (strength: number): number => Math.round(14000 + strength * 26000);
 
-export interface SeasonLedger { season: number; sponsor: number; prize: number; wages: number; net: number }
+/** Bonus prize for a playoff finish, on top of the placement prize — the reward
+ *  for winning when it matters (a title is worth chasing). */
+export function playoffPrize(finish: 'champion' | 'runner-up' | 'semifinal' | 'none'): number {
+  return finish === 'champion' ? 14000 : finish === 'runner-up' ? 7000 : finish === 'semifinal' ? 3500 : 0;
+}
+
+export interface SeasonLedger { season: number; sponsor: number; prize: number; playoff?: number; wages: number; net: number }
 
 /** Settle a club's books for a finished season: income (by final rank) minus the
  *  squad wage bill. Returns the ledger; the caller adds `net` to the balance. */

@@ -10,8 +10,8 @@ import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, developPlayer, makePlayer, HANDLES,
   startingBalance, settleSeason, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
-  seasonIncome, playerWage, ROLE_AGENTS, fullPatch, patchMeta, type MetaChange,
-  type Club, type MatchResult, type Matchday, type SeasonLedger,
+  seasonIncome, playerWage, ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
+  type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket,
 } from '@ace/world';
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
@@ -49,6 +49,8 @@ const listings = shallowRef<{ club: number; playerId: string }[]>(aiListings(clu
 const myListed = ref<Set<string>>(new Set());          // your player ids put up for sale
 const patch = ref<PatchState>(fullPatch(PATCH, ALL_AGENTS));   // the live agent meta
 const metaChanges = ref<MetaChange[]>([]);             // last off-season's patch notes
+const playoffs = shallowRef<Bracket | null>(null);    // this season's bracket (null until the regular season ends)
+const titles = ref<number[]>(clubs.value.map(() => 0));  // career championships per club
 const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned to the XI
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
 
@@ -131,17 +133,31 @@ function resolveDay() {
 }
 function simSeason() { while (!done.value) resolveDay(); }
 
-// the off-season: settle EVERY club's books by final rank, then develop every
-// squad, then refresh the board. Your authored tactics/comp carry over (player
-// ids are stable through a tick).
+// the season climax: once the regular season is done, the top four seed a
+// best-of-three single-elim bracket (1v4, 2v3 → final). Resolved with the SAME
+// sim as fixtures (buildInput overlays your comp/tactics for your ties), so each
+// game is re-simmable to watch. The champion banks a title.
+function enterPlayoffs() {
+  if (!done.value || playoffs.value || !nav) return;
+  const bracket = runPlayoffs(table.value, seasonSeed.value, season.value, (home, away, seed) => simFixture({ home, away }, seed));
+  if (bracket.champion != null) titles.value = titles.value.map((t, i) => i === bracket.champion ? t + 1 : t);
+  playoffs.value = bracket;
+}
+
+// the off-season: settle EVERY club's books by final rank (+ any playoff prize),
+// then develop every squad, then refresh the board. Your authored tactics/comp
+// carry over (player ids are stable through a tick).
 function advanceSeason() {
   if (!done.value) return;
+  const bracket = playoffs.value;
+  const poPrize = (i: number) => bracket ? playoffPrize(finishOf(bracket, i)) : 0;
   // settle every club; YOUR wage bill is over the whole roster (depth costs money)
   const inc = seasonIncome(rankOf(myClub.value), N);
   const myWages = myRoster.value.reduce((s, p) => s + playerWage(p), 0);
-  ledger.value = { season: season.value, sponsor: inc.sponsor, prize: inc.prize, wages: myWages, net: inc.sponsor + inc.prize - myWages };
+  const myPo = poPrize(myClub.value);
+  ledger.value = { season: season.value, sponsor: inc.sponsor, prize: inc.prize, playoff: myPo, wages: myWages, net: inc.sponsor + inc.prize + myPo - myWages };
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net : b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net);
+    i === myClub.value ? b + ledger.value!.net : b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net + poPrize(i));
   // snapshot (whole roster) for deltas, then develop the league + your reserves
   prevById.value = new Map([
     ...clubs.value.flatMap(c => c.team.players.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const)),
@@ -156,6 +172,7 @@ function advanceSeason() {
   syncLineup();
   season.value++;
   results.value = []; dayIdx.value = 0;
+  playoffs.value = null;           // a fresh bracket awaits next season's end
   refreshMarket();
 }
 function refreshMarket() {
@@ -172,6 +189,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i);
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
+  playoffs.value = null;
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -187,6 +205,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   ledger.value = null;
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
+  playoffs.value = null; titles.value = clubs.value.map(() => 0);
   refreshMarket();
 }
 
@@ -318,8 +337,9 @@ export function useWorld() {
   return {
     N, MAP, seasonSeed, clubs, schedule, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
+    playoffs, titles,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
-    buildInput, simFixture, resolveDay, simSeason, advanceSeason, selectClub, newWorld, ensureNav, getNav,
+    buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

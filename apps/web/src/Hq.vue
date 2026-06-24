@@ -13,8 +13,12 @@ import { useWorld, MAP } from './world';
 
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
-  table, total, done, dayIdx, myStanding, myResults, nextFixture } = w;
+  table, total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, titles } = w;
 const N = w.N;
+
+// playoff helpers
+const seedNo = (c: number) => (playoffs.value ? playoffs.value.qualified.indexOf(c) + 1 : 0);
+const titleCount = (i: number) => titles.value[i] ?? 0;
 
 const hqTab = ref<'season' | 'squad' | 'market'>('season');
 
@@ -74,6 +78,7 @@ onUnmounted(() => { viewer?.destroy(); });
       </div>
       <div class="hq-actions">
         <button v-if="!done" class="hq-go" @click="w.resolveDay()">▶ Resolve match-day</button>
+        <button v-else-if="!playoffs" class="hq-go po" @click="w.enterPlayoffs()">🏆 Enter playoffs</button>
         <button v-else class="hq-go" @click="advance">⟳ Advance to season {{ season + 1 }}</button>
         <button class="hq-alt" :disabled="done" @click="w.simSeason()">⏭ Sim to end</button>
         <button class="hq-alt" @click="newWorld">⟲ New world</button>
@@ -104,7 +109,41 @@ onUnmounted(() => { viewer?.destroy(); });
     </div>
 
     <!-- SEASON -->
-    <div v-else class="hq-grid">
+    <template v-else>
+    <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
+    <div v-if="playoffs" class="hq-panel hq-bracket">
+      <h3><span class="b"></span>Playoffs <span class="rs-sub">top 4 · best of 3{{ playoffs.champion != null ? ` · champion ${tagOf(playoffs.champion)}` : '' }}</span></h3>
+      <div class="po-cols">
+        <div class="po-col">
+          <div class="po-colh">Semifinals</div>
+          <div v-for="s in playoffs.rounds[0]" :key="'sf'+s.slot" class="po-series">
+            <div class="po-team" :class="{ win: s.winner === s.hi, me: s.hi === myClub, out: s.winner != null && s.winner !== s.hi }">
+              <span class="po-seed">{{ seedNo(s.hi) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.hi)} 65% 55%)` }"></i>{{ tagOf(s.hi) }}<b>{{ s.wins[0] }}</b>
+            </div>
+            <div class="po-team" :class="{ win: s.winner === s.lo, me: s.lo === myClub, out: s.winner != null && s.winner !== s.lo }">
+              <span class="po-seed">{{ seedNo(s.lo) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.lo)} 65% 55%)` }"></i>{{ tagOf(s.lo) }}<b>{{ s.wins[1] }}</b>
+            </div>
+            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g)" :title="`watch game ${gi + 1}`">G{{ gi + 1 }}</button></div>
+          </div>
+        </div>
+        <div class="po-col">
+          <div class="po-colh">Final</div>
+          <div v-for="s in playoffs.rounds[1]" :key="'fn'+s.slot" class="po-series po-final">
+            <div class="po-team" :class="{ win: s.winner === s.hi, me: s.hi === myClub, out: s.winner != null && s.winner !== s.hi }">
+              <span class="po-seed">{{ seedNo(s.hi) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.hi)} 65% 55%)` }"></i>{{ tagOf(s.hi) }}<b>{{ s.wins[0] }}</b>
+            </div>
+            <div class="po-team" :class="{ win: s.winner === s.lo, me: s.lo === myClub, out: s.winner != null && s.winner !== s.lo }">
+              <span class="po-seed">{{ seedNo(s.lo) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.lo)} 65% 55%)` }"></i>{{ tagOf(s.lo) }}<b>{{ s.wins[1] }}</b>
+            </div>
+            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g)" :title="`watch game ${gi + 1}`">G{{ gi + 1 }}</button></div>
+          </div>
+          <div v-if="playoffs.champion != null" class="po-champ" :class="{ me: playoffs.champion === myClub }">🏆 {{ cname(playoffs.champion) }} — champion</div>
+        </div>
+      </div>
+      <div class="hq-compnote">The top four seed a single-elim bracket; each tie is best-of-three. Your ties run your comp + tactics — click any <b>G</b> to watch it back. Win it for the title (and the prize). Then <b>Advance</b> to settle the books and start next season.</div>
+    </div>
+
+    <div class="hq-grid">
       <!-- standings -->
       <div class="hq-panel hq-table">
         <h3><span class="b"></span>Standings</h3>
@@ -129,7 +168,7 @@ onUnmounted(() => { viewer?.destroy(); });
           <div class="hq-clubcard">
             <div class="hq-badge" :style="{ background: `hsl(${hue(myClub)} 60% 22%)`, borderColor: `hsl(${hue(myClub)} 65% 55%)` }">{{ tagOf(myClub) }}</div>
             <div class="hq-clubmeta">
-              <div class="hq-clubname">{{ nameOf(myClub) }}</div>
+              <div class="hq-clubname">{{ nameOf(myClub) }}<span v-if="titleCount(myClub)" class="hq-titles" :title="`${titleCount(myClub)} championship${titleCount(myClub) > 1 ? 's' : ''}`">{{ '🏆'.repeat(Math.min(5, titleCount(myClub))) }}<i v-if="titleCount(myClub) > 5">×{{ titleCount(myClub) }}</i></span></div>
               <div class="hq-clubsub">
                 <span class="hq-pos">{{ w.rankOf(myClub) }}<sup>{{ ['st','nd','rd'][w.rankOf(myClub)-1] || 'th' }}</sup></span> of {{ N }}
                 <span v-if="myStanding">· {{ myStanding.won }}W {{ myStanding.lost }}L · {{ myStanding.diff >= 0 ? '+' : '' }}{{ myStanding.diff }} diff</span>
@@ -146,6 +185,7 @@ onUnmounted(() => { viewer?.destroy(); });
           <div v-if="ledger" class="hq-ledger">
             <div class="hq-led"><span>Sponsor (s{{ ledger.season }})</span><b class="pos">+{{ fmt(ledger.sponsor) }}</b></div>
             <div class="hq-led"><span>Prize money</span><b class="pos">+{{ fmt(ledger.prize) }}</b></div>
+            <div v-if="ledger.playoff" class="hq-led"><span>Playoff bonus 🏆</span><b class="pos">+{{ fmt(ledger.playoff) }}</b></div>
             <div class="hq-led"><span>Squad wages</span><b class="neg">−{{ fmt(ledger.wages) }}</b></div>
             <div class="hq-led net"><span>Net last season</span><b :class="ledger.net >= 0 ? 'pos' : 'neg'">{{ ledger.net >= 0 ? '+' : '−' }}{{ fmt(Math.abs(ledger.net)) }}</b></div>
           </div>
@@ -170,6 +210,7 @@ onUnmounted(() => { viewer?.destroy(); });
         </div>
       </div>
     </div>
+    </template>
 
     <!-- the watched match -->
     <div v-if="watching" class="hq-watchwrap">
