@@ -8,6 +8,7 @@ import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 
 const MAP = 'ascent';
+const ATK_SPAWN: [number, number] = [485, 60];   // Ascent attacker spawn — the default angle defenders watch
 const FORKS = 50;                 // fewer than the CLI's 120 — snappier live re-sim
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
@@ -18,8 +19,8 @@ function starterPlay(t: Team): Play {
   const bait = p3;
   return { plans: [
     { player: p3, pos: [500, 470] },                                         // bait @ mid
-    { player: p0, pos: [300, 420], rotate: { pos: [320, 160], onDeathOf: bait } },  // rotate A on his death
-    { player: p1, pos: [330, 430], rotate: { pos: [296, 165], onDeathOf: bait } },
+    { player: p0, pos: [300, 420], rotate: { pos: [320, 160], trigger: { kind: 'death', player: bait } } },  // rotate A on his death
+    { player: p1, pos: [330, 430], rotate: { pos: [296, 165], trigger: { kind: 'death', player: bait } } },
     { player: p2, pos: [310, 150] },                                         // A anchor
     { player: p4, pos: [270, 793] },                                         // B anchor
   ] };
@@ -141,6 +142,7 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
           :map-url="`/${MAP}.png`"
           :side="authoring === 0 ? 'att' : 'def'"
           :play="tactics[authoring].defense.play!"
+          :atk-spawn="ATK_SPAWN"
           @update="(p) => onPlay(authoring!, p)"
         />
       </div>

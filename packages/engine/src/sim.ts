@@ -100,7 +100,8 @@ interface Ag {
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
-  rotatePlan: { pos: Vec2; onDeathOf: string; route?: Vec2[] } | null;  // kill point: rotate here when handle dies
+  // kill point: rotate here when the trigger fires (death's player resolved to a handle)
+  rotatePlan: { pos: Vec2; route?: Vec2[]; trigger: { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number } } | null;
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -206,6 +207,14 @@ function resolveRound(
   let method: RoundMethod = 'time';
   let hadKill = false, contactT = Infinity;
 
+  // release an authored kill-point rotation: walk the authored route verbatim,
+  // else A* the way; reuses the departT hold-then-move machinery.
+  const fireRotation = (ag: Ag, t: number) => {
+    const rp = ag.rotatePlan!, here = posAt(ag, t);
+    ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
+    ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED); ag.rotatePlan = null;
+  };
+
   const resolvedThisStep = new Set<string>();
   for (let t = 0; t <= 1 + 1e-9; t += STEP) {
     resolvedThisStep.clear();
@@ -215,6 +224,14 @@ function resolveRound(
     if (contactT === Infinity && (hadKill || atk().some(a => dist(posAt(a, t), sitePt) < SITE_R))) {
       contactT = t;
       for (const ag of agents) if (ag.departT === Infinity) ag.departT = t;
+    }
+
+    // authored kill points keyed to contact or the clock (death-keyed ones fire
+    // in the kill loop below). Time triggers are the staggered-hold timing lever.
+    for (const ag of agents) {
+      if (!ag.alive || !ag.rotatePlan) continue;
+      const tr = ag.rotatePlan.trigger;
+      if ((tr.kind === 'contact' && contactT !== Infinity) || (tr.kind === 'time' && t >= tr.t)) fireRotation(ag, t);
     }
 
     const liveA = atk(), liveD = def();
@@ -252,14 +269,9 @@ function resolveRound(
         loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         hadKill = true;                                 // first blood = info for the defense
-        // kill point: teammates keyed to this death rotate to their next spot now.
-        // an authored rotation route is walked verbatim; otherwise A* finds the way.
+        // kill point: teammates whose death-trigger names this victim rotate now
         for (const ag of agents) {
-          if (ag.alive && ag.rotatePlan && ag.rotatePlan.onDeathOf === loser.handle) {
-            const rp = ag.rotatePlan, here = posAt(ag, t);
-            ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
-            ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED); ag.rotatePlan = null;
-          }
+          if (ag.alive && ag.rotatePlan?.trigger.kind === 'death' && ag.rotatePlan.trigger.handle === loser.handle) fireRotation(ag, t);
         }
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
         events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
@@ -364,30 +376,35 @@ function simulateRound(
 
   const dAgg = defTac.defense.aggression;
   if (defTac.defense.play) {
-    // AUTHORED play: defenders hold exactly where the owner placed them, walk an
-    // optional authored route to get there, and a kill point (rotate.onDeathOf)
-    // re-routes them when the named teammate dies.
+    // AUTHORED play: defenders hold exactly where the owner placed them, watch an
+    // optional authored angle, walk an optional route to get there, and a kill
+    // point re-routes them when its trigger (a death / contact / time) fires.
     const byId = new Map(defTeam.players.map(p => [p.id, p] as const));
     defTeam.players.forEach(p => {
       const plan = defTac.defense.play!.plans.find(q => q.player === p.id);
       const pos = plan ? plan.pos : A.sites[site];           // unplanned players hold the site
       const lo = loadouts.get(p.handle)!;
-      const trigHandle = plan?.rotate ? byId.get(plan.rotate.onDeathOf)?.handle : undefined;
       // a route is the waypoints walked into the hold; [...route, pos] is the full
       // path. No route = start already set on the hold (the original behaviour).
       const route = plan?.route?.length ? plan.route : null;
       const path = route ? [...route, pos] : [pos];
+      // resolve the kill-point trigger; a death trigger's player id → a handle
+      const rt = plan?.rotate;
+      const trig = rt ? (rt.trigger.kind === 'death'
+        ? (byId.get(rt.trigger.player)?.handle ? { kind: 'death' as const, handle: byId.get(rt.trigger.player)!.handle } : null)
+        : rt.trigger) : null;
       agents.push({
         p, side: defender, handle: p.handle, path, departT: 0,
         arrive: route ? arriveTime(path) : 0.12,            // a longer route = set up later
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: true,
-        holdDir: unit(pos, A.atkSpawn),
+        // watch the authored angle if given, else default to facing the attacker spawn
+        holdDir: plan?.face ? unit(pos, plan.face) : unit(pos, A.atkSpawn),
         form: form.get(p.handle) ?? 0,
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1,
-        rotatePlan: plan?.rotate && trigHandle ? { pos: plan.rotate.pos, onDeathOf: trigHandle, route: plan.rotate.route } : null,
+        rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
       });
     });
   } else {

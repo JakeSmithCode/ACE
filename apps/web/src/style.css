@@ -170,6 +170,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-wp-ix{fill:#06121a;font-family:var(--label);font-size:12px;font-weight:700;text-anchor:middle}
 .pe-mark.hold.sel .pe-dot{stroke-width:4;filter:drop-shadow(0 0 5px var(--brand))}
 .pe-hint b.full{color:var(--def)}
+.pe-face-line{stroke-width:2.5;stroke-linecap:round;opacity:.35}
+.pe-face-line.att{stroke:var(--att)}.pe-face-line.def{stroke:var(--def)}
+.pe-face-line.set{opacity:.85}
+.pe-face-nub{cursor:grab;stroke-width:2;fill:#0a0e13}
+.pe-face-nub.att{stroke:var(--att)}.pe-face-nub.def{stroke:var(--def)}
+.pe-face-nub.set.att{fill:var(--att)}.pe-face-nub.set.def{fill:var(--def)}
+.pe-time{display:flex;align-items:center;gap:5px}
+.pe-time input[type=range]{width:64px;accent-color:var(--gold)}
+.pe-time i{font-style:normal;color:var(--gold);font-variant-numeric:tabular-nums;min-width:30px}
+.pe-tk{color:var(--text)}
 .pe-link{stroke:var(--gold);stroke-width:2.4;stroke-dasharray:7 7;opacity:.8}
 .pe-mark{cursor:grab}.pe-mark:active{cursor:grabbing}
 .pe-mark .pe-dot{stroke-width:3}

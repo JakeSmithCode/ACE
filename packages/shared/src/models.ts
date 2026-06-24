@@ -76,13 +76,24 @@ export type Comp = Record<string, string>;
  *  the ordered waypoints travelled *before* reaching `pos` — `[...route, pos]` is
  *  the full path, so an empty/absent route means they start already on the hold.
  *  A longer route is a real tradeoff: the player is set up later. */
+/** What releases a kill-point rotation. `death` = a named teammate dies (the
+ *  classic bait); `contact` = the first contact on site (a kill, or an attacker
+ *  reaching the site); `time` = the round clock passes `t` (0..1) — the timing
+ *  lever that makes a staggered hold ("hold mid until 0.4, then fall to site")
+ *  expressible. */
+export type RotateTrigger =
+  | { kind: 'death'; player: string }   // a teammate (player id) dies
+  | { kind: 'contact' }                 // first contact on the contested site
+  | { kind: 'time'; t: number };        // round time reaches t (0..1)
+
 export interface PlayerPlan {
   player: string;                                 // player id
   pos: Vec2;                                      // where they set up / hold (the destination)
+  face?: Vec2;                                    // a point to watch from the hold (sets the held angle)
   route?: Vec2[];                                 // optional waypoints walked before reaching pos
-  rotate?: {                                      // kill point: rotate when onDeathOf dies
+  rotate?: {                                      // kill point: rotate when the trigger fires
     pos: Vec2;                                    //   the spot to collapse onto
-    onDeathOf: string;                            //   trigger: this teammate's death (a player id)
+    trigger: RotateTrigger;                       //   what releases the rotation
     route?: Vec2[];                               //   optional authored path for the rotation itself
   };
 }

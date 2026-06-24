@@ -8,9 +8,9 @@
 // not micro). Mutations clone-and-emit so the parent re-sims.
 import { ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
-import type { Play, PlayerPlan, Vec2, Team } from '@ace/shared';
+import type { Play, PlayerPlan, RotateTrigger, Vec2, Team } from '@ace/shared';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def' }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; atkSpawn: Vec2 }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
 
 type Target = 'hold' | 'rotate';
@@ -18,6 +18,16 @@ const handleOf = (id: string) => props.team.players.find(p => p.id === id)?.hand
 const planOf = (id: string) => props.play.plans.find(p => p.player === id);
 const routeArr = (pl: PlayerPlan | undefined, tgt: Target) => (tgt === 'hold' ? pl?.route : pl?.rotate?.route) ?? [];
 const routeLen = (id: string, tgt: Target) => routeArr(planOf(id), tgt).length;
+
+// facing: the nub sits a fixed distance from the hold along the watched angle
+// (the default angle, when unset, points at the attacker spawn — as the engine does)
+const FACE_LEN = 58;
+function faceNub(pl: PlayerPlan): Vec2 {
+  const tgt = pl.face ?? props.atkSpawn;
+  let dx = tgt[0] - pl.pos[0], dy = tgt[1] - pl.pos[1];
+  const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+  return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
+}
 
 function commit(mut: (p: Play) => void) {
   const next: Play = JSON.parse(JSON.stringify(props.play));   // cheap (5 plans); avoids mutating the prop
@@ -33,8 +43,8 @@ function toImg(clientX: number, clientY: number): Vec2 {
   return [Math.round(x), Math.round(y)];
 }
 
-// --- dragging markers (hold / rotate target / a route waypoint) -----------
-type Which = 'pos' | 'rotate' | 'wp';
+// --- dragging markers (hold / rotate target / route waypoint / facing) ----
+type Which = 'pos' | 'rotate' | 'wp' | 'face';
 let drag: { player: string; which: Which; tgt: Target; idx: number; from: Vec2; moved: boolean } | null = null;
 
 function startDrag(player: string, which: Which, tgt: Target, idx: number, ev: PointerEvent) {
@@ -53,6 +63,7 @@ function onMove(ev: PointerEvent) {
     if (!pl) return;
     if (d.which === 'pos') pl.pos = pt;
     else if (d.which === 'rotate' && pl.rotate) pl.rotate.pos = pt;
+    else if (d.which === 'face') { if (pt[0] !== pl.pos[0] || pt[1] !== pl.pos[1]) pl.face = pt; }
     else if (d.which === 'wp') { const arr = d.tgt === 'hold' ? pl.route : pl.rotate?.route; if (arr) arr[d.idx] = pt; }
   });
 }
@@ -104,12 +115,26 @@ function toggleKill(player: string) {
     if (!pl) return;
     if (pl.rotate) { delete pl.rotate; return; }
     const other = props.team.players.find(q => q.id !== player)!.id;
-    pl.rotate = { pos: [Math.min(1000, pl.pos[0] + 90), Math.max(0, pl.pos[1] - 90)], onDeathOf: other };
+    pl.rotate = { pos: [Math.min(1000, pl.pos[0] + 90), Math.max(0, pl.pos[1] - 90)], trigger: { kind: 'death', player: other } };
   });
   if (routing.value?.player === player && routing.value.tgt === 'rotate') routing.value = null;
 }
-function setTrigger(player: string, onDeathOf: string) {
-  commit(p => { const pl = p.plans.find(q => q.player === player); if (pl?.rotate) pl.rotate.onDeathOf = onDeathOf; });
+const triggerKind = (id: string) => planOf(id)?.rotate?.trigger.kind;
+const deathPlayer = (id: string) => { const tr = planOf(id)?.rotate?.trigger; return tr?.kind === 'death' ? tr.player : ''; };
+const timeT = (id: string) => { const tr = planOf(id)?.rotate?.trigger; return tr?.kind === 'time' ? tr.t : 0.4; };
+function setTriggerKind(player: string, kind: RotateTrigger['kind']) {
+  commit(p => {
+    const pl = p.plans.find(q => q.player === player);
+    if (!pl?.rotate) return;
+    pl.rotate.trigger = kind === 'death' ? { kind: 'death', player: props.team.players.find(q => q.id !== player)!.id }
+      : kind === 'time' ? { kind: 'time', t: 0.4 } : { kind: 'contact' };
+  });
+}
+function setDeathPlayer(player: string, who: string) {
+  commit(p => { const pl = p.plans.find(q => q.player === player); if (pl?.rotate) pl.rotate.trigger = { kind: 'death', player: who }; });
+}
+function setTime(player: string, t: number) {
+  commit(p => { const pl = p.plans.find(q => q.player === player); if (pl?.rotate) pl.rotate.trigger = { kind: 'time', t }; });
 }
 
 // polyline point strings: the hold path ends AT the hold; the rotation path
@@ -160,6 +185,14 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
          @pointerdown="startDrag(pl.player, 'pos', 'hold', 0, $event)">
         <circle r="17" class="pe-dot" /><text class="pe-hl" y="-24">{{ handleOf(pl.player) }}</text>
       </g>
+
+      <!-- facing handles: the angle each defender watches (drag to aim) -->
+      <g v-for="pl in play.plans" :key="'f' + pl.player">
+        <line :x1="pl.pos[0]" :y1="pl.pos[1]" :x2="faceNub(pl)[0]" :y2="faceNub(pl)[1]"
+              class="pe-face-line" :class="[side, { set: pl.face }]" />
+        <circle :cx="faceNub(pl)[0]" :cy="faceNub(pl)[1]" r="7" class="pe-mark pe-face-nub" :class="[side, { set: pl.face }]"
+                @pointerdown="startDrag(pl.player, 'face', 'hold', 0, $event)" />
+      </g>
     </svg>
 
     <div class="pe-list">
@@ -169,8 +202,9 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
         click the map to drop waypoints, drag to move, click a point to remove.
       </div>
       <div class="pe-hint" v-else>
-        Drag dots to place defenders. <b>route</b> = draw the path they walk in (longer = set up later);
-        <b>kill point</b> = rotate (↻) when a teammate trades, with its own routable path. Up to {{ CAP }} waypoints each.
+        Drag dots to place defenders; drag the small nub to aim what they <b>watch</b>. <b>route</b> = draw the path
+        they walk in (longer = set up later); <b>kill point</b> = rotate (↻) when its trigger fires —
+        a teammate's death, first contact, or the clock. Up to {{ CAP }} waypoints each.
       </div>
       <div v-for="pl in play.plans" :key="pl.player" class="pe-row"
            :class="{ keyed: pl.rotate, routing: routing?.player === pl.player }">
@@ -183,10 +217,22 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
           <input type="checkbox" :checked="!!pl.rotate" @change="toggleKill(pl.player)" /> kill point
         </label>
         <template v-if="pl.rotate">
-          <span class="pe-trig">when
-            <select :value="pl.rotate.onDeathOf" @change="setTrigger(pl.player, ($event.target as HTMLSelectElement).value)">
+          <span class="pe-trig">
+            <select class="pe-tk" :value="triggerKind(pl.player)"
+                    @change="setTriggerKind(pl.player, ($event.target as HTMLSelectElement).value as any)">
+              <option value="death">when… dies</option>
+              <option value="contact">on contact</option>
+              <option value="time">at time</option>
+            </select>
+            <select v-if="triggerKind(pl.player) === 'death'" :value="deathPlayer(pl.player)"
+                    @change="setDeathPlayer(pl.player, ($event.target as HTMLSelectElement).value)">
               <option v-for="o in team.players.filter(q => q.id !== pl.player)" :key="o.id" :value="o.id">{{ o.handle }}</option>
-            </select> dies
+            </select>
+            <span v-else-if="triggerKind(pl.player) === 'time'" class="pe-time">
+              <input type="range" min="0.1" max="0.9" step="0.05" :value="timeT(pl.player)"
+                     @input="setTime(pl.player, +($event.target as HTMLInputElement).value)" />
+              <i>{{ Math.round(timeT(pl.player) * 100) }}%</i>
+            </span>
           </span>
           <button class="pe-rt-btn gold" :class="{ on: isRouting(pl.player, 'rotate') }" @click="toggleRouting(pl.player, 'rotate')">
             {{ isRouting(pl.player, 'rotate') ? 'done ↻' : 'route ↻' }}<i v-if="routeLen(pl.player, 'rotate')">{{ routeLen(pl.player, 'rotate') }}</i>
