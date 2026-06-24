@@ -82,7 +82,7 @@ onUnmounted(() => { viewer?.destroy(); });
         <button v-else class="hq-go" @click="advance">⟳ Advance to season {{ season + 1 }}</button>
         <button class="hq-alt" :disabled="done" @click="w.simSeason()">⏭ Sim to end</button>
         <button class="hq-alt" @click="newWorld">⟲ New world</button>
-        <span class="hq-seed">seed {{ w.seasonSeed.value }}</span>
+        <span class="hq-seed">seed {{ w.seasonSeed.value }}<i v-if="w.hasSave.value" class="hq-saved" title="your career autosaves to this browser">● saved</i></span>
       </div>
     </div>
 

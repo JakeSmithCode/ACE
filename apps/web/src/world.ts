@@ -3,7 +3,7 @@
 // (@ace/world), resolved client-side by the same engine the server worker will
 // run. Your club gets two manager overlays the AI clubs don't: an authored comp
 // and authored tactics, both injected into your fixtures.
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tactics } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
@@ -333,11 +333,65 @@ function resolveListings() {
 async function ensureNav() { if (!nav) nav = await fetch(`/${MAP}.navmesh.json`).then(r => r.json()); }
 const getNav = () => nav;
 
+// --- career persistence (localStorage) ---------------------------------------
+// A whole career lives in the refs above; here we snapshot the mutated state to
+// localStorage and restore it on load, so a refresh resumes exactly where you
+// left off. The schedule is pure (doubleRoundRobin(N)) so it's regenerated, not
+// stored. Sets/Maps round-trip via arrays. A version+club-count guard ignores a
+// stale/incompatible save (then you just start fresh).
+const SAVE_KEY = 'ace.career.v1';
+const hasSave = ref(false);
+
+function snapshot() {
+  return {
+    v: 1, n: N,
+    seasonSeed: seasonSeed.value, season: season.value, myClub: myClub.value, dayIdx: dayIdx.value,
+    clubs: clubs.value, results: results.value, balances: balances.value, ledger: ledger.value,
+    titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
+    freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
+    patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
+    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value],
+    prevById: [...prevById.value.entries()],
+  };
+}
+function save() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot())); hasSave.value = true; } catch { /* quota / private mode — run unsaved */ }
+}
+function loadSave(): ReturnType<typeof snapshot> | null {
+  try { const s = localStorage.getItem(SAVE_KEY); if (!s) return null; const o = JSON.parse(s); return o?.v === 1 && o?.n === N ? o : null; } catch { return null; }
+}
+function hydrate(o: ReturnType<typeof snapshot>) {
+  seasonSeed.value = o.seasonSeed; season.value = o.season; myClub.value = o.myClub; dayIdx.value = o.dayIdx;
+  clubs.value = o.clubs; schedule.value = doubleRoundRobin(N); results.value = o.results;
+  balances.value = o.balances; ledger.value = o.ledger; titles.value = o.titles;
+  myComp.value = o.myComp; myTactics.value = o.myTactics; myRoster.value = o.myRoster;
+  freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
+  patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs;
+  forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
+  prevById.value = new Map(o.prevById);
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
+
+// restore an existing career BEFORE wiring the autosave watcher, so hydration
+// doesn't re-trigger a save of identical data.
+const _saved = loadSave();
+if (_saved) { hydrate(_saved); hasSave.value = true; }
+
+// autosave: the store reassigns these refs immutably on every change, so a
+// shallow watch catches them all. Debounced so a fast "sim to end" (many
+// match-days) collapses into one write.
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+watch(
+  [seasonSeed, clubs, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById],
+  () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
+);
+
 export function useWorld() {
   return {
     N, MAP, seasonSeed, clubs, schedule, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
-    playoffs, titles,
+    playoffs, titles, hasSave, clearSave,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

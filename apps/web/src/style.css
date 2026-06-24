@@ -468,3 +468,4 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .po-game:hover{color:var(--text);border-color:var(--brand)}
 .po-champ{margin-top:4px;padding:9px 12px;background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--display);font-weight:700;font-size:14px}
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
+.hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}
