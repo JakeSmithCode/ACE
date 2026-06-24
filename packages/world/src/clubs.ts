@@ -18,12 +18,14 @@ const ROLE_SHAPE: Record<Role, Partial<Attributes>> = {
   sentinel:   { gameSense: 12, clutch: 13, utility: 6, entry: -17, aim: -6, movement: -5 },
 };
 
-const AGENTS: Record<Role, string[]> = {
+/** Agents by role — the comp builder picks from these per player. */
+export const ROLE_AGENTS: Record<Role, string[]> = {
   duelist:    ['Jett', 'Raze', 'Neon', 'Yoru', 'Phoenix', 'Reyna'],
   initiator:  ['Sova', 'Fade', 'Breach', 'Skye', 'KAY/O', 'Gekko'],
   controller: ['Omen', 'Brimstone', 'Viper', 'Astra', 'Harbor', 'Clove'],
   sentinel:   ['Killjoy', 'Cypher', 'Chamber', 'Sage', 'Deadlock', 'Vyse'],
 };
+const AGENTS = ROLE_AGENTS;
 
 const clamp = (v: number, lo = 35, hi = 95) => Math.max(lo, Math.min(hi, Math.round(v)));
 
