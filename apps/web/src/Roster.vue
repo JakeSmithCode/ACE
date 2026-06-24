@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// The squad screen — your full roster (the matchday five + reserves). Shows the
-// three-layer model (current ability, fogged potential, age + phase) with the
-// off-season deltas, plus depth management: list a player for sale or sell them
-// outright (you can't sell below a valid five).
+// The squad screen — your full roster (matchday five + reserves). Potential is
+// shown as a SCOUTED estimate (fogged stars + a confidence that's higher for
+// older players you own), never the true ceiling. Start a reserve / bench a
+// starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, potentialOverall, phaseOf, playerValue } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -13,12 +13,11 @@ const ATTRS: { k: keyof Attributes; label: string }[] = [
   { k: 'utility', label: 'UTL' }, { k: 'clutch', label: 'CLT' }, { k: 'entry', label: 'ENT' },
 ];
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
-const stars = (p: Player) => Math.max(1, Math.min(5, Math.round((potentialOverall(p) - 44) / 9)));
+const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
 const delta = (p: Player, k: keyof Attributes) => {
   const prev = w.prevById.value.get(p.id);
   return prev ? p.attr[k] - prev.attr[k] : 0;
 };
-// starters first (by role order), then reserves, each by overall
 const order = (p: Player) => (w.isStarter(p.id) ? 0 : 1);
 const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) || overall(b) - overall(a));
 </script>
@@ -26,7 +25,7 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
 <template>
   <div class="hq-panel rs">
     <h3><span class="b"></span>{{ w.myTeam.value.tag }} · Squad
-      <span class="rs-sub">{{ w.myRoster.value.length }} players · best five start · reserves are depth</span></h3>
+      <span class="rs-sub">{{ w.myRoster.value.length }} players · best five start · potential is scouted (fogged)</span></h3>
     <div v-for="p in sorted()" :key="p.id" class="rs-row" :class="[phaseOf(p), { reserve: !w.isStarter(p.id), listed: w.isListed(p.id) }]">
       <div class="rs-id">
         <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
@@ -36,7 +35,10 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span></div>
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
-      <div class="rs-pot"><div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= stars(p) }">★</span></div><div class="rs-ovrl">POTENTIAL</div></div>
+      <div class="rs-pot">
+        <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true) }">★</span></div>
+        <div class="rs-ovrl">POTENTIAL · <span class="rs-conf" :class="{ lo: conf(p) < 55 }">{{ conf(p) }}%</span></div>
+      </div>
       <div class="rs-attrs">
         <div v-for="a in ATTRS" :key="a.k" class="rs-attr">
           <div class="rs-abar"><i :style="{ width: p.attr[a.k] + '%' }" :class="{ mech: a.k === 'aim' || a.k === 'movement' || a.k === 'entry' }"></i></div>
@@ -47,11 +49,13 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         </div>
       </div>
       <div class="rs-actions">
-        <div class="rs-val">{{ money(playerValue(p)) }}</div>
+        <div class="rs-val">{{ money(w.value(p)) }}</div>
+        <button v-if="w.isStarter(p.id)" class="rs-lx" :disabled="!w.canBench(p.id)" @click="w.benchStarter(p.id)" title="move to the reserves">bench</button>
+        <button v-else class="rs-lx start" @click="w.startReserve(p.id)" title="start in the XI">start ▲</button>
         <button class="hq-list" :class="{ on: w.isListed(p.id) }" @click="w.toggleList(p.id)">{{ w.isListed(p.id) ? '● listed' : 'list' }}</button>
-        <button class="rs-sell" :disabled="!w.canSell(p.id)" @click="w.sellPlayer(p.id)" :title="w.canSell(p.id) ? 'sell for ' + money(playerValue(p)) : 'need cover at this role'">sell</button>
+        <button class="rs-sell" :disabled="!w.canSell(p.id)" @click="w.sellPlayer(p.id)">sell</button>
       </div>
     </div>
-    <div class="hq-compnote">Buy in the <b>Market</b> to add depth — the best five at each role start automatically. Sell a player for their value (you can't drop below a valid five), or <b>list</b> them so a rival might buy between match-days.</div>
+    <div class="hq-compnote">Potential is a <b>scouted</b> read — confidence rises as a player ages and stays in your squad, so a young signing is a bet. Buy in the <b>Market</b> to add depth (best five start automatically); <b>start</b>/<b>bench</b> to override; sell or list to trim (never below a valid five).</div>
   </div>
 </template>

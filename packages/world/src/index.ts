@@ -9,4 +9,6 @@ export * from './season.js';
 export * from './develop.js';
 export * from './finance.js';
 export * from './market.js';
+export * from './scouting.js';
+export * from './meta.js';
 export * from './transfers.js';

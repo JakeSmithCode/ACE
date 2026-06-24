@@ -424,3 +424,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-sell:hover:not(:disabled){background:rgba(255,92,110,.12);border-color:var(--def)}
 .rs-sell:disabled{color:var(--muted-2);border-color:var(--line);cursor:default;opacity:.6}
 .rs-actions .hq-list{padding:4px 0}
+/* scouting fog: potential confidence */
+.rs-conf{color:var(--muted);font-weight:600}
+.rs-conf.lo{color:var(--gold)}
+/* manual lineup override: start / bench buttons */
+.rs-lx{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:4px 0;cursor:pointer}
+.rs-lx:hover:not(:disabled){color:var(--text);border-color:var(--brand)}
+.rs-lx:disabled{color:var(--muted-2);border-color:var(--line);cursor:default;opacity:.6}
+.rs-lx.start{color:var(--win);border-color:rgba(59,209,127,.4)}
+.rs-lx.start:hover{background:rgba(59,209,127,.12);border-color:var(--win)}
+/* meta-reactive market: agent buff/nerf tags + patch notes */
+.mk-meta{font-style:normal;font-family:var(--label);font-size:9px;letter-spacing:.04em;padding:1px 5px;font-weight:600}
+.mk-meta.buff{color:var(--win);background:rgba(59,209,127,.12)}
+.mk-meta.nerf{color:var(--def);background:rgba(255,92,110,.1)}
+.mk-row .fe.buff{color:var(--win)}.mk-row .fe.nerf{color:var(--def)}
+.mk-patch{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-bottom:12px;padding:8px 10px;background:var(--bg-3);border:1px solid var(--line)}
+.mk-patch-h{font-family:var(--label);font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-2);margin-right:3px}
+.mk-note{font-family:var(--label);font-size:10px;letter-spacing:.03em;color:var(--muted)}
+.mk-note i{font-style:normal;font-weight:700;margin-left:2px}
+.mk-note.buff i{color:var(--win)}.mk-note.nerf i{color:var(--def)}
