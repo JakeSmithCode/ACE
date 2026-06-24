@@ -19,9 +19,33 @@ export const CLUB_IDENTITIES: { name: string; tag: string }[] = [
   { name: 'Quasar', tag: 'QSR' }, { name: 'Tundra', tag: 'TND' },
 ];
 
-/** Player handles — the in-game names. A big pool so a 20-club, two-division
- *  league (100 players) draws without replacement AND leaves a disjoint pool for
- *  free agents, with headroom for transfer churn — every handle stays unique. */
+/** Procedural club-name parts — an adjective + a collective noun ("Crimson
+ *  Vipers", "Astral Dynasty"). The curated identities above are used first; these
+ *  fill an arbitrarily deep pyramid (and, later, a server world of thousands). */
+export const CLUB_ADJ: string[] = [
+  'Crimson', 'Azure', 'Golden', 'Shadow', 'Frost', 'Ember', 'Obsidian', 'Radiant',
+  'Savage', 'Royal', 'Rogue', 'Lunar', 'Solar', 'Void', 'Storm', 'Astral',
+  'Vivid', 'Scarlet', 'Cobalt', 'Iron', 'Wild', 'Silent', 'Twilight', 'Eternal',
+  'Rapid', 'Grand', 'Northern', 'Apex', 'Crystal', 'Velvet', 'Burning', 'Ivory',
+];
+export const CLUB_NOUN: string[] = [
+  'Vipers', 'Wolves', 'Titans', 'Ravens', 'Dragons', 'Sentinels', 'Outlaws', 'Phantoms',
+  'Hunters', 'Guardians', 'Foxes', 'Sharks', 'Falcons', 'Serpents', 'Reapers', 'Knights',
+  'Wardens', 'Surge', 'Dynasty', 'Union', 'Syndicate', 'Collective', 'Vanguard', 'Legion',
+  'Brigade', 'Crusaders', 'Mavericks', 'Rebels', 'Pioneers', 'Empire', 'Comets', 'Jaguars',
+];
+
+/** Syllable parts for coined gamer tags (VEX+AR → "VEXAR") — the procedural
+ *  overflow once the curated handles run out, so the pool stays word-like (not
+ *  "NOVA4") deep into the ladder. */
+export const HANDLE_PRE: string[] = [
+  'VEX', 'ZAR', 'KOR', 'NYX', 'RAV', 'THO', 'DRA', 'SOL', 'VYR', 'KAI', 'ZEN', 'BRY',
+  'QOR', 'LUX', 'PYR', 'GRA', 'VOR', 'SYN', 'KRY', 'AXL', 'NEV', 'RHO', 'SKY', 'TYR',
+];
+export const HANDLE_SUF: string[] = ['AR', 'ON', 'IX', 'US', 'EL', 'YN', 'OR', 'AX', 'EN', 'IS', 'OS', 'UL', 'YX', 'AN'];
+
+/** Curated player handles — the in-game names, seeding the procedural pool
+ *  (`genHandles`) that scales it to any world size. */
 export const HANDLES: string[] = [
   'AXIOM', 'BLAZE', 'CIPHER', 'DRIFT', 'EMBER', 'FROST', 'GHOST', 'HAVOC',
   'IRIS', 'JOLT', 'KESTREL', 'LUMEN', 'MIRAGE', 'NOVA', 'ONYX', 'PRISM',

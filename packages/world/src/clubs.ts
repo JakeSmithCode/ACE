@@ -3,7 +3,49 @@
 // the same world the client previewed.
 import type { Team, Player, Role, Attributes, Tactics } from '@ace/shared';
 import { Rng } from '@ace/engine';
-import { CLUB_IDENTITIES, HANDLES } from './names.js';
+import { CLUB_IDENTITIES, HANDLES, HANDLE_PRE, HANDLE_SUF, CLUB_ADJ, CLUB_NOUN } from './names.js';
+
+const shuffle = <T,>(a: T[], rng: Rng): T[] => { for (let i = a.length - 1; i > 0; i--) { const j = rng.int(0, i); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+/** A deterministic pool of `count` unique player handles, disjoint from `exclude`.
+ *  The curated handles seed it; overflow appends a number (NOVA → NOVA2 → NOVA3),
+ *  so the pool scales to a deep pyramid (and a server world) without collisions. */
+export function genHandles(rng: Rng, count: number, exclude: Set<string> = new Set()): string[] {
+  const out: string[] = [], used = new Set(exclude);
+  const add = (h: string) => { if (out.length < count && !used.has(h)) { used.add(h); out.push(h); } };
+  // 1. curated handles, 2. coined syllable combos, 3. numeric fallback — each unique
+  for (const r of shuffle([...HANDLES], rng)) { if (out.length >= count) break; add(r); }
+  const pre = shuffle([...HANDLE_PRE], rng), suf = shuffle([...HANDLE_SUF], rng);
+  for (let i = 0; out.length < count && i < pre.length * suf.length; i++)
+    add(pre[i % pre.length] + suf[Math.floor(i / pre.length) % suf.length]);
+  for (let pass = 2; out.length < count && pass < 200; pass++)
+    for (const r of HANDLES) { if (out.length >= count) break; add(r + pass); }
+  return shuffle(out, rng);   // mix so any slice (a club's five) is varied
+}
+
+/** A deterministic pool of `count` unique club identities (name + 3-letter tag).
+ *  Curated identities first, then procedural adjective+noun combos with a derived,
+ *  de-duplicated tag — so the world can be as deep (or as large) as it needs. */
+export function genClubIdentities(rng: Rng, count: number): { name: string; tag: string }[] {
+  const out: { name: string; tag: string }[] = [];
+  const usedNames = new Set<string>(), usedTags = new Set<string>();
+  for (const c of shuffle([...CLUB_IDENTITIES], rng)) {
+    if (out.length >= count) break;
+    out.push(c); usedNames.add(c.name); usedTags.add(c.tag);
+  }
+  const adj = shuffle([...CLUB_ADJ], rng), nouns = shuffle([...CLUB_NOUN], rng);
+  for (let i = 0; out.length < count && i < adj.length * nouns.length; i++) {
+    const a = adj[i % adj.length], n = nouns[Math.floor(i / adj.length) % nouns.length];
+    const name = `${a} ${n}`;
+    if (usedNames.has(name)) continue;
+    const cands = [a[0] + n.slice(0, 2), n.slice(0, 3), a.slice(0, 2) + n[0], a[0] + n[0] + n[n.length - 1]].map(s => s.toUpperCase());
+    let tag = cands.find(t => !usedTags.has(t));
+    for (let x = 0; !tag && x < 26; x++) { const t = (a[0] + n[0] + String.fromCharCode(65 + x)).toUpperCase(); if (!usedTags.has(t)) tag = t; }
+    if (!tag) continue;
+    usedNames.add(name); usedTags.add(tag); out.push({ name, tag });
+  }
+  return out;
+}
 
 // A standard comp: two duelists, an initiator, a controller, a sentinel.
 const COMP: Role[] = ['duelist', 'duelist', 'initiator', 'controller', 'sentinel'];
@@ -103,13 +145,10 @@ export interface Club { team: Team; tactics: Tactics; strength: number }
  *  from `seed`. `n` should be even for a clean round-robin. */
 export function makeLeague(seed: number, n = 8): Club[] {
   const rng = new Rng(seed >>> 0);
-  // shuffle identities and handles (Fisher–Yates) so each seed yields a fresh world
-  const ids = [...CLUB_IDENTITIES];
-  const pool = [...HANDLES];
-  const shuffle = <T,>(a: T[]) => { for (let i = a.length - 1; i > 0; i--) { const j = rng.int(0, i); [a[i], a[j]] = [a[j], a[i]]; } };
-  shuffle(ids); shuffle(pool);
-
-  const chosen = ids.slice(0, n);
+  // procedurally generate identities + a handle pool sized to the league, so a
+  // world of any depth (two divisions or the full rank ladder) generates cleanly
+  const chosen = genClubIdentities(rng, n);
+  const pool = genHandles(rng, n * 5 + 8);
   return chosen.map((identity, i) => {
     // strength descends across the field with a little noise — a hierarchy, not a ladder
     const tier = 1 - i / (n - 1);                  // 1.0 (top) .. 0 (bottom)

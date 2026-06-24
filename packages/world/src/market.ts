@@ -2,8 +2,7 @@
 // price. Deterministic: the free-agent pool is a function of (seed, season).
 import { Rng } from '@ace/engine';
 import type { Player, Role, PatchState } from '@ace/shared';
-import { makePlayer } from './clubs.js';
-import { HANDLES } from './names.js';
+import { makePlayer, genHandles } from './clubs.js';
 import { overall } from './develop.js';
 import { scoutedPotential } from './scouting.js';
 
@@ -36,14 +35,12 @@ const ROLE_SPREAD: Role[] = ['duelist', 'duelist', 'initiator', 'controller', 's
  *  to the occasional gem. */
 export function freeAgents(seed: number, exclude: Set<string>, count = 16): Player[] {
   const rng = new Rng(seed >>> 0);
-  const pool = HANDLES.filter(h => !exclude.has(h));
-  for (let i = pool.length - 1; i > 0; i--) { const j = rng.int(0, i); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const pool = genHandles(rng, count, exclude);   // unique handles, disjoint from the league
   const out: Player[] = [];
-  const n = Math.min(count, pool.length);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < count; i++) {
     const role = ROLE_SPREAD[i % ROLE_SPREAD.length];
     const strength = Math.max(0.2, Math.min(0.92, rng.range(0.28, 0.78) + (rng.chance(0.15) ? 0.2 : 0)));  // a few gems
-    out.push(makePlayer(rng, role, pool.pop()!, 'fa', strength));
+    out.push(makePlayer(rng, role, pool[i], 'fa', strength));
   }
   return out;
 }
