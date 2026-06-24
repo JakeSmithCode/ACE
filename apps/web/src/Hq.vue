@@ -33,6 +33,9 @@ function zoneOf(rank: number): '' | 'promo' | 'releg' {
   if (viewDiv.value < DIVS - 1 && rank > DIV_SIZE - PROMO) return 'releg';  // bottom of a higher tier → down
   return '';
 }
+// on a deep ladder, only show off-season moves touching your tier (in or out) —
+// the rest of the ladder churns, but these are the clubs you'll face
+const nearMoves = computed(() => lastMoves.value.filter(m => m.from === myDivision.value || m.to === myDivision.value));
 
 const hqTab = ref<'season' | 'squad' | 'market'>('season');
 
@@ -130,8 +133,11 @@ onUnmounted(() => { viewer?.destroy(); });
         {{ divOf(myClub) < lastMoves.find(m => m.club === myClub)!.from ? `▲ Promoted to ${DIV_NAMES[divOf(myClub)]}!` : `▼ Relegated to ${DIV_NAMES[divOf(myClub)]}` }}
       </div>
       <div class="hq-prlist">
-        <span class="hq-prh">Off-season</span>
-        <span v-for="m in lastMoves" :key="m.club" class="hq-prmove" :class="m.to < m.from ? 'up' : 'down'">{{ tagOf(m.club) }} {{ m.to < m.from ? '▲' : '▼' }}</span>
+        <span class="hq-prh">{{ DIV_NAMES[myDivision] }} in &amp; out</span>
+        <span v-for="m in nearMoves" :key="m.club" class="hq-prmove" :class="m.to < m.from ? 'up' : 'down'">
+          {{ tagOf(m.club) }} {{ m.to < m.from ? '▲' : '▼' }}{{ m.to === myDivision ? ' in' : ' out' }}
+        </span>
+        <span v-if="!nearMoves.length" class="hq-prmove">no changes to your tier</span>
       </div>
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
@@ -171,8 +177,12 @@ onUnmounted(() => { viewer?.destroy(); });
       <!-- standings (per division, with a tier toggle) -->
       <div class="hq-panel hq-table">
         <h3><span class="b"></span>Standings
-          <span class="hq-divtabs">
-            <button v-for="d in DIVS" :key="d" :class="{ on: viewDiv === d - 1, mine: myDivision === d - 1 }" @click="viewDiv = d - 1">{{ DIV_NAMES[d - 1] }}</button>
+          <span class="hq-divsel">
+            <button class="hq-divstep" :disabled="viewDiv === 0" @click="viewDiv--" title="higher tier">▲</button>
+            <select v-model.number="viewDiv">
+              <option v-for="(name, d) in DIV_NAMES" :key="d" :value="d">{{ name }}{{ d === myDivision ? ' — you' : '' }}</option>
+            </select>
+            <button class="hq-divstep" :disabled="viewDiv === DIVS - 1" @click="viewDiv++" title="lower tier">▼</button>
           </span>
         </h3>
         <div class="hq-trow hq-thead">
@@ -202,7 +212,7 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-clubmeta">
               <div class="hq-clubname">{{ nameOf(myClub) }}<span v-if="titleCount(myClub)" class="hq-titles" :title="`${titleCount(myClub)} championship${titleCount(myClub) > 1 ? 's' : ''}`">{{ '🏆'.repeat(Math.min(5, titleCount(myClub))) }}<i v-if="titleCount(myClub) > 5">×{{ titleCount(myClub) }}</i></span></div>
               <div class="hq-clubsub">
-                <span class="hq-tier" :class="'t' + myDivision">{{ DIV_NAMES[myDivision] }}</span>
+                <span class="hq-tier" :class="{ top: myDivision === 0, semi: myDivision === 1 }">{{ DIV_NAMES[myDivision] }}</span>
                 <span class="hq-pos">{{ w.rankOf(myClub) }}<sup>{{ ['st','nd','rd'][w.rankOf(myClub)-1] || 'th' }}</sup></span> of {{ DIV_SIZE }}
                 <span v-if="myStanding">· {{ myStanding.won }}W {{ myStanding.lost }}L · {{ myStanding.diff >= 0 ? '+' : '' }}{{ myStanding.diff }} diff</span>
               </div>

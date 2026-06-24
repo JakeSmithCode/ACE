@@ -470,21 +470,21 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
 .hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}
 
-/* divisions: standings tier toggle, promo/relegation zones, tier badge */
-.hq-divtabs{margin-left:auto;display:inline-flex;gap:3px}
-.hq-divtabs button{background:transparent;border:1px solid var(--line-2);color:var(--muted-2);font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;cursor:pointer}
-.hq-divtabs button:hover{color:var(--text)}
-.hq-divtabs button.on{background:var(--bg-3);color:var(--text);border-color:var(--brand)}
-.hq-divtabs button.mine{border-bottom:2px solid var(--gold)}
+/* divisions: standings tier selector, promo/relegation zones, tier badge */
+.hq-divsel{margin-left:auto;display:inline-flex;align-items:center;gap:4px}
+.hq-divsel select{background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);font-family:var(--label);font-size:10px;letter-spacing:.04em;text-transform:uppercase;padding:4px 8px;cursor:pointer}
+.hq-divstep{background:transparent;border:1px solid var(--line-2);color:var(--muted-2);font-size:9px;padding:4px 7px;cursor:pointer}
+.hq-divstep:hover:not(:disabled){color:var(--text);border-color:var(--brand)}
+.hq-divstep:disabled{opacity:.35;cursor:default}
 .hq-trow.promo{box-shadow:inset 3px 0 0 var(--win)}
 .hq-trow.releg{box-shadow:inset 3px 0 0 var(--def)}
 .hq-trow.promo.me,.hq-trow.releg.me{box-shadow:inset 3px 0 0 var(--brand)}
 .hq-zonekey{display:flex;gap:16px;padding:9px 8px 2px;font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2)}
 .hq-zonekey span{display:flex;align-items:center;gap:6px}
 .zk{width:9px;height:9px;display:inline-block}.zk.promo{background:var(--win)}.zk.releg{background:var(--def)}
-.hq-tier{font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;padding:1px 6px;margin-right:7px}
-.hq-tier.t0{color:var(--gold);background:rgba(229,181,103,.14)}
-.hq-tier.t1{color:var(--muted);background:var(--bg-3)}
+.hq-tier{font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;padding:1px 6px;margin-right:7px;color:var(--muted);background:var(--bg-3)}
+.hq-tier.top{color:var(--gold);background:rgba(229,181,103,.14)}
+.hq-tier.semi{color:var(--brand);background:rgba(34,211,238,.1)}
 /* promotion/relegation banner */
 .hq-prbanner{display:flex;align-items:center;gap:16px;margin-bottom:16px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--line)}
 .hq-prmine{font-family:var(--display);font-weight:700;font-size:16px;padding:4px 12px}

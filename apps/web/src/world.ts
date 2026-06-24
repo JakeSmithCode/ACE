@@ -17,12 +17,16 @@ import {
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
 
-// a two-tier pyramid: DIVS divisions of DIV_SIZE clubs each. N is the TOTAL.
+// the full rank pyramid: DIVS tiers of DIV_SIZE clubs — the pro leagues at the
+// top, the solo-queue rank ladder below. N is the TOTAL world size. Only YOUR
+// tier is resolved by the full engine; the rest are quick-resolved by strength
+// (cheap + deterministic), so a 110-club world still sims a season in a blink.
+export const DIV_NAMES = ['Premier', 'Challengers', 'Radiant', 'Immortal', 'Ascendant', 'Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze', 'Iron'];
 export const DIV_SIZE = 10;
-export const DIVS = 2;
-export const PROMO = 2;             // clubs promoted/relegated between tiers each season
-export const N = DIV_SIZE * DIVS;   // total clubs in the world (20)
-export const DIV_NAMES = ['Premier', 'Challenger'];
+export const DIVS = DIV_NAMES.length;   // 11
+export const PROMO = 2;                 // clubs promoted/relegated between tiers each season
+export const N = DIV_SIZE * DIVS;       // total clubs in the world (110)
+export const START_TIER = 7;            // you begin mid-table in Gold — a long climb to the Premier
 export const MAP: MapId = 'ascent';
 const RESOLVE_FORKS = 0;            // standings only need the final score (fork-independent)
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
@@ -35,9 +39,9 @@ const ROLE_NEED: Record<string, number> = { duelist: 2, initiator: 1, controller
  *  (`from === -1` a free agent, else the club index selling them). */
 export interface MarketEntry { player: Player; from: number }
 
-// the initial division split: makeLeague descends in strength, so the top
-// DIV_SIZE clubs seed the Premier tier and the rest the Challenger tier.
-const initialDivision = () => Array.from({ length: N }, (_, i) => (i < DIV_SIZE ? 0 : 1));
+// the initial split: makeLeague descends in strength, so the strongest DIV_SIZE
+// clubs seed the Premier, the next the Challengers, on down to Iron at the foot.
+const initialDivision = () => Array.from({ length: N }, (_, i) => Math.min(DIVS - 1, Math.floor(i / DIV_SIZE)));
 const divSchedules = (division: number[]): Matchday[][] =>
   Array.from({ length: DIVS }, (_, d) => divisionSchedule(membersOf(division, d)));
 
@@ -48,7 +52,7 @@ const schedules = shallowRef<Matchday[][]>(divSchedules(division.value));  // on
 const lastMoves = ref<DivMove[]>([]);                // last off-season's promotions/relegations
 const results = ref<MatchResult[]>([]);
 const dayIdx = ref(0);
-const myClub = ref(15);   // start mid-table in the Challenger tier — a club to climb
+const myClub = ref(START_TIER * DIV_SIZE + 5);   // start mid-table in Gold — a club to climb
 const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
@@ -58,8 +62,14 @@ const balances = ref<number[]>(clubs.value.map(c => startingBalance(c.strength))
 const ledger = ref<SeasonLedger | null>(null);
 const leagueHandles = () => new Set(clubs.value.flatMap(c => c.team.players.map(p => p.handle)));
 const marketSeed = () => (seasonSeed.value ^ (season.value * 0x85ebca6b)) >>> 0;
+// on a deep ladder, the transfer board only lists clubs within a tier of you —
+// realistic reach, and a browsable board (you can't sign a Premier star in Iron)
+const marketEligible = () => {
+  const d = division.value[myClub.value];
+  return new Set(clubs.value.map((_, i) => i).filter(i => Math.abs(division.value[i] - d) <= 1));
+};
 const freeAgentPool = shallowRef<Player[]>(freeAgents(marketSeed(), leagueHandles()));  // unowned, mutable
-const listings = shallowRef<{ club: number; playerId: string }[]>(aiListings(clubs.value, myClub.value));  // AI players for sale
+const listings = shallowRef<{ club: number; playerId: string }[]>(aiListings(clubs.value, myClub.value, marketEligible()));  // AI players for sale
 const myListed = ref<Set<string>>(new Set());          // your player ids put up for sale
 const patch = ref<PatchState>(fullPatch(PATCH, ALL_AGENTS));   // the live agent meta
 const metaChanges = ref<MetaChange[]>([]);             // last off-season's patch notes
@@ -144,13 +154,31 @@ function simFixture(fx: { home: number; away: number }, seed: number): MatchResu
   const [hs, as] = simulateMatch(buildInput(fx, seed), nav!, RESOLVE_FORKS).finalScore;
   return { home: fx.home, away: fx.away, score: [hs, as], winner: hs > as ? fx.home : fx.away, seed };
 }
+// distant tiers don't need a full engine sim — resolve them from club strength
+// (deterministic from the fixture seed). The scoreline is plausible, never
+// watched, and keeps a 110-club world fast. Your own tier always full-sims.
+function quickResult(fx: { home: number; away: number }, seed: number): MatchResult {
+  const hs = clubs.value[fx.home].strength, as = clubs.value[fx.away].strength;
+  const rng = new Rng(seed >>> 0);
+  const homeWins = rng.next() < 1 / (1 + Math.exp(-(hs - as) * 6));
+  const gap = Math.abs(hs - as);
+  const loser = Math.max(3, Math.min(11, Math.round(11 - gap * 14 + rng.range(-2, 3))));
+  return homeWins
+    ? { home: fx.home, away: fx.away, score: [13, loser], winner: fx.home, seed }
+    : { home: fx.home, away: fx.away, score: [loser, 13], winner: fx.away, seed };
+}
 function resolveDay() {
   if (done.value || !nav) return;
-  // the whole world advances: resolve this match-day in EVERY division
+  // the whole world advances each match-day: your tier full-sims (watchable),
+  // every other tier is quick-resolved by strength
   const fresh: MatchResult[] = [];
-  for (let d = 0; d < DIVS; d++)
-    schedules.value[d][dayIdx.value].forEach((fx, slot) =>
-      fresh.push(simFixture(fx, fixtureSeed(seasonSeed.value, dayIdx.value, slot + d * 1000))));
+  for (let d = 0; d < DIVS; d++) {
+    const full = d === myDivision.value;
+    schedules.value[d][dayIdx.value].forEach((fx, slot) => {
+      const seed = fixtureSeed(seasonSeed.value, dayIdx.value, slot + d * 1000);
+      fresh.push(full ? simFixture(fx, seed) : quickResult(fx, seed));
+    });
+  }
   results.value = [...results.value, ...fresh];
   dayIdx.value++;
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -171,7 +199,7 @@ function enterPlayoffs() {
 // the off-season: settle EVERY club's books by final rank in its OWN division
 // (the top tier pays more), apply promotion/relegation, then develop every squad
 // and refresh the board. Your authored tactics/comp carry over (ids are stable).
-const divMult = (d: number) => (d === 0 ? 1 : 0.6);   // the top flight earns the bigger sponsor/prize
+const divMult = (d: number) => Math.max(0.18, 1 - d * 0.075);   // each tier down earns less — the Premier is where the money is
 function advanceSeason() {
   if (!done.value) return;
   const bracket = playoffs.value;
@@ -210,7 +238,7 @@ function advanceSeason() {
 }
 function refreshMarket() {
   freeAgentPool.value = freeAgents(marketSeed(), leagueHandles());
-  listings.value = aiListings(clubs.value, myClub.value);
+  listings.value = aiListings(clubs.value, myClub.value, marketEligible());
   myListed.value = new Set();
 }
 function selectClub(i: number) {
@@ -219,7 +247,7 @@ function selectClub(i: number) {
   myTactics.value = clone(clubs.value[i].tactics);
   myRoster.value = [...clubs.value[i].team.players];
   ledger.value = null;
-  listings.value = aiListings(clubs.value, i);
+  listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null;

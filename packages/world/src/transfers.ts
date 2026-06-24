@@ -8,16 +8,19 @@ import type { Club, } from './clubs.js';
 import { overall } from './develop.js';
 import { playerValue } from './market.js';
 
-/** Each AI club lists its most expendable player (lowest value — surplus/ageing)
- *  for sale, so the board always has real players from real teams. */
-export function aiListings(clubs: Club[], myClub: number): { club: number; playerId: string }[] {
-  const out: { club: number; playerId: string }[] = [];
+/** Each eligible AI club lists its most expendable player (lowest value —
+ *  surplus/ageing) for sale, so the board always has real players from real
+ *  teams. `eligible` scopes which clubs list (on a deep ladder, the store passes
+ *  only clubs near your tier); `cap` keeps the board browsable (the priciest
+ *  listings win the slots). */
+export function aiListings(clubs: Club[], myClub: number, eligible?: Set<number>, cap = 30): { club: number; playerId: string }[] {
+  const out: { club: number; playerId: string; v: number }[] = [];
   clubs.forEach((c, i) => {
-    if (i === myClub) return;
+    if (i === myClub || (eligible && !eligible.has(i))) return;
     const p = [...c.team.players].sort((a, b) => playerValue(a) - playerValue(b))[0];
-    out.push({ club: i, playerId: p.id });
+    out.push({ club: i, playerId: p.id, v: playerValue(p) });
   });
-  return out;
+  return out.sort((a, b) => b.v - a.v).slice(0, cap).map(({ club, playerId }) => ({ club, playerId }));
 }
 
 /** Would AI club `i` buy `player` to replace its same-role player? Only if it's

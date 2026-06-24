@@ -33,9 +33,13 @@ export function genClubIdentities(rng: Rng, count: number): { name: string; tag:
     if (out.length >= count) break;
     out.push(c); usedNames.add(c.name); usedTags.add(c.tag);
   }
-  const adj = shuffle([...CLUB_ADJ], rng), nouns = shuffle([...CLUB_NOUN], rng);
-  for (let i = 0; out.length < count && i < adj.length * nouns.length; i++) {
-    const a = adj[i % adj.length], n = nouns[Math.floor(i / adj.length) % nouns.length];
+  // every adjective×noun combo, shuffled, so consecutive clubs (a whole tier)
+  // don't all share a noun — variety across the board
+  const combos: [string, string][] = [];
+  for (const a of CLUB_ADJ) for (const n of CLUB_NOUN) combos.push([a, n]);
+  shuffle(combos, rng);
+  for (let i = 0; out.length < count && i < combos.length; i++) {
+    const [a, n] = combos[i];
     const name = `${a} ${n}`;
     if (usedNames.has(name)) continue;
     const cands = [a[0] + n.slice(0, 2), n.slice(0, 3), a.slice(0, 2) + n[0], a[0] + n[0] + n[n.length - 1]].map(s => s.toUpperCase());
