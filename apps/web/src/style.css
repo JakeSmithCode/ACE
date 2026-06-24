@@ -180,6 +180,24 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-time input[type=range]{width:64px;accent-color:var(--gold)}
 .pe-time i{font-style:normal;color:var(--gold);font-variant-numeric:tabular-nums;min-width:30px}
 .pe-tk{color:var(--text)}
+/* utility lineups */
+.pe-util-r{pointer-events:none}
+.pe-util-r.smoke{fill:rgba(220,225,235,.16);stroke:rgba(220,225,235,.5);stroke-width:1.5;stroke-dasharray:5 5}
+.pe-util-r.flash{fill:rgba(229,181,103,.13);stroke:rgba(229,181,103,.6);stroke-width:1.5;stroke-dasharray:5 5}
+.pe-util-r.recon{fill:rgba(34,211,238,.11);stroke:rgba(34,211,238,.55);stroke-width:1.5;stroke-dasharray:5 5}
+.pe-util{cursor:grab}.pe-util:active{cursor:grabbing}
+.pe-util .pe-util-c{stroke-width:2.5;fill:#0a0e13}
+.pe-util.smoke .pe-util-c{stroke:#dce1eb}.pe-util.flash .pe-util-c{stroke:var(--gold)}.pe-util.recon .pe-util-c{stroke:var(--brand)}
+.pe-util-ic{font-size:11px;text-anchor:middle;fill:#dce1eb}
+.pe-util.flash .pe-util-ic{fill:var(--gold)}.pe-util.recon .pe-util-ic{fill:var(--brand)}
+.pe-util-head{display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:9px;border-top:1px solid var(--line);font-family:var(--label);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pe-add{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.04em;padding:3px 9px;cursor:pointer;text-transform:none}
+.pe-add:hover{color:var(--text)}
+.pe-add.smoke:hover{border-color:#dce1eb}.pe-add.flash:hover{border-color:var(--gold)}.pe-add.recon:hover{border-color:var(--brand)}
+.pe-row.util{gap:9px}
+.pe-util-tag{font-family:var(--label);font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;min-width:48px}
+.pe-util-tag.smoke{color:#dce1eb}.pe-util-tag.flash{color:var(--gold)}.pe-util-tag.recon{color:var(--brand)}
+.pe-row.util select{background:var(--bg);border:1px solid var(--line-2);color:var(--text);padding:3px 5px;font-family:var(--label);font-size:11px}
 .pe-link{stroke:var(--gold);stroke-width:2.4;stroke-dasharray:7 7;opacity:.8}
 .pe-mark{cursor:grab}.pe-mark:active{cursor:grabbing}
 .pe-mark .pe-dot{stroke-width:3}

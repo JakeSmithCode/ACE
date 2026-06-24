@@ -99,6 +99,21 @@ export interface PlayerPlan {
 }
 export interface Play {
   plans: PlayerPlan[];                            // one entry per player on this side
+  lineups?: Lineup[];                             // authored utility (smokes / flashes / recon)
+}
+
+/** An authored utility lineup: a caster throws a smoke/flash/recon to land at
+ *  `at` at round-time `t`. It feeds the same smoke/pulse geometry the procedural
+ *  utility uses (reach/duration still scale with the caster's utility stat), and
+ *  *replaces* that caster's automatic cast — authoring is taking manual control.
+ *  Smokes blind the enemy through the cloud; flash/recon grant the first shot in
+ *  an area-window. Defensive by side (it lives on `Tactics.defense.play`). */
+export type UtilKind = 'smoke' | 'flash' | 'recon';
+export interface Lineup {
+  player: string;     // caster (player id)
+  kind: UtilKind;
+  at: Vec2;           // where it lands
+  t: number;          // when it deploys (0..1)
 }
 
 /** Cap on authored waypoints per route. A play is a *sketch*, not turn-by-turn

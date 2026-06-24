@@ -8,7 +8,7 @@
 // not micro). Mutations clone-and-emit so the parent re-sims.
 import { ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
-import type { Play, PlayerPlan, RotateTrigger, Vec2, Team } from '@ace/shared';
+import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team } from '@ace/shared';
 
 const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; atkSpawn: Vec2 }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
@@ -43,8 +43,8 @@ function toImg(clientX: number, clientY: number): Vec2 {
   return [Math.round(x), Math.round(y)];
 }
 
-// --- dragging markers (hold / rotate target / route waypoint / facing) ----
-type Which = 'pos' | 'rotate' | 'wp' | 'face';
+// --- dragging markers (hold / rotate target / route waypoint / facing / util) ----
+type Which = 'pos' | 'rotate' | 'wp' | 'face' | 'util';
 let drag: { player: string; which: Which; tgt: Target; idx: number; from: Vec2; moved: boolean } | null = null;
 
 function startDrag(player: string, which: Which, tgt: Target, idx: number, ev: PointerEvent) {
@@ -58,6 +58,7 @@ function onMove(ev: PointerEvent) {
   const pt = toImg(ev.clientX, ev.clientY);
   const d = drag;
   if (Math.hypot(pt[0] - d.from[0], pt[1] - d.from[1]) > 12) d.moved = true;
+  if (d.which === 'util') { commit(p => { const ln = p.lineups?.[d.idx]; if (ln) ln.at = pt; }); return; }
   commit(p => {
     const pl = p.plans.find(q => q.player === d.player);
     if (!pl) return;
@@ -66,6 +67,13 @@ function onMove(ev: PointerEvent) {
     else if (d.which === 'face') { if (pt[0] !== pl.pos[0] || pt[1] !== pl.pos[1]) pl.face = pt; }
     else if (d.which === 'wp') { const arr = d.tgt === 'hold' ? pl.route : pl.rotate?.route; if (arr) arr[d.idx] = pt; }
   });
+}
+// util-lineup markers drag independently of a player plan (they key off index)
+function startDragUtil(idx: number, ev: PointerEvent) {
+  ev.stopPropagation();
+  drag = { player: '', which: 'util', tgt: 'hold', idx, from: toImg(ev.clientX, ev.clientY), moved: false };
+  (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
+  ev.preventDefault();
 }
 function endDrag() {
   if (drag && drag.which === 'wp' && !drag.moved) removeWaypoint(drag.player, drag.tgt, drag.idx); // click = remove
@@ -141,6 +149,26 @@ function setTime(player: string, t: number) {
 // runs hold → waypoints → rotate target.
 const holdPts = (pl: PlayerPlan) => [...(pl.route ?? []), pl.pos].map(p => p.join(',')).join(' ');
 const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), pl.rotate.pos].map(p => p.join(',')).join(' ') : '';
+
+// --- utility lineups ------------------------------------------------------
+function addLineup(kind: UtilKind) {
+  commit(p => { (p.lineups ??= []).push({ player: props.team.players[0].id, kind, at: [460, 380], t: 0.25 }); });
+}
+function removeLineup(i: number) {
+  commit(p => { p.lineups?.splice(i, 1); if (p.lineups && p.lineups.length === 0) delete p.lineups; });
+}
+function setUtilCaster(i: number, player: string) {
+  commit(p => { if (p.lineups?.[i]) p.lineups[i].player = player; });
+}
+function setUtilTime(i: number, t: number) {
+  commit(p => { if (p.lineups?.[i]) p.lineups[i].t = t; });
+}
+// display radius mirrors the engine's reach (base + util-scaled), using the
+// caster's utility stat with a mid mastery factor so the circle reads true-ish.
+function utilRadius(ln: { player: string; kind: UtilKind }): number {
+  const u = ((props.team.players.find(q => q.id === ln.player)?.attr.utility ?? 50) / 100) * 0.9;
+  return ln.kind === 'smoke' ? 58 + 46 * u : 84 + 70 * u;
+}
 </script>
 
 <template>
@@ -149,6 +177,10 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
          @pointermove="onMove" @pointerup="endDrag" @pointerleave="endDrag">
       <image :href="mapUrl" x="0" y="0" width="1000" height="1000" preserveAspectRatio="none" />
       <rect x="0" y="0" width="1000" height="1000" class="pe-scrim" @pointerdown="onBg" />
+
+      <!-- utility lineups: translucent reach circles (drawn low, click-through) -->
+      <circle v-for="(ln, i) in (play.lineups || [])" :key="'uc' + i"
+              :cx="ln.at[0]" :cy="ln.at[1]" :r="utilRadius(ln)" class="pe-util-r" :class="ln.kind" />
 
       <!-- rotation paths: hold → (waypoints) → rotate target -->
       <g v-for="pl in play.plans" :key="'rp' + pl.player">
@@ -192,6 +224,13 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
               class="pe-face-line" :class="[side, { set: pl.face }]" />
         <circle :cx="faceNub(pl)[0]" :cy="faceNub(pl)[1]" r="7" class="pe-mark pe-face-nub" :class="[side, { set: pl.face }]"
                 @pointerdown="startDrag(pl.player, 'face', 'hold', 0, $event)" />
+      </g>
+
+      <!-- utility lineup centers (draggable) -->
+      <g v-for="(ln, i) in (play.lineups || [])" :key="'um' + i" class="pe-mark pe-util" :class="ln.kind"
+         :transform="`translate(${ln.at[0]},${ln.at[1]})`" @pointerdown="startDragUtil(i, $event)">
+        <circle r="9" class="pe-util-c" />
+        <text class="pe-util-ic" y="3.5">{{ ln.kind === 'smoke' ? '◍' : ln.kind === 'flash' ? '✸' : '◉' }}</text>
       </g>
     </svg>
 
@@ -238,6 +277,25 @@ const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? [
             {{ isRouting(pl.player, 'rotate') ? 'done ↻' : 'route ↻' }}<i v-if="routeLen(pl.player, 'rotate')">{{ routeLen(pl.player, 'rotate') }}</i>
           </button>
         </template>
+      </div>
+
+      <div class="pe-util-head">
+        <span>Utility lineups</span>
+        <button class="pe-add smoke" @click="addLineup('smoke')">+ smoke</button>
+        <button class="pe-add flash" @click="addLineup('flash')">+ flash</button>
+        <button class="pe-add recon" @click="addLineup('recon')">+ recon</button>
+      </div>
+      <div v-for="(ln, i) in (play.lineups || [])" :key="'ur' + i" class="pe-row util" :class="ln.kind">
+        <span class="pe-util-tag" :class="ln.kind">{{ ln.kind }}</span>
+        <select :value="ln.player" @change="setUtilCaster(i, ($event.target as HTMLSelectElement).value)">
+          <option v-for="o in team.players" :key="o.id" :value="o.id">{{ o.handle }}</option>
+        </select>
+        <span class="pe-time">at
+          <input type="range" min="0.05" max="0.9" step="0.05" :value="ln.t"
+                 @input="setUtilTime(i, +($event.target as HTMLInputElement).value)" />
+          <i>{{ Math.round(ln.t * 100) }}%</i>
+        </span>
+        <button class="pe-rt-clear" @click="removeLineup(i)">remove</button>
       </div>
     </div>
   </div>

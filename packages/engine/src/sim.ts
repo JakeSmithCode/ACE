@@ -453,7 +453,13 @@ function simulateRound(
   const smokes: Smoke[] = [];
   const pulses: Pulse[] = [];
   const choke = lerp(A.mid, sitePt, 0.55);
+  // authored utility lineups (defensive): a caster's lineup REPLACES their auto
+  // cast, so collect those handles to skip below, then add the lineups verbatim.
+  const lineups = defTac.defense.play?.lineups ?? [];
+  const handleOfId = new Map(defTeam.players.map(p => [p.id, p.handle] as const));
+  const authoredCasters = new Set(lineups.map(l => handleOfId.get(l.player)).filter(Boolean) as string[]);
   for (const ag of agents) {
+    if (authoredCasters.has(ag.handle)) continue;   // this player throws their authored lineup instead
     const isAtk = ag.side === attacker;
     const u = (ag.p.attr.utility / 100) * ag.utilFactor;
     if (ag.agentRole === 'controller') {
@@ -469,6 +475,20 @@ function simulateRound(
       pulses.push({ side: ag.side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash' });
     }
+  }
+  // authored lineups: deterministic (no rng), reach/duration still express the
+  // caster's utility. A smoke blinds attackers through it; a flash/recon grants
+  // the defender the first shot in its window.
+  for (const ln of lineups) {
+    const h = handleOfId.get(ln.player);
+    const caster = agents.find(a => a.handle === h);
+    const u = caster ? (caster.p.attr.utility / 100) * caster.utilFactor : 0.5;
+    if (ln.kind === 'smoke') {
+      smokes.push({ side: defender, c: ln.at, r: SMOKE_R + SMOKE_R_UTIL * u, t0: ln.t, t1: ln.t + SMOKE_DUR + SMOKE_DUR_UTIL * u });
+    } else {
+      pulses.push({ side: defender, c: ln.at, r: PULSE_R + PULSE_R_UTIL * u, t0: ln.t, t1: ln.t + PULSE_DUR + PULSE_DUR_UTIL * u });
+    }
+    if (h) events.push({ t: ln.t, kind: 'ability', agent: h, ability: ln.kind });
   }
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
