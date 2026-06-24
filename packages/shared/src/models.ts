@@ -47,6 +47,7 @@ export interface Tactics {
     tempo: number;      //  0 slow default (take map control) .. 1 fast execute (rush)
     entry?: string;     // player id who leads the push (defaults to the best opening duelist)
     lurk?: string;      // player id who peels off to lurk a flank for picks + late info
+    play?: Play;        // authored execute: per-player routes/holds + lineups; forces the site
   };
   defense: {
     read: number;       // -1 stack B · 0 spread · +1 stack A  (pre-round site read)
@@ -100,6 +101,7 @@ export interface PlayerPlan {
 export interface Play {
   plans: PlayerPlan[];                            // one entry per player on this side
   lineups?: Lineup[];                             // authored utility (smokes / flashes / recon)
+  site?: 'A' | 'B';                               // attack plays: which site this execute targets (forces the round site)
 }
 
 /** An authored utility lineup: a caster throws a smoke/flash/recon to land at

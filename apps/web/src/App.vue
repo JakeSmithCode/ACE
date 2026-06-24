@@ -12,9 +12,9 @@ const ATK_SPAWN: [number, number] = [485, 60];   // Ascent attacker spawn — th
 const FORKS = 50;                 // fewer than the CLI's 120 — snappier live re-sim
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
-// a starter DEFENSE play to drop a team into the editor with: one player baits
-// mid, two rotate to A when he dies (a "kill point"). The author then drags.
-function starterPlay(t: Team): Play {
+// a starter DEFENSE play: one player baits mid, two rotate to A when he dies
+// (a "kill point"). The author then drags.
+function starterDefense(t: Team): Play {
   const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
   const bait = p3;
   return { plans: [
@@ -25,30 +25,43 @@ function starterPlay(t: Team): Play {
     { player: p4, pos: [270, 793] },                                         // B anchor
   ] };
 }
+// a starter ATTACK execute: four hit A, one lurks mid, with an entry smoke.
+function starterAttack(t: Team): Play {
+  const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
+  return { site: 'A', plans: [
+    { player: p0, pos: [310, 170] },                                         // entry onto A
+    { player: p1, pos: [345, 210] },
+    { player: p2, pos: [305, 256] },
+    { player: p3, pos: [420, 330] },                                         // trailer / flex
+    { player: p4, pos: [500, 470] },                                         // lurk mid
+  ], lineups: [ { player: p2, kind: 'smoke', at: [300, 120], t: 0.25 } ] };  // smoke deep A
+}
+const starterFor = (t: Team, side: Side): Play => (side === 'attack' ? starterAttack(t) : starterDefense(t));
+const playRef = (i: number, side: Side) => side === 'attack' ? tactics[i].attack : tactics[i].defense;
 
+type Side = 'attack' | 'defense';
 const host = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const score = ref<[number, number]>([0, 0]);
 const teams: [Team, Team] = [NOCTURNE, MERIDIAN];
 const seed = ref(42);
 const tactics = reactive<[Tactics, Tactics]>([clone(NCT_TACTICS), clone(MRD_TACTICS)]);
-const authoring = ref<number | null>(null);   // which team's defense play is open in the drag editor
+const authoring = ref<{ team: number; side: Side } | null>(null);   // which play is open in the editor
+const isOpen = (i: number, side: Side) => authoring.value?.team === i && authoring.value?.side === side;
 
-// open/close the drag editor for team i; seed a starter play the first time
-function toggleAuthor(i: number) {
-  if (authoring.value === i) { authoring.value = null; return; }
-  if (!tactics[i].defense.play) tactics[i].defense.play = starterPlay(teams[i]);
-  authoring.value = i;
+// open/close the editor for a team's attack OR defense play; seed a starter the first time
+function toggleAuthor(i: number, side: Side) {
+  if (isOpen(i, side)) { authoring.value = null; return; }
+  if (!playRef(i, side).play) playRef(i, side).play = starterFor(teams[i], side);
+  authoring.value = { team: i, side };
 }
-// clear the authored play → team falls back to the procedural read
-function clearPlay(i: number) {
-  tactics[i].defense.play = undefined;
-  if (authoring.value === i) authoring.value = null;
+function clearPlay(i: number, side: Side) {
+  playRef(i, side).play = undefined;
+  if (isOpen(i, side)) authoring.value = null;
   schedule();
 }
-// the editor emitted a new Play (drag / kill-point edit) → store + re-sim
-function onPlay(i: number, play: Play) {
-  tactics[i].defense.play = play;
+function onPlay(i: number, side: Side, play: Play) {
+  playRef(i, side).play = play;
   schedule();
 }
 
@@ -118,33 +131,32 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
               <option :value="undefined">— none —</option>
               <option v-for="p in teams[i].players" :key="p.id" :value="p.id">{{ p.handle }}</option>
             </select>
-            <label>Defense play</label>
+            <label>Plays</label>
             <div class="ed-play">
-              <button class="ed-author" :class="{ on: authoring === i }" @click="toggleAuthor(i)">
-                {{ authoring === i ? '✎ editing…' : tactics[i].defense.play ? '✎ edit play' : '✎ author play' }}
-              </button>
-              <button v-if="tactics[i].defense.play" class="ed-clear" @click="clearPlay(i)">clear</button>
-              <span v-else class="ed-proc">procedural read</span>
+              <button class="ed-author" :class="{ on: isOpen(i, 'attack'), set: tactics[i].attack.play }" @click="toggleAuthor(i, 'attack')">✎ attack</button>
+              <button class="ed-author" :class="{ on: isOpen(i, 'defense'), set: tactics[i].defense.play }" @click="toggleAuthor(i, 'defense')">✎ defense</button>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="authoring !== null" class="ed-canvas">
+      <div v-if="authoring" class="ed-canvas">
         <div class="ed-canvas-head">
-          <span class="ed-tag" :class="authoring === 0 ? 'att' : 'def'">{{ teams[authoring].tag }}</span>
-          defense play — drag to place · <b>{{ teams[authoring].name }}</b> defending
+          <span class="ed-tag" :class="authoring.team === 0 ? 'att' : 'def'">{{ teams[authoring.team].tag }}</span>
+          {{ authoring.side }} play — drag to place · <b>{{ teams[authoring.team].name }}</b> {{ authoring.side === 'attack' ? 'attacking' : 'defending' }}
+          <button class="ed-clear" @click="clearPlay(authoring.team, authoring.side)">clear play</button>
           <button class="ed-close" @click="authoring = null">done</button>
         </div>
         <PlayEditor
-          :key="authoring"
-          :team="teams[authoring]"
+          :key="`${authoring.team}-${authoring.side}`"
+          :team="teams[authoring.team]"
           :map-url="`/${MAP}.png`"
-          :side="authoring === 0 ? 'att' : 'def'"
-          :play="tactics[authoring].defense.play!"
+          :side="authoring.team === 0 ? 'att' : 'def'"
+          :mode="authoring.side"
+          :play="playRef(authoring.team, authoring.side).play!"
           :atk-spawn="ATK_SPAWN"
           :nav="nav!"
-          @update="(p) => onPlay(authoring!, p)"
+          @update="(p) => onPlay(authoring!.team, authoring!.side, p)"
         />
       </div>
     </div>

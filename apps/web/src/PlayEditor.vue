@@ -11,7 +11,7 @@ import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
 import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; atkSpawn: Vec2; nav: Navmesh }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
 
 // --- walkability feedback: flag holds/waypoints in a wall and route segments
@@ -50,11 +50,16 @@ const routeLen = (id: string, tgt: Target) => routeArr(planOf(id), tgt).length;
 // (the default angle, when unset, points at the attacker spawn — as the engine does)
 const FACE_LEN = 58;
 function faceNub(pl: PlayerPlan): Vec2 {
-  const tgt = pl.face ?? props.atkSpawn;
-  let dx = tgt[0] - pl.pos[0], dy = tgt[1] - pl.pos[1];
+  // default angle: defenders watch toward the attacker spawn; attackers watch
+  // forward, away from it (their push direction) — matching the engine.
+  let dx: number, dy: number;
+  if (pl.face) { dx = pl.face[0] - pl.pos[0]; dy = pl.face[1] - pl.pos[1]; }
+  else if (props.mode === 'attack') { dx = pl.pos[0] - props.atkSpawn[0]; dy = pl.pos[1] - props.atkSpawn[1]; }
+  else { dx = props.atkSpawn[0] - pl.pos[0]; dy = props.atkSpawn[1] - pl.pos[1]; }
   const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
   return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
 }
+function setSite(s: 'A' | 'B') { commit(p => { p.site = s; }); }
 
 function commit(mut: (p: Play) => void) {
   const next: Play = JSON.parse(JSON.stringify(props.play));   // cheap (5 plans); avoids mutating the prop
@@ -287,10 +292,21 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
     </svg>
 
     <div class="pe-list">
+      <div v-if="mode === 'attack'" class="pe-site">
+        Execute site
+        <button :class="{ on: (play.site ?? 'A') === 'A' }" @click="setSite('A')">A</button>
+        <button :class="{ on: play.site === 'B' }" @click="setSite('B')">B</button>
+        <span class="pe-site-note">forces the round to this site</span>
+      </div>
       <div class="pe-hint" v-if="routing">
         Laying <b>{{ handleOf(routing.player) }}</b>'s {{ routing.tgt === 'rotate' ? 'rotation' : 'setup' }} path
         (<b :class="{ full: routeLen(routing.player, routing.tgt) >= CAP }">{{ routeLen(routing.player, routing.tgt) }}/{{ CAP }}</b>) —
         click the map to drop waypoints, drag to move, click a point to remove.
+      </div>
+      <div class="pe-hint" v-else-if="mode === 'attack'">
+        Drag dots to place the <b>execute</b> — where each attacker ends up; aim the nub at what they <b>watch</b>.
+        <b>route</b> = draw the exact path in (unrouted = auto-pathed); <b>kill point</b> = a lurk that pushes (↻)
+        on a death, contact, or the clock. Add <b>lineups</b> to smoke/flash the site. Up to {{ CAP }} waypoints each.
       </div>
       <div class="pe-hint" v-else>
         Drag dots to place defenders; drag the small nub to aim what they <b>watch</b>. <b>route</b> = draw the path

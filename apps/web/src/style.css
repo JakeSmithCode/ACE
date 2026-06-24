@@ -144,6 +144,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-author{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:11px;letter-spacing:.04em;padding:5px 10px;cursor:pointer;text-transform:none}
 .ace-editor .ed-author:hover{color:var(--text);border-color:var(--brand)}
 .ace-editor .ed-author.on{color:var(--bg);background:var(--brand);border-color:var(--brand)}
+.ace-editor .ed-author.set:not(.on){border-color:var(--brand);color:var(--text)}
+.ace-editor .ed-author.set:not(.on)::after{content:"●";margin-left:5px;color:var(--brand);font-size:8px;vertical-align:middle}
+.pe-site{display:flex;align-items:center;gap:7px;font-family:var(--label);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-bottom:8px;margin-bottom:2px;border-bottom:1px solid var(--line)}
+.pe-site button{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--display);font-weight:700;font-size:14px;width:30px;height:26px;cursor:pointer}
+.pe-site button.on{background:var(--att);border-color:var(--att);color:var(--bg)}
+.pe-site-note{text-transform:none;letter-spacing:0;color:var(--muted-2);font-size:10px}
 .ace-editor .ed-clear{background:transparent;border:none;color:var(--muted-2);font-family:var(--label);font-size:10px;letter-spacing:.06em;cursor:pointer;text-transform:uppercase}
 .ace-editor .ed-clear:hover{color:var(--def)}
 .ace-editor .ed-proc{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--muted-2);text-transform:none}

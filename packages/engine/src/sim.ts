@@ -1,5 +1,5 @@
 import type {
-  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState,
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState, RotateTrigger,
 } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
@@ -65,6 +65,14 @@ function topAgent(p: Player): string {
 /** Default entry = the team's best opening duelist (entry attr, id tiebreak). */
 function bestEntry(team: Team): string {
   return [...team.players].sort((a, b) => b.attr.entry - a.attr.entry || (a.id < b.id ? -1 : 1))[0].id;
+}
+
+/** A kill-point trigger with a death's player id resolved to a handle (the form
+ *  the engine fires on). Returns null if the named teammate doesn't exist. */
+type ResolvedTrig = { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number };
+function resolveTrig(trigger: RotateTrigger, byId: Map<string, Player>): ResolvedTrig | null {
+  if (trigger.kind === 'death') { const h = byId.get(trigger.player)?.handle; return h ? { kind: 'death', handle: h } : null; }
+  return trigger;
 }
 
 function addLoadouts(into: Map<string, Loadout>, team: Team, comp: Comp | undefined, patch: PatchState): void {
@@ -332,9 +340,10 @@ function simulateRound(
     '1': pistol ? 'pistol' : decideBuy(creds['1'], creds['0'], lossStreak['1']),
   };
 
-  // attackers pick a site, weighted by their plan's site bias
+  // attackers pick a site, weighted by their plan's site bias — unless an
+  // authored attack play declares the site it executes (then that's forced).
   const pA = Math.max(0.08, Math.min(0.92, 0.5 + atkTac.attack.siteBias * 0.42));
-  const site: 'A' | 'B' = rng.chance(pA) ? 'A' : 'B';
+  const site: 'A' | 'B' = atkTac.attack.play?.site ?? (rng.chance(pA) ? 'A' : 'B');
   const sitePt = A.sites[site];
   const otherPt = A.sites[site === 'A' ? 'B' : 'A'];
 
@@ -353,26 +362,55 @@ function simulateRound(
   // attackers: stack at spawn, execute the chosen site. Tempo sets the pace —
   // a fast hit reaches site sooner; a slow default arrives later (more map control).
   const atkSpeed = 0.8 + atkTac.attack.tempo * 0.5;
-  atkTeam.players.forEach(p => {
-    const isLurk = p.id === lurkId;
-    const isEntry = !isLurk && p.id === entryId;
-    const spawn = jitter(rng, A.atkSpawn, 22);
-    const goal = jitter(rng, isLurk ? lurkPt : sitePt, isLurk ? 30 : 38);
-    const path = pathfind(nav, spawn, goal);
-    const lo = loadouts.get(p.handle)!;
-    agents.push({
-      p, side: attacker, handle: p.handle, path, departT: 0,
-      // the entry leads (15% faster); the lurker peels off at normal pace
-      arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
-      alive: true, deathT: null, deathPos: null,
-      weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
-      // the lurker holds toward the fight (catches unaware rotators); others push to site
-      holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-      exposedUntil: -1, rotatePlan: null,
-      form: form.get(p.handle) ?? 0, holdBonus: 0,
-      agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+  if (atkTac.attack.play) {
+    // AUTHORED execute: each attacker walks an authored route to a placed spot,
+    // watches an authored angle, and can carry a push trigger (death/contact/time
+    // — e.g. a lurk that flanks on a teammate's death). Like authored defenders,
+    // an unrouted attacker is A*'d to its spot; a routed one is walked verbatim.
+    const byIdA = new Map(atkTeam.players.map(p => [p.id, p] as const));
+    atkTeam.players.forEach((p, i) => {
+      const plan = atkTac.attack.play!.plans.find(q => q.player === p.id);
+      const pos = plan ? plan.pos : sitePt;                 // unplanned players push the site
+      const lo = loadouts.get(p.handle)!;
+      const spawn: Vec2 = [A.atkSpawn[0] + (i - 2) * 14, A.atkSpawn[1]];  // deterministic spread, no rng
+      const route = plan?.route?.length ? plan.route : null;
+      const path = route ? [spawn, ...route, pos] : pathfind(nav, spawn, pos);
+      const isEntry = p.id === entryId;
+      const rt = plan?.rotate, trig = rt ? resolveTrig(rt.trigger, byIdA) : null;
+      agents.push({
+        p, side: attacker, handle: p.handle, path, departT: 0,
+        arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
+        alive: true, deathT: null, deathPos: null,
+        weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
+        holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
+        exposedUntil: -1,
+        rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
+        form: form.get(p.handle) ?? 0, holdBonus: 0,
+        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+      });
     });
-  });
+  } else {
+    atkTeam.players.forEach(p => {
+      const isLurk = p.id === lurkId;
+      const isEntry = !isLurk && p.id === entryId;
+      const spawn = jitter(rng, A.atkSpawn, 22);
+      const goal = jitter(rng, isLurk ? lurkPt : sitePt, isLurk ? 30 : 38);
+      const path = pathfind(nav, spawn, goal);
+      const lo = loadouts.get(p.handle)!;
+      agents.push({
+        p, side: attacker, handle: p.handle, path, departT: 0,
+        // the entry leads (15% faster); the lurker peels off at normal pace
+        arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
+        alive: true, deathT: null, deathPos: null,
+        weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
+        // the lurker holds toward the fight (catches unaware rotators); others push to site
+        holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
+        exposedUntil: -1, rotatePlan: null,
+        form: form.get(p.handle) ?? 0, holdBonus: 0,
+        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+      });
+    });
+  }
 
   const dAgg = defTac.defense.aggression;
   if (defTac.defense.play) {
@@ -389,10 +427,7 @@ function simulateRound(
       const route = plan?.route?.length ? plan.route : null;
       const path = route ? [...route, pos] : [pos];
       // resolve the kill-point trigger; a death trigger's player id → a handle
-      const rt = plan?.rotate;
-      const trig = rt ? (rt.trigger.kind === 'death'
-        ? (byId.get(rt.trigger.player)?.handle ? { kind: 'death' as const, handle: byId.get(rt.trigger.player)!.handle } : null)
-        : rt.trigger) : null;
+      const rt = plan?.rotate, trig = rt ? resolveTrig(rt.trigger, byId) : null;
       agents.push({
         p, side: defender, handle: p.handle, path, departT: 0,
         arrive: route ? arriveTime(path) : 0.12,            // a longer route = set up later
@@ -453,11 +488,17 @@ function simulateRound(
   const smokes: Smoke[] = [];
   const pulses: Pulse[] = [];
   const choke = lerp(A.mid, sitePt, 0.55);
-  // authored utility lineups (defensive): a caster's lineup REPLACES their auto
+  // authored utility lineups (either side): a caster's lineup REPLACES their auto
   // cast, so collect those handles to skip below, then add the lineups verbatim.
-  const lineups = defTac.defense.play?.lineups ?? [];
-  const handleOfId = new Map(defTeam.players.map(p => [p.id, p.handle] as const));
-  const authoredCasters = new Set(lineups.map(l => handleOfId.get(l.player)).filter(Boolean) as string[]);
+  // Each lineup carries the side that threw it (attack smokes blind defenders;
+  // defense smokes blind attackers — blindedThrough holds the invariant).
+  const atkHandleOf = new Map(atkTeam.players.map(p => [p.id, p.handle] as const));
+  const defHandleOf = new Map(defTeam.players.map(p => [p.id, p.handle] as const));
+  const lineups = [
+    ...(atkTac.attack.play?.lineups ?? []).map(l => ({ ...l, side: attacker, handle: atkHandleOf.get(l.player) })),
+    ...(defTac.defense.play?.lineups ?? []).map(l => ({ ...l, side: defender, handle: defHandleOf.get(l.player) })),
+  ];
+  const authoredCasters = new Set(lineups.map(l => l.handle).filter(Boolean) as string[]);
   for (const ag of agents) {
     if (authoredCasters.has(ag.handle)) continue;   // this player throws their authored lineup instead
     const isAtk = ag.side === attacker;
@@ -480,15 +521,14 @@ function simulateRound(
   // caster's utility. A smoke blinds attackers through it; a flash/recon grants
   // the defender the first shot in its window.
   for (const ln of lineups) {
-    const h = handleOfId.get(ln.player);
-    const caster = agents.find(a => a.handle === h);
+    const caster = agents.find(a => a.handle === ln.handle);
     const u = caster ? (caster.p.attr.utility / 100) * caster.utilFactor : 0.5;
     if (ln.kind === 'smoke') {
-      smokes.push({ side: defender, c: ln.at, r: SMOKE_R + SMOKE_R_UTIL * u, t0: ln.t, t1: ln.t + SMOKE_DUR + SMOKE_DUR_UTIL * u });
+      smokes.push({ side: ln.side, c: ln.at, r: SMOKE_R + SMOKE_R_UTIL * u, t0: ln.t, t1: ln.t + SMOKE_DUR + SMOKE_DUR_UTIL * u });
     } else {
-      pulses.push({ side: defender, c: ln.at, r: PULSE_R + PULSE_R_UTIL * u, t0: ln.t, t1: ln.t + PULSE_DUR + PULSE_DUR_UTIL * u });
+      pulses.push({ side: ln.side, c: ln.at, r: PULSE_R + PULSE_R_UTIL * u, t0: ln.t, t1: ln.t + PULSE_DUR + PULSE_DUR_UTIL * u });
     }
-    if (h) events.push({ t: ln.t, kind: 'ability', agent: h, ability: ln.kind });
+    if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind });
   }
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
