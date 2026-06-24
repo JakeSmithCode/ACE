@@ -32,6 +32,9 @@ importers:
       '@ace/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@ace/world':
+        specifier: workspace:*
+        version: link:../../packages/world
       vue:
         specifier: ^3.5.13
         version: 3.5.38(typescript@5.9.3)

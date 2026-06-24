@@ -239,3 +239,76 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-kp input{accent-color:var(--gold);width:auto}
 .pe-trig{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}
 .pe-trig select{background:var(--bg);border:1px solid var(--line-2);color:var(--text);padding:3px 5px;font-family:var(--label);font-size:11px}
+
+/* ── HQ · Season ─────────────────────────────────────────────── */
+.ace-top .ace-nav{display:flex;gap:4px;margin-left:8px}
+.ace-top .ace-nav button{background:transparent;border:none;color:var(--muted);font-family:var(--label);font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:7px 13px;cursor:pointer;border-bottom:2px solid transparent}
+.ace-top .ace-nav button:hover{color:var(--text)}
+.ace-top .ace-nav button.on{color:var(--text);border-bottom-color:var(--brand)}
+.ace-top .crumb-r{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2)}
+.ace-top .crumb-r b{color:var(--muted)}
+
+.hq{padding:18px 22px;max-width:1280px;margin:0 auto}
+.hq-bar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px}
+.hq-season{display:flex;align-items:baseline;gap:10px}
+.hq-kicker{font-family:var(--label);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+.hq-season b{font-family:var(--display);font-weight:700;font-size:22px}
+.hq-day{font-family:var(--label);font-size:12px;color:var(--muted);letter-spacing:.04em}
+.hq-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.hq-go{background:var(--brand);border:1px solid var(--brand);color:var(--bg);font-family:var(--label);font-weight:600;font-size:12px;letter-spacing:.04em;padding:8px 16px;cursor:pointer;clip-path:var(--bevel)}
+.hq-go:hover{filter:brightness(1.08)}
+.hq-go:disabled{opacity:.4;cursor:default}
+.hq-go.sm{padding:5px 11px;font-size:11px}
+.hq-alt{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:11px;letter-spacing:.04em;padding:8px 12px;cursor:pointer}
+.hq-alt:hover{color:var(--text);border-color:var(--brand)}
+.hq-alt:disabled{opacity:.4;cursor:default}
+.hq-seed{font-family:var(--label);font-size:10px;color:var(--muted-2);letter-spacing:.06em}
+
+.hq-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+@media (max-width:900px){.hq-grid{grid-template-columns:1fr}}
+.hq-panel{background:var(--bg-2);border:1px solid var(--line);padding:14px 16px}
+.hq-panel h3{display:flex;align-items:center;gap:8px;font-family:var(--label);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:11px}
+.hq-panel h3 .b{width:7px;height:7px;background:var(--brand);transform:rotate(45deg)}
+
+.hq-table .hq-trow{display:grid;grid-template-columns:26px 1fr 26px 26px 26px 34px 34px 40px 40px;align-items:center;gap:4px;padding:7px 6px;font-variant-numeric:tabular-nums;font-size:13px;border-bottom:1px solid var(--line);cursor:pointer}
+.hq-table .hq-trow span{text-align:center;color:var(--muted)}
+.hq-table .hq-trow .r{color:var(--muted-2);font-family:var(--display);font-weight:700}
+.hq-table .hq-trow .c{text-align:left;color:var(--text);display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.hq-table .hq-trow .pts{color:var(--text);font-weight:700}
+.hq-table .hq-trow .pos{color:var(--win)}.hq-table .hq-trow .neg{color:var(--def)}
+.hq-table .hq-thead{cursor:default;border-bottom:1px solid var(--line-2)}
+.hq-table .hq-thead span{font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.hq-table .hq-trow.me{background:rgba(34,211,238,.09);box-shadow:inset 2px 0 0 var(--brand)}
+.hq-table .hq-trow:hover:not(.hq-thead):not(.me){background:rgba(255,255,255,.03)}
+.hq-dot{width:9px;height:9px;border-radius:2px;flex:none}
+
+.hq-right{display:flex;flex-direction:column;gap:16px}
+.hq-clubcard{display:flex;gap:13px;align-items:center}
+.hq-badge{width:58px;height:58px;flex:none;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:19px;border:2px solid;color:var(--text);clip-path:var(--bevel)}
+.hq-clubmeta{flex:1;min-width:0}
+.hq-clubname{font-family:var(--display);font-weight:700;font-size:21px}
+.hq-clubsub{font-family:var(--label);font-size:12px;color:var(--muted);margin:2px 0 7px}
+.hq-pos{color:var(--text);font-weight:700}.hq-pos sup{font-size:.65em}
+.hq-strbar{position:relative;height:16px;background:var(--bg-3);border:1px solid var(--line)}
+.hq-strbar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,var(--brand),var(--win));opacity:.5}
+.hq-strbar span{position:absolute;inset:0;display:flex;align-items:center;padding-left:7px;font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--text)}
+.hq-picker{margin-top:11px;font-family:var(--label);font-size:11px;color:var(--muted-2);letter-spacing:.03em}
+.hq-picker select{background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:4px 6px;font-family:var(--label);font-size:11px;margin-left:6px}
+
+.hq-next{display:flex;align-items:center;gap:9px;padding:9px 10px;background:var(--bg-3);border:1px solid var(--line-2);margin-bottom:9px}
+.hq-nextlbl{font-family:var(--label);font-size:9px;letter-spacing:.1em;color:var(--gold);background:rgba(229,181,103,.12);padding:2px 6px}
+.hq-vs{flex:1;font-size:13px;color:var(--muted)}.hq-vs b{color:var(--text)}
+.hq-result{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.hq-rw{width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:11px;background:rgba(255,92,110,.16);color:var(--def);clip-path:var(--bevel)}
+.hq-result.win .hq-rw{background:rgba(59,209,127,.16);color:var(--win)}
+.hq-rscore{font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);min-width:42px}
+.hq-ropp{flex:1;color:var(--muted)}
+.hq-watch{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.05em;padding:4px 9px;cursor:pointer}
+.hq-watch:hover{color:var(--brand);border-color:var(--brand)}
+.hq-empty{color:var(--muted-2);font-family:var(--label);font-size:12px;padding:8px}
+
+.hq-watchwrap{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+.hq-watchhead{display:flex;align-items:center;gap:7px;font-family:var(--label);font-size:13px;letter-spacing:.03em;color:var(--muted);margin-bottom:10px}
+.hq-watchhead b{color:var(--text);font-family:var(--display);font-size:16px}
+.hq-watchhead .ed-close{margin-left:auto}
+.ed-busy{margin-left:10px;font-family:var(--label);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);animation:pulse 1s ease-in-out infinite}
