@@ -255,7 +255,7 @@ Persistent left nav + a top bar carrying club identity, currency, the match-day 
 - **Thin reactive client.** Management tables/forms, a drag-drop tactics editor (Canvas/SVG), and a 2D replay viewer (PixiJS/Canvas) that animates the stored timeline. Replays are pure data ⇒ shareable by URL.
 - **Real-time only where it earns it.** WebSockets for synced tick-night viewing, transfer-market pings, and notifications. **Never** the sim itself.
 - **AI integration.** Anthropic API on the tick + on-demand; outputs cached against events.
-- **Proposed stack.** NestJS backend, Supabase (Postgres + auth), Stripe billing, Vue 3 + TypeScript front end. (Home turf — and structurally close to breakerlabs: scheduled jobs + subscription billing + multi-tenant.)
+- **Proposed stack.** NestJS backend, **self-owned auth** (our own email/password + session/JWT layer over our own Postgres — *no auth vendor / BaaS lock-in*; the world must be portable and ours to run anywhere), plain **Postgres** (open, self-hostable) for persistence, Stripe billing, Vue 3 + TypeScript front end. (Home turf — and structurally close to breakerlabs: scheduled jobs + subscription billing + multi-tenant.) Rationale: a "your club, forever" promise can't sit on a vendor that might change terms, pricing, or shut down — we own the identity layer.
 - **Distribution.** One web codebase → browser game + installable **PWA** (home-screen, app-like) + optional **Tauri/Electron** desktop wrapper (even a Steam storefront listing later). Build once, distribute everywhere.
 
 ---
@@ -289,7 +289,7 @@ Sequenced **build-order, not calendar** — size each phase to your own pace. Th
 
 ### Phase 2 — The World & Persistence *(multi-tenant async PvP)*
 **Goal:** a real persistent world with real owners.
-**Build:** accounts (Supabase auth); persistent clubs; the league/pyramid structure; **scheduled tick resolution at scale**; **AI-run orgs to fill the leagues**; the **public club page** (social-spine MVP); shareable replays.
+**Build:** accounts (**self-owned auth — no vendor lock-in**); persistent clubs; the league/pyramid structure; **scheduled tick resolution at scale**; **AI-run orgs to fill the leagues**; the **public club page** (social-spine MVP); shareable replays.
 **Gate:** dozens of humans + AI orgs run a full season; the world feels alive and persistent.
 
 ### Phase 3 — Depth Systems *(the simulation matures)*
