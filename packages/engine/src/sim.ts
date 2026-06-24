@@ -67,6 +67,20 @@ function bestEntry(team: Team): string {
   return [...team.players].sort((a, b) => b.attr.entry - a.attr.entry || (a.id < b.id ? -1 : 1))[0].id;
 }
 
+/** The in-game leader's read: a rotation-speed multiplier for the defense's
+ *  info-held rotators, scaled by the IGL's cerebral stats (gameSense + clutch).
+ *  A sharp caller gets bodies into position faster on contact — and because only
+ *  *out-of-position* rotators move, the edge scales with how wrong the read was,
+ *  so it reads as adaptive mid-round recovery. Bounded both ways (~0.85..1.20)
+ *  and fair: a wrong pre-round read is mitigated by a great IGL, never erased,
+ *  and a weak caller is a roster gap you can fix, not a mugging. No IGL = neutral. */
+function iglRotateMul(team: Team): number {
+  const igl = team.players.find(p => p.igl);
+  if (!igl) return 1;
+  const sense = (igl.attr.gameSense + igl.attr.clutch) / 2;        // 0..100
+  return 1 + Math.max(-0.15, Math.min(0.20, (sense - 70) / 100));  // 50→0.85 .. 90→1.20
+}
+
 /** A kill-point trigger with a death's player id resolved to a handle (the form
  *  the engine fires on). Returns null if the named teammate doesn't exist. */
 type ResolvedTrig = { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number };
@@ -485,6 +499,7 @@ function simulateRound(
     const readSite = SITES[readIndex(defTac.defense.read, SITES.length)];
     const otherSites = SITES.filter(s => s !== readSite);   // each gets one watcher, in order
     const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
+    const rotSpeed = ROTATE_SPEED * iglRotateMul(defTeam);   // a sharp IGL gets rotators there faster
     const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
     const slots: { from: Vec2; site: SiteId | 'M' }[] = [];
     for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, siteAnchor(A, readSite), 30), site: readSite });
@@ -501,7 +516,7 @@ function simulateRound(
         // anchors are set from the start; rotators HOLD their read until contact,
         // then rotate with purpose — so a wrong read is paid for in real info time
         departT: anchor ? 0 : Infinity,
-        arrive: anchor ? 0.12 : arriveTime(path, ROTATE_SPEED),
+        arrive: anchor ? 0.12 : arriveTime(path, rotSpeed),
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
         holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
