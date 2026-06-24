@@ -7,12 +7,16 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { MatchInput, Tactics, Team, Play } from '@ace/shared';
 import { simulateMatch, PATCH } from '@ace/engine';
+import { ANCHORS } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { useWorld, MAP } from './world';
 
-const ATK_SPAWN: [number, number] = [485, 60];
-const SITES: { A: [number, number]; B: [number, number] } = { A: [310, 150], B: [270, 793] };
+// the active map's anchors drive the editor — spawn + the sites it fields (A/B,
+// or A/B/C on a three-site map), so the play editor is correct for whatever map.
+const A0 = ANCHORS[MAP]!;
+const ATK_SPAWN: [number, number] = A0.atkSpawn;
+const SITES = A0.sites;
 const FORKS = 50;
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 

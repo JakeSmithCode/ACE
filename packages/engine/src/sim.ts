@@ -1,10 +1,10 @@
 import type {
-  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState, RotateTrigger,
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState, RotateTrigger, SiteId,
 } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
-import { ANCHORS, pathfind, inView, posAlong, type Navmesh } from '@ace/maps';
+import { ANCHORS, pathfind, inView, posAlong, siteIds, sitePt as siteAnchor, type Navmesh } from '@ace/maps';
 
 // ---- tuning ----------------------------------------------------------------
 const STEP = 0.015;        // simulation tick (normalized round time)
@@ -165,6 +165,35 @@ function arriveTime(path: Vec2[], speedMul = 1): number {
   return Math.max(0.1, Math.min(0.92, 0.1 + len / (SPEED * speedMul)));
 }
 
+const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Attack site-choice weights from the siteBias dial, generalized to N sites.
+ *  Two-site reduces EXACTLY to the original `pA = 0.5 + bias·0.42` (clamped), so
+ *  the single rng draw and its result are unchanged — seed 42 stays byte-identical.
+ *  For three sites the bias tilts linearly: +1 favours A, −1 the last site, 0 even. */
+function siteWeights(bias: number, n: number): number[] {
+  if (n <= 2) { const pA = clampN(0.5 + bias * 0.42, 0.08, 0.92); return [pA, 1 - pA]; }
+  const k = 0.30, w: number[] = [];
+  for (let i = 0; i < n; i++) { const pos = (i / (n - 1)) * 2 - 1; w.push(Math.max(0.06, 1 / n - bias * k * pos)); }
+  const s = w.reduce((a, b) => a + b, 0);
+  return w.map(x => x / s);
+}
+
+/** Pick an index from weights with ONE rng draw (cumulative walk). For two
+ *  weights `[p, 1−p]` this is exactly `rng.chance(p) ? 0 : 1` — same draw. */
+function pickWeighted(weights: number[], rng: Rng): number {
+  let u = rng.next();
+  for (let i = 0; i < weights.length; i++) { if (u < weights[i]) return i; u -= weights[i]; }
+  return weights.length - 1;
+}
+
+/** Map the read dial (−1..+1) to a defended site index. Two-site keeps the exact
+ *  original `read ≥ 0 ? A : B`; for N sites it spans read +1→A .. −1→last site. */
+function readIndex(read: number, n: number): number {
+  if (n <= 2) return read >= 0 ? 0 : 1;
+  return clampN(Math.round((1 - read) / 2 * (n - 1)), 0, n - 1);
+}
+
 /** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
  *  / pulse / trade), -ve favours the defender. */
@@ -196,7 +225,7 @@ function forkSeed(seed: number, n: number, i: number): number {
  *  mutated (alive/death), so callers pass a throwaway copy for forks. */
 function resolveRound(
   agents: Ag[], smokes: Smoke[], pulses: Pulse[], nav: Navmesh,
-  sitePt: Vec2, site: 'A' | 'B', attacker: 0 | 1, defender: 0 | 1, rng: Rng,
+  sitePt: Vec2, site: SiteId, attacker: 0 | 1, defender: 0 | 1, rng: Rng,
 ): { winner: 0 | 1; method: RoundMethod; events: MatchEvent[] } {
   // a smoke is directional: it blinds the ENEMY's vision through it, not the
   // side that threw it (you play around your own smoke).
@@ -340,12 +369,17 @@ function simulateRound(
     '1': pistol ? 'pistol' : decideBuy(creds['1'], creds['0'], lossStreak['1']),
   };
 
-  // attackers pick a site, weighted by their plan's site bias — unless an
-  // authored attack play declares the site it executes (then that's forced).
-  const pA = Math.max(0.08, Math.min(0.92, 0.5 + atkTac.attack.siteBias * 0.42));
-  const site: 'A' | 'B' = atkTac.attack.play?.site ?? (rng.chance(pA) ? 'A' : 'B');
-  const sitePt = A.sites[site];
-  const otherPt = A.sites[site === 'A' ? 'B' : 'A'];
+  // attackers pick a site (A/B, or A/B/C on a three-site map), weighted by their
+  // plan's site bias — unless an authored attack play declares the site it
+  // executes (then that's forced). The weighted pick draws one rng value; on a
+  // two-site map it reduces exactly to the original A/B coin-flip.
+  const SITES = siteIds(A);
+  const site: SiteId = atkTac.attack.play?.site ?? SITES[pickWeighted(siteWeights(atkTac.attack.siteBias, SITES.length), rng)];
+  const sitePt = siteAnchor(A, site);
+  // the lurk flanks the off-site = the fielded site whose anchor is farthest from
+  // the target (the other one on a two-site map; the far site on a three-site map)
+  const otherSite = SITES.filter(s => s !== site).sort((a, b) => dist(siteAnchor(A, b), sitePt) - dist(siteAnchor(A, a), sitePt))[0] ?? site;
+  const otherPt = siteAnchor(A, otherSite);
 
   const atkTeam = input.teams[attacker];
   const defTeam = input.teams[defender];
@@ -420,7 +454,7 @@ function simulateRound(
     const byId = new Map(defTeam.players.map(p => [p.id, p] as const));
     defTeam.players.forEach(p => {
       const plan = defTac.defense.play!.plans.find(q => q.player === p.id);
-      const pos = plan ? plan.pos : A.sites[site];           // unplanned players hold the site
+      const pos = plan ? plan.pos : sitePt;                  // unplanned players hold the site
       const lo = loadouts.get(p.handle)!;
       // a route is the waypoints walked into the hold; [...route, pos] is the full
       // path. No route = start already set on the hold (the original behaviour).
@@ -444,16 +478,18 @@ function simulateRound(
     });
   } else {
     // PROCEDURAL: defenders set up on their READ, not the actual site — a wrong
-    // read is paid for in rotation time. Stack hardens the read; aggression
-    // pushes mids forward and trades held-angle edge for early picks.
-    const readSite: 'A' | 'B' = defTac.defense.read >= 0 ? 'A' : 'B';
-    const readPt = A.sites[readSite], offPt = A.sites[readSite === 'A' ? 'B' : 'A'];
+    // read is paid for in rotation time. Stack hardens the read; one watcher
+    // takes each other site; aggression pushes the rest forward to mid. On a
+    // three-site map the read spans all three, so a wrong read can be two
+    // rotations away. Two-site reduces exactly to the original A/off/mid split.
+    const readSite = SITES[readIndex(defTac.defense.read, SITES.length)];
+    const otherSites = SITES.filter(s => s !== readSite);   // each gets one watcher, in order
     const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
     const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
-    const slots: { from: Vec2; site: 'A' | 'B' | 'M' }[] = [];
-    for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, readPt, 30), site: readSite });
-    slots.push({ from: jitter(rng, offPt, 30), site: readSite === 'A' ? 'B' : 'A' });
-    for (let i = 0; i < 5 - onRead - 1; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
+    const slots: { from: Vec2; site: SiteId | 'M' }[] = [];
+    for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, siteAnchor(A, readSite), 30), site: readSite });
+    for (const os of otherSites) slots.push({ from: jitter(rng, siteAnchor(A, os), 30), site: os });
+    for (let i = 0; i < 5 - onRead - otherSites.length; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
     defTeam.players.forEach((p, i) => {
       const st = slots[i];
       const anchor = st.site === site;            // already on the contested site = holding an angle

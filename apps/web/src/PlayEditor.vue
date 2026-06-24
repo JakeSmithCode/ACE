@@ -8,10 +8,10 @@
 // not micro). Mutations clone-and-emit so the parent re-sims.
 import { computed, ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
-import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team } from '@ace/shared';
+import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2 }; nav: Navmesh }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
 
 // --- walkability feedback: flag holds/waypoints in a wall and route segments
@@ -59,16 +59,23 @@ function faceNub(pl: PlayerPlan): Vec2 {
   const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
   return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
 }
-function setSite(s: 'A' | 'B') { commit(p => { p.site = s; }); }
+// the sites this map fields (A/B, or A/B/C on a three-site map)
+const siteList = computed<SiteId[]>(() => (['A', 'B', 'C'] as SiteId[]).filter(s => props.sites[s]));
+const siteAt = (s: SiteId): Vec2 => props.sites[s]!;
+function setSite(s: SiteId) { commit(p => { p.site = s; }); }
 
-// A/B mirror: Ascent's sites aren't reflections, so we TRANSPLANT the formation —
-// translate every point by (otherSite − thisSite) and flip the execute site. A
-// rough starting template for the other site that the owner then tunes (the
-// walkability feedback flags whatever lands in a wall).
-const otherSite = (): 'A' | 'B' => (props.play.site ?? 'A') === 'A' ? 'B' : 'A';
+// site mirror: a map's sites aren't reflections, so we TRANSPLANT the formation —
+// translate every point by (nextSite − thisSite) and flip the execute site. A
+// rough starting template for the next site that the owner then tunes (the
+// walkability feedback flags whatever lands in a wall). Cycles through every
+// site the map fields.
+const otherSite = (): SiteId => {
+  const list = siteList.value, i = list.indexOf(props.play.site ?? 'A');
+  return list[(i + 1) % list.length];
+};
 function mirror() {
   const cur = props.play.site ?? 'A', nxt = otherSite();
-  const dx = props.sites[nxt][0] - props.sites[cur][0], dy = props.sites[nxt][1] - props.sites[cur][1];
+  const dx = siteAt(nxt)[0] - siteAt(cur)[0], dy = siteAt(nxt)[1] - siteAt(cur)[1];
   const clamp = (v: number) => Math.max(0, Math.min(1000, Math.round(v)));
   const sh = (p: Vec2): Vec2 => [clamp(p[0] + dx), clamp(p[1] + dy)];
   commit(p => {
@@ -316,9 +323,8 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
     <div class="pe-list">
       <div v-if="mode === 'attack'" class="pe-site">
         Execute site
-        <button :class="{ on: (play.site ?? 'A') === 'A' }" @click="setSite('A')">A</button>
-        <button :class="{ on: play.site === 'B' }" @click="setSite('B')">B</button>
-        <button class="pe-mirror" @click="mirror" title="Transplant this formation to the other site, then tune">⇄ mirror to {{ otherSite() }}</button>
+        <button v-for="s in siteList" :key="s" :class="{ on: (play.site ?? 'A') === s }" @click="setSite(s)">{{ s }}</button>
+        <button class="pe-mirror" @click="mirror" title="Transplant this formation to the next site, then tune">⇄ mirror to {{ otherSite() }}</button>
         <span class="pe-site-note">forces the round to this site</span>
       </div>
       <div class="pe-hint" v-if="routing">

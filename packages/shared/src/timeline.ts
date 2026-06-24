@@ -1,4 +1,4 @@
-import type { MapId, Vec2, PatchState, Team, Tactics, Comp } from './models.js';
+import type { MapId, Vec2, PatchState, Team, Tactics, Comp, SiteId } from './models.js';
 
 /** What the engine takes in. Deterministic given identical input. */
 export interface MatchInput {
@@ -21,7 +21,7 @@ export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
 export type MatchEvent =
   | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2 }
   | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string }
-  | { t: number; kind: 'plant'; agent: string; site: 'A' | 'B' }
+  | { t: number; kind: 'plant'; agent: string; site: SiteId }
   | { t: number; kind: 'defuse'; agent: string }
   | { t: number; kind: 'ability'; agent: string; ability: string };
 
@@ -35,7 +35,7 @@ export interface Round {
   attacker: 0 | 1;                   // attacking side this round
   winner: 0 | 1;
   method: RoundMethod;
-  site: 'A' | 'B';
+  site: SiteId;
   economy: RoundEconomy;
   winPct: number;                    // P(attacker wins) for THIS setup, by re-simulating the round
   spawns: Record<string, Vec2>;      // agent handle -> spawn point

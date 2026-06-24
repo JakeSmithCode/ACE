@@ -5,6 +5,11 @@ export type MapId =
   | 'sunset' | 'breeze' | 'icebox' | 'pearl' | 'fracture' | 'abyss';
 export type Vec2 = [number, number]; // minimap image space, 0..1000
 
+/** A bombsite id. Most maps are two-site (A/B); Haven and Lotus field a third
+ *  (C). The engine models N sites generally — the third is opt-in per map, so
+ *  two-site maps are untouched. */
+export type SiteId = 'A' | 'B' | 'C';
+
 /** Current-ability layer of the three-layer player model (DESIGN.md §4). */
 export interface Attributes {
   aim: number;        // mechanical accuracy        (0..100)
@@ -102,7 +107,7 @@ export interface PlayerPlan {
 export interface Play {
   plans: PlayerPlan[];                            // one entry per player on this side
   lineups?: Lineup[];                             // authored utility (smokes / flashes / recon)
-  site?: 'A' | 'B';                               // attack plays: which site this execute targets (forces the round site)
+  site?: SiteId;                                  // attack plays: which site this execute targets (forces the round site)
 }
 
 /** An authored utility lineup: a caster throws a smoke/flash/recon to land at
