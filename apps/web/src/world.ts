@@ -8,8 +8,9 @@ import type { Attributes, Comp, MapId, MatchInput, Player, Role, Tactics } from 
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
-  makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, makePlayer, HANDLES,
-  startingBalance, settleSeason, freeAgents, playerValue, squadRating, aiListings, aiWantsToBuy,
+  makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, developPlayer, makePlayer, HANDLES,
+  startingBalance, settleSeason, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
+  seasonIncome, playerWage,
   type Club, type MatchResult, type Matchday, type SeasonLedger,
 } from '@ace/world';
 
@@ -18,6 +19,9 @@ export const MAP: MapId = 'ascent';
 const RESOLVE_FORKS = 3;            // standings only need the final score
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));
+
+// the comp shape — how many of each role the matchday five needs
+const ROLE_NEED: Record<string, number> = { duelist: 2, initiator: 1, controller: 1, sentinel: 1 };
 
 /** A buyable slot on the always-open market: a player + where they come from
  *  (`from === -1` a free agent, else the club index selling them). */
@@ -33,6 +37,7 @@ const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
 const myTactics = ref<Tactics>(clone(clubs.value[myClub.value].tactics));  // your authored tactics (overlay)
+const myRoster = ref<Player[]>([...clubs.value[myClub.value].team.players]);  // your FULL squad (≥5; the matchday five is derived)
 const balances = ref<number[]>(clubs.value.map(c => startingBalance(c.strength)));  // every club's bank
 const ledger = ref<SeasonLedger | null>(null);
 const leagueHandles = () => new Set(clubs.value.flatMap(c => c.team.players.map(p => p.handle)));
@@ -42,6 +47,23 @@ const listings = shallowRef<{ club: number; playerId: string }[]>(aiListings(clu
 const myListed = ref<Set<string>>(new Set());          // your player ids put up for sale
 
 const balance = computed(() => balances.value[myClub.value]);
+
+// the matchday five is always the best player per comp slot from your roster;
+// the rest are reserves (depth). One IGL — the starting sentinel.
+function startingFive(roster: Player[]): Player[] {
+  const five: Player[] = [];
+  (['duelist', 'initiator', 'controller', 'sentinel'] as const).forEach(role => {
+    const ranked = roster.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a));
+    five.push(...ranked.slice(0, ROLE_NEED[role]));
+  });
+  return five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
+}
+// re-derive your club's fielded team from the roster (called after any roster change)
+function syncLineup() {
+  const team = { ...clubs.value[myClub.value].team, players: startingFive(myRoster.value) };
+  clubs.value = clubs.value.map((c, i) => i === myClub.value ? { ...c, team, strength: clampStr(squadRating(team) / 100) } : c);
+}
+const isStarter = (id: string) => clubs.value[myClub.value].team.players.some(p => p.id === id);
 
 let nav: Navmesh | null = null;
 
@@ -96,11 +118,21 @@ function simSeason() { while (!done.value) resolveDay(); }
 // ids are stable through a tick).
 function advanceSeason() {
   if (!done.value) return;
-  balances.value = balances.value.map((b, i) => b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net);
-  ledger.value = settleSeason(myTeam.value, rankOf(myClub.value), N, season.value);
-  prevById.value = new Map(clubs.value.flatMap(c => c.team.players.map(p =>
-    [p.id, { age: p.age, attr: { ...p.attr } }] as const)));
-  clubs.value = developLeague(clubs.value, new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0));
+  // settle every club; YOUR wage bill is over the whole roster (depth costs money)
+  const inc = seasonIncome(rankOf(myClub.value), N);
+  const myWages = myRoster.value.reduce((s, p) => s + playerWage(p), 0);
+  ledger.value = { season: season.value, sponsor: inc.sponsor, prize: inc.prize, wages: myWages, net: inc.sponsor + inc.prize - myWages };
+  balances.value = balances.value.map((b, i) =>
+    i === myClub.value ? b + ledger.value!.net : b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net);
+  // snapshot (whole roster) for deltas, then develop the league + your reserves
+  prevById.value = new Map([
+    ...clubs.value.flatMap(c => c.team.players.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const)),
+    ...myRoster.value.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const),
+  ]);
+  const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
+  clubs.value = developLeague(clubs.value, rng);
+  myRoster.value = myRoster.value.map(p => developPlayer(p, rng));
+  syncLineup();
   season.value++;
   results.value = []; dayIdx.value = 0;
   refreshMarket();
@@ -114,9 +146,11 @@ function selectClub(i: number) {
   myClub.value = i;
   myComp.value = {};
   myTactics.value = clone(clubs.value[i].tactics);
+  myRoster.value = [...clubs.value[i].team.players];
   ledger.value = null;
   listings.value = aiListings(clubs.value, i);
   myListed.value = new Set();
+  syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -126,31 +160,33 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   prevById.value = new Map();
   myComp.value = {};
   myTactics.value = clone(clubs.value[myClub.value].tactics);
+  myRoster.value = [...clubs.value[myClub.value].team.players];
   balances.value = clubs.value.map(c => startingBalance(c.strength));
   ledger.value = null;
   refreshMarket();
 }
 
-// --- the always-open market --------------------------------------------------
-const myPlayerOf = (role: string) => myTeam.value.players.find(p => p.role === role);
-const netFee = (e: MarketEntry) => playerValue(e.player) - playerValue(myPlayerOf(e.player.role)!);  // <0 = you bank cash
-const canAfford = (e: MarketEntry) => netFee(e) <= balance.value;
+// --- the always-open market: rosters carry depth, the matchday five is derived
+const myRosterRole = (role: string) => myRoster.value.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a));
+const myPlayerOf = (role: string) => myRosterRole(role)[0];           // your best in the role (the upgrade hint)
+const canAfford = (e: MarketEntry) => playerValue(e.player) <= balance.value;
 const isListed = (id: string) => myListed.value.has(id);
+// you can sell unless it would leave the comp short of a role — the "valid five" floor
+const canSell = (id: string) => {
+  const p = myRoster.value.find(x => x.id === id);
+  return !!p && myRoster.value.filter(x => x.id !== id && x.role === p.role).length >= ROLE_NEED[p.role];
+};
 
 const withPlayer = (c: Club, idx: number, p: Player): Club => {
   const team = { ...c.team, players: c.team.players.map((q, i) => i === idx ? p : q) };
   return { ...c, team, strength: clampStr(squadRating(team) / 100) };
 };
-const remap = (oldId: string, newId: string) => {
-  myTactics.value = JSON.parse(JSON.stringify(myTactics.value).split(oldId).join(newId));
-  if (myComp.value[oldId]) { const c = { ...myComp.value }; delete c[oldId]; myComp.value = c; }
-};
 const retag = (p: Player, clubId: string, igl?: boolean): Player => ({ ...p, id: `${clubId}-${p.handle.toLowerCase()}`, igl });
 const release = (p: Player): Player => ({ ...p, id: `fa-${p.handle.toLowerCase()}`, igl: false });
+const unlist = (id: string) => { if (myListed.value.has(id)) { const s = new Set(myListed.value); s.delete(id); myListed.value = s; } };
 
-// a club that lost a player restocks from free agency — the best same-role free
-// agent (or, if the pool is dry there, a generated journeyman). Pure deterministic
-// generation (no Math.random), keyed by a move counter.
+// a (non-you) club that lost a player restocks the slot from free agency — the
+// best same-role free agent, or a deterministically generated journeyman if dry.
 let moveSeq = 0;
 function backfillFor(role: Role): Player {
   const same = freeAgentPool.value.filter(p => p.role === role).sort((a, b) => playerValue(b) - playerValue(a));
@@ -159,64 +195,70 @@ function backfillFor(role: Role): Player {
   const handle = HANDLES.find(h => !used.has(h)) ?? `Sub${moveSeq}`;
   return makePlayer(new Rng((seasonSeed.value ^ (++moveSeq * 0x9e3779b9)) >>> 0), role, handle, 'fa', 0.4);
 }
-
-/** A transfer is a cash purchase, not a player-for-player swap: `buyer` pays for
- *  `sellerPlayerId`; the buyer's same-role player is released to free agency; and
- *  the seller takes the cash and restocks that slot from free agency. The whole
- *  market — your buy, your sale, AI moves — reduces to this one move. */
-function trade(buyerIdx: number, sellerIdx: number, sellerPlayerId: string) {
-  const buyer = clubs.value[buyerIdx], seller = clubs.value[sellerIdx];
-  const sIdx = seller.team.players.findIndex(p => p.id === sellerPlayerId);
-  if (sIdx < 0) return;
-  const incoming = seller.team.players[sIdx];
-  const bIdx = buyer.team.players.findIndex(p => p.role === incoming.role);
-  const buyerOld = buyer.team.players[bIdx];
-  const fee = playerValue(incoming) - playerValue(buyerOld);
-  const toBuyer = retag(incoming, buyer.team.id, buyerOld.igl);
-  const toSeller = retag(backfillFor(incoming.role as Role), seller.team.id, incoming.igl);  // seller restocks from FA
-  clubs.value = clubs.value.map((c, i) => i === buyerIdx ? withPlayer(c, bIdx, toBuyer)
-    : i === sellerIdx ? withPlayer(c, sIdx, toSeller) : c);
-  balances.value = balances.value.map((b, i) => i === buyerIdx ? b - fee : i === sellerIdx ? b + fee : b);
-  freeAgentPool.value = [release(buyerOld), ...freeAgentPool.value];   // your dropped player → free agency, not the seller
-  if (buyerIdx === myClub.value) remap(buyerOld.id, toBuyer.id);
-  if (sellerIdx === myClub.value) remap(incoming.id, toSeller.id);
-  listings.value = listings.value.filter(l => l.playerId !== sellerPlayerId);
-  if (myListed.value.has(sellerPlayerId)) { const s = new Set(myListed.value); s.delete(sellerPlayerId); myListed.value = s; }
+function sellerRestock(clubIdx: number, playerId: string) {
+  const team = clubs.value[clubIdx].team;
+  const idx = team.players.findIndex(p => p.id === playerId);
+  if (idx < 0) return;
+  const old = team.players[idx];
+  const fill = retag(backfillFor(old.role as Role), team.id, old.igl);
+  clubs.value = clubs.value.map((c, i) => i === clubIdx ? withPlayer(c, idx, fill) : c);
 }
 
-/** You acquire a market entry — a free agent (swap through the unowned pool) or
- *  an AI club's listed player (a direct trade). */
+/** Buy a market player — they JOIN your roster (no forced drop) at the full
+ *  price. A free agent leaves the unowned pool; a club sale pays the seller, who
+ *  restocks that slot from free agency. The matchday five is re-derived. */
 function acquire(e: MarketEntry) {
   if (!canAfford(e)) return;
-  if (e.from >= 0) { trade(myClub.value, e.from, e.player.id); return; }
-  // free agent: your same-role player is released to the pool, the FA joins you
-  const team = clubs.value[myClub.value].team;
-  const idx = team.players.findIndex(p => p.role === e.player.role);
-  const old = team.players[idx];
-  const fee = playerValue(e.player) - playerValue(old);
-  const signed = retag(e.player, team.id, old.igl);
-  clubs.value = clubs.value.map((c, i) => i === myClub.value ? withPlayer(c, idx, signed) : c);
-  balances.value = balances.value.map((b, i) => i === myClub.value ? b - fee : b);
-  remap(old.id, signed.id);
-  freeAgentPool.value = [release(old), ...freeAgentPool.value.filter(p => p.id !== e.player.id)];
+  const price = playerValue(e.player);
+  myRoster.value = [...myRoster.value, retag(e.player, clubs.value[myClub.value].team.id, false)];
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b - price : b);
+  if (e.from === -1) {
+    freeAgentPool.value = freeAgentPool.value.filter(p => p.id !== e.player.id);
+  } else {
+    balances.value = balances.value.map((b, i) => i === e.from ? b + price : b);
+    sellerRestock(e.from, e.player.id);
+    listings.value = listings.value.filter(l => !(l.club === e.from && l.playerId === e.player.id));
+  }
+  syncLineup();
 }
 
-/** Put one of your players up for sale (toggle). A listed player may be bought
- *  by an AI club on any match-day (resolveListings). */
-function toggleList(id: string) {
-  const s = new Set(myListed.value);
-  s.has(id) ? s.delete(id) : s.add(id);
-  myListed.value = s;
+/** Sell one of your players for their value (released to free agency). Blocked
+ *  when it would break a valid five. */
+function sellPlayer(id: string) {
+  const p = myRoster.value.find(x => x.id === id);
+  if (!p || !canSell(id)) return;
+  myRoster.value = myRoster.value.filter(x => x.id !== id);
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b + playerValue(p) : b);
+  freeAgentPool.value = [release(p), ...freeAgentPool.value];
+  unlist(id);
+  syncLineup();
 }
-/** The market is always live: each match-day, an AI club that would upgrade by
- *  signing one of your listed players (and can afford it) buys them — you get
- *  their same-role player plus the cash difference. */
+
+/** Put a player up for sale (toggle). A listed player may be bought by a rival
+ *  on any match-day (resolveListings). */
+function toggleList(id: string) {
+  const s = new Set(myListed.value); s.has(id) ? s.delete(id) : s.add(id); myListed.value = s;
+}
+/** Each match-day, a rival that would upgrade by signing one of your listed
+ *  players (and can afford the full price) buys them for cash — provided the sale
+ *  still leaves you a valid five. Their replaced starter goes to free agency. */
 function resolveListings() {
   for (const pid of [...myListed.value]) {
-    const mine = myTeam.value.players.find(p => p.id === pid);
-    if (!mine) { const s = new Set(myListed.value); s.delete(pid); myListed.value = s; continue; }
+    const mine = myRoster.value.find(p => p.id === pid);
+    if (!mine) { unlist(pid); continue; }
+    if (!canSell(pid)) continue;
     const buyer = clubs.value.findIndex((_, i) => i !== myClub.value && aiWantsToBuy(clubs.value, balances.value, i, mine));
-    if (buyer >= 0) trade(buyer, myClub.value, pid);
+    if (buyer < 0) continue;
+    const price = playerValue(mine);
+    const bteam = clubs.value[buyer].team;
+    const bIdx = bteam.players.findIndex(p => p.role === mine.role);
+    const bOld = bteam.players[bIdx];
+    clubs.value = clubs.value.map((c, i) => i === buyer ? withPlayer(c, bIdx, retag(mine, bteam.id, bOld.igl)) : c);
+    freeAgentPool.value = [release(bOld), ...freeAgentPool.value];
+    balances.value = balances.value.map((b, i) => i === buyer ? b - price : i === myClub.value ? b + price : b);
+    myRoster.value = myRoster.value.filter(p => p.id !== pid);
+    unlist(pid);
+    syncLineup();
   }
 }
 async function ensureNav() { if (!nav) nav = await fetch(`/${MAP}.navmesh.json`).then(r => r.json()); }
@@ -225,9 +267,9 @@ const getNav = () => nav;
 export function useWorld() {
   return {
     N, MAP, seasonSeed, clubs, schedule, results, dayIdx, myClub, season, prevById,
-    myComp, myTactics, balance, balances, ledger, market, myListed,
+    myComp, myTactics, myRoster, balance, balances, ledger, market, myListed,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, advanceSeason, selectClub, newWorld, ensureNav, getNav,
-    myPlayerOf, netFee, canAfford, isListed, acquire, toggleList,
+    myPlayerOf, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
   };
 }

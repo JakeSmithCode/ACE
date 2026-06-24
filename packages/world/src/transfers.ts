@@ -21,10 +21,10 @@ export function aiListings(clubs: Club[], myClub: number): { club: number; playe
 }
 
 /** Would AI club `i` buy `player` to replace its same-role player? Only if it's
- *  a clear upgrade and the net fee fits its budget. */
+ *  a clear upgrade and it can afford the full price. */
 export function aiWantsToBuy(clubs: Club[], balances: number[], i: number, player: { role: string; }): boolean {
   const mine = clubs[i].team.players.find(p => p.role === player.role);
   if (!mine) return false;
   if (overall(player as any) <= overall(mine) + 2) return false;   // must be a real upgrade
-  return playerValue(player as any) - playerValue(mine) <= balances[i];
+  return playerValue(player as any) <= balances[i];               // full cash price
 }

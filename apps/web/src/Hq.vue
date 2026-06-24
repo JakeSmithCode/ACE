@@ -12,7 +12,7 @@ import Market from './Market.vue';
 import { useWorld, MAP } from './world';
 
 const w = useWorld();
-const { clubs, myClub, season, prevById, myComp, balance, ledger,
+const { clubs, myClub, season, myComp, balance, ledger,
   table, total, done, dayIdx, myStanding, myResults, nextFixture } = w;
 const N = w.N;
 
@@ -85,11 +85,11 @@ onUnmounted(() => { viewer?.destroy(); });
     <Market v-if="hqTab === 'market'" />
 
     <!-- SQUAD & COMP -->
-    <div v-else-if="hqTab === 'squad'" class="hq-grid">
-      <Roster :team="club(myClub).team" :prev-by-id="prevById" />
+    <div v-else-if="hqTab === 'squad'" class="hq-squad">
+      <Roster />
       <div class="hq-panel hq-comp">
-        <h3><span class="b"></span>Comp <span class="rs-sub">field each player's agent</span></h3>
-        <div v-for="p in club(myClub).team.players" :key="p.id" class="hq-comprow" :class="{ listed: w.isListed(p.id) }">
+        <h3><span class="b"></span>Comp <span class="rs-sub">field each starter's agent</span></h3>
+        <div v-for="p in club(myClub).team.players" :key="p.id" class="hq-comprow">
           <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
           <span class="hq-cph">{{ p.handle }}</span>
           <select :value="pick(p)" @change="setComp(p, ($event.target as HTMLSelectElement).value)">
@@ -98,9 +98,8 @@ onUnmounted(() => { viewer?.destroy(); });
           <span class="hq-mast" :class="{ off: masteryOf(p, pick(p)) < 50 }">
             {{ masteryOf(p, pick(p)) >= 50 ? 'mastery ' + masteryOf(p, pick(p)) : 'off-pool' }}
           </span>
-          <button class="hq-list" :class="{ on: w.isListed(p.id) }" @click="w.toggleList(p.id)">{{ w.isListed(p.id) ? '● listed' : 'list' }}</button>
         </div>
-        <div class="hq-compnote">Your comp is fielded in your fixtures (off-pool plays rough). <b>List</b> a player to sell — a rival who'd upgrade may buy them between match-days for cash, and you restock the slot from free agency.</div>
+        <div class="hq-compnote">Your comp is fielded in your fixtures — only the starting five plays, so an off-pool pick (low mastery) hurts the duel + utility.</div>
       </div>
     </div>
 
