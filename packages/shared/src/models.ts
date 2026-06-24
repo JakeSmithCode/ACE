@@ -23,6 +23,7 @@ export interface Player {
   igl?: boolean;
   age: number;
   attr: Attributes;     // current ability
+  potential?: Attributes; // per-attribute ceilings the development tick grows toward (behind fog to the manager)
   agents: AgentMastery[];
 }
 

@@ -4,11 +4,12 @@
 // engine the viewer uses. You own a club, advance match-days, climb the table,
 // and watch any fixture back (re-simmed from its stable fixture seed).
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue';
-import type { MapId, MatchInput } from '@ace/shared';
+import type { Attributes, MapId, MatchInput } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
-import { simulateMatch, PATCH } from '@ace/engine';
-import { makeLeague, doubleRoundRobin, standings, fixtureSeed, type Club, type MatchResult, type Matchday } from '@ace/world';
+import { simulateMatch, PATCH, Rng } from '@ace/engine';
+import { makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, type Club, type MatchResult, type Matchday } from '@ace/world';
 import { Viewer } from './viewer';
+import Roster from './Roster.vue';
 
 const MAP: MapId = 'ascent';
 const N = 8;
@@ -22,6 +23,9 @@ const results = ref<MatchResult[]>([]);
 const dayIdx = ref(0);                              // next match-day to resolve
 const myClub = ref(4);                              // the club you own (mid-table by generation)
 const busy = ref(false);
+const season = ref(1);                             // career season number
+const hqTab = ref<'season' | 'squad'>('season');
+const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
 
 let nav: Navmesh | null = null;
 
@@ -60,11 +64,26 @@ function resolveDay() {
   dayIdx.value++;
 }
 function simSeason() { busy.value = true; requestAnimationFrame(() => { while (!done.value) resolveDay(); busy.value = false; }); }
+
+// the off-season: every club's squad develops (youth grows, veterans fade), then
+// a fresh season begins. Deterministic from (world seed, season).
+function advanceSeason() {
+  if (!done.value) return;
+  prevById.value = new Map(clubs.value.flatMap(c => c.team.players.map(p =>
+    [p.id, { age: p.age, attr: { ...p.attr } }] as const)));
+  const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
+  clubs.value = developLeague(clubs.value, rng);
+  season.value++;
+  results.value = []; dayIdx.value = 0;
+  watching.value = null; viewer?.destroy(); viewer = null;
+  kickoff();
+}
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
   clubs.value = makeLeague(s, N);
   schedule.value = doubleRoundRobin(N);
   results.value = []; dayIdx.value = 0;
+  season.value = 1; prevById.value = new Map();
   watching.value = null; viewer?.destroy(); viewer = null;
   kickoff();
 }
@@ -95,19 +114,28 @@ onUnmounted(() => { viewer?.destroy(); });
     <!-- season control bar -->
     <div class="hq-bar">
       <div class="hq-season">
-        <span class="hq-kicker">Season</span>
+        <span class="hq-kicker">Season {{ season }}</span>
         <b>{{ N }}-club league</b>
         <span class="hq-day">Match-day {{ Math.min(dayIdx, total) }} / {{ total }}</span>
       </div>
+      <div class="hq-tabs">
+        <button :class="{ on: hqTab === 'season' }" @click="hqTab = 'season'">Season</button>
+        <button :class="{ on: hqTab === 'squad' }" @click="hqTab = 'squad'">Squad</button>
+      </div>
       <div class="hq-actions">
-        <button class="hq-go" :disabled="done" @click="resolveDay">▶ Resolve match-day</button>
+        <button v-if="!done" class="hq-go" @click="resolveDay">▶ Resolve match-day</button>
+        <button v-else class="hq-go" @click="advanceSeason">⟳ Advance to season {{ season + 1 }}</button>
         <button class="hq-alt" :disabled="done" @click="simSeason">⏭ Sim to end</button>
         <button class="hq-alt" @click="newWorld()">⟲ New world</button>
         <span class="hq-seed">seed {{ seasonSeed }}</span>
       </div>
     </div>
 
-    <div class="hq-grid">
+    <div v-if="hqTab === 'squad'">
+      <Roster :team="club(myClub).team" :prev-by-id="prevById" />
+    </div>
+
+    <div v-else class="hq-grid">
       <!-- standings -->
       <div class="hq-panel hq-table">
         <h3><span class="b"></span>Standings</h3>

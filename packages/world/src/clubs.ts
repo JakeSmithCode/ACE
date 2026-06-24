@@ -40,6 +40,18 @@ export function makeClub(rng: Rng, identity: { name: string; tag: string }, stre
       aim: roll('aim'), movement: roll('movement'), gameSense: roll('gameSense'),
       utility: roll('utility'), clutch: roll('clutch'), entry: roll('entry'),
     };
+    // duelists skew young, anchors skew veteran — flavour, and the hook for aging
+    const age = role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27);
+    // potential = current + age-scaled headroom × a per-player gift; the young
+    // carry real upside, a veteran is ~already there. The development tick grows
+    // current toward this ceiling. (Hidden from the manager — Phase-3 scouting.)
+    const youth = Math.max(0, (24 - age) / 8);     // 1 at ≤16 .. 0 at ≥24
+    const gift = rng.range(0.6, 1.5);              // some players have more upside than others
+    const head = (k: keyof Attributes) => clamp(attr[k] + Math.round(youth * gift * (9 + rng.range(0, 14))), attr[k], 99);
+    const potential: Attributes = {
+      aim: head('aim'), movement: head('movement'), gameSense: head('gameSense'),
+      utility: head('utility'), clutch: head('clutch'), entry: head('entry'),
+    };
     const handle = pool.pop()!;
     // a role-appropriate main + 1–2 secondary agents, mastery scaling with talent
     const roster = [...AGENTS[role]];
@@ -49,11 +61,9 @@ export function makeClub(rng: Rng, identity: { name: string; tag: string }, stre
       { agent: main, level: clamp(70 + strength * 22 + rng.range(-4, 6), 50, 99) },
       { agent: second, level: clamp(55 + strength * 18 + rng.range(-6, 6), 40, 90) },
     ];
-    // duelists skew young, anchors skew veteran — flavour, and a hook for aging later
-    const age = role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27);
     return {
       id: `${identity.tag.toLowerCase()}-${handle.toLowerCase()}`,
-      handle, role, igl: i === iglIdx, age, attr, agents,
+      handle, role, igl: i === iglIdx, age, attr, potential, agents,
     };
   });
   return { id: identity.tag.toLowerCase(), tag: identity.tag, name: identity.name, players };
