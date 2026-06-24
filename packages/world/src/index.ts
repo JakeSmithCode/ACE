@@ -6,6 +6,7 @@ export * from './names.js';
 export * from './clubs.js';
 export * from './schedule.js';
 export * from './season.js';
+export * from './divisions.js';
 export * from './playoffs.js';
 export * from './develop.js';
 export * from './finance.js';

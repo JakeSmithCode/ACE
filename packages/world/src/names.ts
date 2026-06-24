@@ -19,8 +19,9 @@ export const CLUB_IDENTITIES: { name: string; tag: string }[] = [
   { name: 'Quasar', tag: 'QSR' }, { name: 'Tundra', tag: 'TND' },
 ];
 
-/** Player handles — the in-game names. A big pool so a 12-club league (60
- *  players) draws without replacement and every handle stays unique. */
+/** Player handles — the in-game names. A big pool so a 20-club, two-division
+ *  league (100 players) draws without replacement AND leaves a disjoint pool for
+ *  free agents, with headroom for transfer churn — every handle stays unique. */
 export const HANDLES: string[] = [
   'AXIOM', 'BLAZE', 'CIPHER', 'DRIFT', 'EMBER', 'FROST', 'GHOST', 'HAVOC',
   'IRIS', 'JOLT', 'KESTREL', 'LUMEN', 'MIRAGE', 'NOVA', 'ONYX', 'PRISM',
@@ -34,4 +35,10 @@ export const HANDLES: string[] = [
   'ULTRA', 'VOID', 'WISP', 'XACT', 'YETI', 'ZANE', 'ASH', 'BRINE',
   'CINDER', 'DOZER', 'EAGLE', 'FANG', 'GAUGE', 'HUSK', 'ICON', 'JADE',
   'KNOX', 'LOOM', 'MOTH', 'NULL', 'OPAL', 'PYRE', 'QUO', 'REX',
+  'ARC', 'BLITZ', 'CRUX', 'DASH', 'EDGE', 'FERN', 'GALE', 'HYDRA',
+  'IBEX', 'JEST', 'KRAKEN', 'LURE', 'MEND', 'NYX', 'OATH', 'PLUME',
+  'QUILT', 'ROOK', 'SHARD', 'THORN', 'URSA', 'VEX', 'WICK', 'XERO',
+  'YARN', 'ZEAL', 'ASPEN', 'BRAVO', 'CREST', 'DUNE', 'FOXX', 'GRAVE',
+  'HOLLOW', 'ION', 'JIVE', 'KARMA', 'LOTUS', 'MYTH', 'NADIR', 'ODIN',
+  'PROWL', 'QUIVER', 'RALLY', 'SAGE', 'TIDE', 'VYNE', 'WANE', 'ZORRO',
 ];

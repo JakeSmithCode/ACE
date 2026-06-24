@@ -8,17 +8,23 @@ import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tac
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
-  makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, developPlayer, makePlayer, HANDLES,
-  startingBalance, settleSeason, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
+  makeLeague, standings, fixtureSeed, developLeague, developPlayer, makePlayer, HANDLES,
+  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
   seasonIncome, playerWage, ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
-  type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket,
+  membersOf, divisionSchedule, promoteRelegate,
+  type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
 } from '@ace/world';
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
 
-export const N = 8;
+// a two-tier pyramid: DIVS divisions of DIV_SIZE clubs each. N is the TOTAL.
+export const DIV_SIZE = 10;
+export const DIVS = 2;
+export const PROMO = 2;             // clubs promoted/relegated between tiers each season
+export const N = DIV_SIZE * DIVS;   // total clubs in the world (20)
+export const DIV_NAMES = ['Premier', 'Challenger'];
 export const MAP: MapId = 'ascent';
-const RESOLVE_FORKS = 3;            // standings only need the final score
+const RESOLVE_FORKS = 0;            // standings only need the final score (fork-independent)
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));
 
@@ -29,12 +35,20 @@ const ROLE_NEED: Record<string, number> = { duelist: 2, initiator: 1, controller
  *  (`from === -1` a free agent, else the club index selling them). */
 export interface MarketEntry { player: Player; from: number }
 
+// the initial division split: makeLeague descends in strength, so the top
+// DIV_SIZE clubs seed the Premier tier and the rest the Challenger tier.
+const initialDivision = () => Array.from({ length: N }, (_, i) => (i < DIV_SIZE ? 0 : 1));
+const divSchedules = (division: number[]): Matchday[][] =>
+  Array.from({ length: DIVS }, (_, d) => divisionSchedule(membersOf(division, d)));
+
 const seasonSeed = ref(7);
 const clubs = shallowRef<Club[]>(makeLeague(seasonSeed.value, N));
-const schedule = shallowRef<Matchday[]>(doubleRoundRobin(N));
+const division = ref<number[]>(initialDivision());   // club index → tier (0 = Premier)
+const schedules = shallowRef<Matchday[][]>(divSchedules(division.value));  // one schedule per division
+const lastMoves = ref<DivMove[]>([]);                // last off-season's promotions/relegations
 const results = ref<MatchResult[]>([]);
 const dayIdx = ref(0);
-const myClub = ref(4);
+const myClub = ref(15);   // start mid-table in the Challenger tier — a club to climb
 const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
@@ -87,17 +101,23 @@ const isStarter = (id: string) => clubs.value[myClub.value].team.players.some(p 
 
 let nav: Navmesh | null = null;
 
-const table = computed(() => standings(N, results.value));
-const total = computed(() => schedule.value.length);
+const myDivision = computed(() => division.value[myClub.value]);
+const mySchedule = computed(() => schedules.value[myDivision.value]);
+// a division's table: only that tier's games, only that tier's clubs.
+const tableOf = (d: number): Standing[] =>
+  standings(N, results.value.filter(r => division.value[r.home] === d)).filter(s => division.value[s.club] === d);
+const table = computed(() => tableOf(myDivision.value));   // your tier's table (drives playoffs, rank, standing)
+const total = computed(() => schedules.value[0].length);
 const done = computed(() => dayIdx.value >= total.value);
 const myTeam = computed(() => clubs.value[myClub.value].team);
-const rankOf = (i: number) => table.value.findIndex(s => s.club === i) + 1;
+// rank is WITHIN a club's own division
+const rankOf = (i: number) => tableOf(division.value[i]).findIndex(s => s.club === i) + 1;
 const myStanding = computed(() => table.value.find(s => s.club === myClub.value));
 const myResults = computed(() => results.value.filter(r => r.home === myClub.value || r.away === myClub.value));
 const nextFixture = computed(() => done.value ? null
-  : schedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
+  : mySchedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
 const nextOpponent = computed(() => {
-  const fx = nextFixture.value ?? schedule.value[0].find(f => f.home === myClub.value || f.away === myClub.value)!;
+  const fx = nextFixture.value ?? mySchedule.value[0].find(f => f.home === myClub.value || f.away === myClub.value)!;
   return fx.home === myClub.value ? fx.away : fx.home;
 });
 // the always-open board: free agents + every AI club's listed player (resolved
@@ -126,7 +146,11 @@ function simFixture(fx: { home: number; away: number }, seed: number): MatchResu
 }
 function resolveDay() {
   if (done.value || !nav) return;
-  const fresh = schedule.value[dayIdx.value].map((fx, slot) => simFixture(fx, fixtureSeed(seasonSeed.value, dayIdx.value, slot)));
+  // the whole world advances: resolve this match-day in EVERY division
+  const fresh: MatchResult[] = [];
+  for (let d = 0; d < DIVS; d++)
+    schedules.value[d][dayIdx.value].forEach((fx, slot) =>
+      fresh.push(simFixture(fx, fixtureSeed(seasonSeed.value, dayIdx.value, slot + d * 1000))));
   results.value = [...results.value, ...fresh];
   dayIdx.value++;
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -144,20 +168,29 @@ function enterPlayoffs() {
   playoffs.value = bracket;
 }
 
-// the off-season: settle EVERY club's books by final rank (+ any playoff prize),
-// then develop every squad, then refresh the board. Your authored tactics/comp
-// carry over (player ids are stable through a tick).
+// the off-season: settle EVERY club's books by final rank in its OWN division
+// (the top tier pays more), apply promotion/relegation, then develop every squad
+// and refresh the board. Your authored tactics/comp carry over (ids are stable).
+const divMult = (d: number) => (d === 0 ? 1 : 0.6);   // the top flight earns the bigger sponsor/prize
 function advanceSeason() {
   if (!done.value) return;
   const bracket = playoffs.value;
+  const tables = Array.from({ length: DIVS }, (_, d) => tableOf(d));   // final regular-season tables (pre-swap)
+  const rankIn = (i: number) => tables[division.value[i]].findIndex(s => s.club === i) + 1;
   const poPrize = (i: number) => bracket ? playoffPrize(finishOf(bracket, i)) : 0;
-  // settle every club; YOUR wage bill is over the whole roster (depth costs money)
-  const inc = seasonIncome(rankOf(myClub.value), N);
+  // settle every club by its division rank; YOUR wage bill is over the whole roster
+  const incomeOf = (i: number) => { const d = division.value[i]; const { sponsor, prize } = seasonIncome(rankIn(i), DIV_SIZE); return Math.round((sponsor + prize) * divMult(d)); };
   const myWages = myRoster.value.reduce((s, p) => s + playerWage(p), 0);
-  const myPo = poPrize(myClub.value);
-  ledger.value = { season: season.value, sponsor: inc.sponsor, prize: inc.prize, playoff: myPo, wages: myWages, net: inc.sponsor + inc.prize + myPo - myWages };
+  const my = division.value[myClub.value];
+  const myInc = seasonIncome(rankIn(myClub.value), DIV_SIZE);
+  const mySponsor = Math.round(myInc.sponsor * divMult(my)), myPrizeMoney = Math.round(myInc.prize * divMult(my)), myPo = poPrize(myClub.value);
+  ledger.value = { season: season.value, sponsor: mySponsor, prize: myPrizeMoney, playoff: myPo, wages: myWages, net: mySponsor + myPrizeMoney + myPo - myWages };
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net : b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net + poPrize(i));
+    i === myClub.value ? b + ledger.value!.net : b + incomeOf(i) + poPrize(i) - clubs.value[i].team.players.reduce((s, p) => s + playerWage(p), 0));
+  // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
+  const pr = promoteRelegate(division.value, tables, PROMO);
+  division.value = pr.division; lastMoves.value = pr.moves;
+  schedules.value = divSchedules(division.value);
   // snapshot (whole roster) for deltas, then develop the league + your reserves
   prevById.value = new Map([
     ...clubs.value.flatMap(c => c.team.players.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const)),
@@ -195,7 +228,9 @@ function selectClub(i: number) {
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
   clubs.value = makeLeague(s, N);
-  schedule.value = doubleRoundRobin(N);
+  division.value = initialDivision();
+  schedules.value = divSchedules(division.value);
+  lastMoves.value = [];
   results.value = []; dayIdx.value = 0; season.value = 1;
   prevById.value = new Map();
   myComp.value = {};
@@ -336,17 +371,18 @@ const getNav = () => nav;
 // --- career persistence (localStorage) ---------------------------------------
 // A whole career lives in the refs above; here we snapshot the mutated state to
 // localStorage and restore it on load, so a refresh resumes exactly where you
-// left off. The schedule is pure (doubleRoundRobin(N)) so it's regenerated, not
-// stored. Sets/Maps round-trip via arrays. A version+club-count guard ignores a
-// stale/incompatible save (then you just start fresh).
-const SAVE_KEY = 'ace.career.v1';
+// left off. The schedules are pure (divisionSchedule over each tier) so they're
+// regenerated from the division map, not stored. Sets/Maps round-trip via arrays.
+// A version+club-count guard ignores a stale/incompatible save (then start fresh).
+const SAVE_KEY = 'ace.career.v2';
 const hasSave = ref(false);
 
 function snapshot() {
   return {
-    v: 1, n: N,
+    v: 2, n: N,
     seasonSeed: seasonSeed.value, season: season.value, myClub: myClub.value, dayIdx: dayIdx.value,
-    clubs: clubs.value, results: results.value, balances: balances.value, ledger: ledger.value,
+    clubs: clubs.value, division: division.value, lastMoves: lastMoves.value,
+    results: results.value, balances: balances.value, ledger: ledger.value,
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
@@ -358,11 +394,12 @@ function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot())); hasSave.value = true; } catch { /* quota / private mode — run unsaved */ }
 }
 function loadSave(): ReturnType<typeof snapshot> | null {
-  try { const s = localStorage.getItem(SAVE_KEY); if (!s) return null; const o = JSON.parse(s); return o?.v === 1 && o?.n === N ? o : null; } catch { return null; }
+  try { const s = localStorage.getItem(SAVE_KEY); if (!s) return null; const o = JSON.parse(s); return o?.v === 2 && o?.n === N ? o : null; } catch { return null; }
 }
 function hydrate(o: ReturnType<typeof snapshot>) {
   seasonSeed.value = o.seasonSeed; season.value = o.season; myClub.value = o.myClub; dayIdx.value = o.dayIdx;
-  clubs.value = o.clubs; schedule.value = doubleRoundRobin(N); results.value = o.results;
+  clubs.value = o.clubs; division.value = o.division; lastMoves.value = o.lastMoves;
+  schedules.value = divSchedules(division.value); results.value = o.results;
   balances.value = o.balances; ledger.value = o.ledger; titles.value = o.titles;
   myComp.value = o.myComp; myTactics.value = o.myTactics; myRoster.value = o.myRoster;
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
@@ -382,16 +419,16 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 // match-days) collapses into one write.
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
-  [seasonSeed, clubs, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
+  [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
     myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
 export function useWorld() {
   return {
-    N, MAP, seasonSeed, clubs, schedule, results, dayIdx, myClub, season, prevById,
+    N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
-    playoffs, titles, hasSave, clearSave,
+    playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

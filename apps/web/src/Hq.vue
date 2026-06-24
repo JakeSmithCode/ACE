@@ -2,7 +2,7 @@
 // HQ + Season — the single-player management loop, reading the shared world
 // store. Own a club, advance match-days, climb the table, develop the squad,
 // pick your comp, watch your matches, and balance the books.
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch as vueWatch } from 'vue';
 import type { Player } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { ROLE_AGENTS } from '@ace/world';
@@ -13,12 +13,26 @@ import { useWorld, MAP } from './world';
 
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
-  table, total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, titles } = w;
+  total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, titles,
+  myDivision, division, lastMoves } = w;
 const N = w.N;
+const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_SIZE;
 
 // playoff helpers
 const seedNo = (c: number) => (playoffs.value ? playoffs.value.qualified.indexOf(c) + 1 : 0);
 const titleCount = (i: number) => titles.value[i] ?? 0;
+
+// --- divisions: which tier's table to show (defaults to yours, follows you) ---
+const viewDiv = ref(myDivision.value);
+vueWatch(myDivision, d => { viewDiv.value = d; });
+const shownTable = computed(() => w.tableOf(viewDiv.value));
+const divOf = (i: number) => division.value[i];
+// a row's promotion/relegation status within the shown division
+function zoneOf(rank: number): '' | 'promo' | 'releg' {
+  if (viewDiv.value > 0 && rank <= PROMO) return 'promo';            // top of a lower tier → up
+  if (viewDiv.value < DIVS - 1 && rank > DIV_SIZE - PROMO) return 'releg';  // bottom of a higher tier → down
+  return '';
+}
 
 const hqTab = ref<'season' | 'squad' | 'market'>('season');
 
@@ -68,7 +82,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <div class="hq-bar">
       <div class="hq-season">
         <span class="hq-kicker">Season {{ season }}</span>
-        <b>{{ N }}-club league</b>
+        <b>{{ DIVS }} divisions · {{ N }} clubs</b>
         <span class="hq-day">Match-day {{ Math.min(dayIdx, total) }} / {{ total }}</span>
       </div>
       <div class="hq-tabs">
@@ -110,6 +124,16 @@ onUnmounted(() => { viewer?.destroy(); });
 
     <!-- SEASON -->
     <template v-else>
+    <!-- promotion/relegation summary — shown at the start of a fresh season -->
+    <div v-if="lastMoves.length && !playoffs && dayIdx < total" class="hq-prbanner">
+      <div v-if="lastMoves.some(m => m.club === myClub)" class="hq-prmine" :class="divOf(myClub) < (lastMoves.find(m => m.club === myClub)!.from) ? 'up' : 'down'">
+        {{ divOf(myClub) < lastMoves.find(m => m.club === myClub)!.from ? `▲ Promoted to ${DIV_NAMES[divOf(myClub)]}!` : `▼ Relegated to ${DIV_NAMES[divOf(myClub)]}` }}
+      </div>
+      <div class="hq-prlist">
+        <span class="hq-prh">Off-season</span>
+        <span v-for="m in lastMoves" :key="m.club" class="hq-prmove" :class="m.to < m.from ? 'up' : 'down'">{{ tagOf(m.club) }} {{ m.to < m.from ? '▲' : '▼' }}</span>
+      </div>
+    </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">
       <h3><span class="b"></span>Playoffs <span class="rs-sub">top 4 · best of 3{{ playoffs.champion != null ? ` · champion ${tagOf(playoffs.champion)}` : '' }}</span></h3>
@@ -144,20 +168,28 @@ onUnmounted(() => { viewer?.destroy(); });
     </div>
 
     <div class="hq-grid">
-      <!-- standings -->
+      <!-- standings (per division, with a tier toggle) -->
       <div class="hq-panel hq-table">
-        <h3><span class="b"></span>Standings</h3>
+        <h3><span class="b"></span>Standings
+          <span class="hq-divtabs">
+            <button v-for="d in DIVS" :key="d" :class="{ on: viewDiv === d - 1, mine: myDivision === d - 1 }" @click="viewDiv = d - 1">{{ DIV_NAMES[d - 1] }}</button>
+          </span>
+        </h3>
         <div class="hq-trow hq-thead">
           <span class="r">#</span><span class="c">Club</span>
           <span>P</span><span>W</span><span>L</span><span>RF</span><span>RA</span><span>Δ</span><span class="pts">Pts</span>
         </div>
-        <div v-for="(s, rank) in table" :key="s.club" class="hq-trow" :class="{ me: s.club === myClub }" @click="selectClub(s.club)">
+        <div v-for="(s, rank) in shownTable" :key="s.club" class="hq-trow" :class="[zoneOf(rank + 1), { me: s.club === myClub }]" @click="selectClub(s.club)">
           <span class="r">{{ rank + 1 }}</span>
           <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i>{{ cname(s.club) }}</span>
           <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
           <span>{{ s.rf }}</span><span>{{ s.ra }}</span>
           <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
           <span class="pts">{{ s.points }}</span>
+        </div>
+        <div class="hq-zonekey">
+          <span v-if="viewDiv > 0"><i class="zk promo"></i>top {{ PROMO }} promote</span>
+          <span v-if="viewDiv < DIVS - 1"><i class="zk releg"></i>bottom {{ PROMO }} relegate</span>
         </div>
       </div>
 
@@ -170,7 +202,8 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-clubmeta">
               <div class="hq-clubname">{{ nameOf(myClub) }}<span v-if="titleCount(myClub)" class="hq-titles" :title="`${titleCount(myClub)} championship${titleCount(myClub) > 1 ? 's' : ''}`">{{ '🏆'.repeat(Math.min(5, titleCount(myClub))) }}<i v-if="titleCount(myClub) > 5">×{{ titleCount(myClub) }}</i></span></div>
               <div class="hq-clubsub">
-                <span class="hq-pos">{{ w.rankOf(myClub) }}<sup>{{ ['st','nd','rd'][w.rankOf(myClub)-1] || 'th' }}</sup></span> of {{ N }}
+                <span class="hq-tier" :class="'t' + myDivision">{{ DIV_NAMES[myDivision] }}</span>
+                <span class="hq-pos">{{ w.rankOf(myClub) }}<sup>{{ ['st','nd','rd'][w.rankOf(myClub)-1] || 'th' }}</sup></span> of {{ DIV_SIZE }}
                 <span v-if="myStanding">· {{ myStanding.won }}W {{ myStanding.lost }}L · {{ myStanding.diff >= 0 ? '+' : '' }}{{ myStanding.diff }} diff</span>
               </div>
               <div class="hq-strbar"><i :style="{ width: (club(myClub).strength * 100) + '%' }"></i><span>strength {{ club(myClub).strength.toFixed(2) }}</span></div>
