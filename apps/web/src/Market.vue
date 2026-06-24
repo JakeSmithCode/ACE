@@ -48,6 +48,6 @@ const sourceOf = (e: MarketEntry) => e.from === -1 ? 'free agent' : w.clubs.valu
         {{ overall(e.player) > overall(w.myPlayerOf(e.player.role)!) ? 'sign ▲' : 'sign' }}
       </button>
     </div>
-    <div class="hq-compnote">The market never closes — buy any match-day. Signing swaps your same-role player out (a club deal trades them to the seller). List your own players in <b>Squad &amp; Comp</b>; a rival may buy one between match-days.</div>
+    <div class="hq-compnote">The market never closes — buy any match-day. A signing is a cash buy: your same-role player is released to free agency, and a club you buy from banks the fee and restocks from the market. List your own players in <b>Squad &amp; Comp</b>; a rival who'd upgrade may buy one between match-days.</div>
   </div>
 </template>

@@ -4,11 +4,11 @@
 // run. Your club gets two manager overlays the AI clubs don't: an authored comp
 // and authored tactics, both injected into your fixtures.
 import { computed, ref, shallowRef } from 'vue';
-import type { Attributes, Comp, MapId, MatchInput, Player, Tactics } from '@ace/shared';
+import type { Attributes, Comp, MapId, MatchInput, Player, Role, Tactics } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
-  makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague,
+  makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague, makePlayer, HANDLES,
   startingBalance, settleSeason, freeAgents, playerValue, squadRating, aiListings, aiWantsToBuy,
   type Club, type MatchResult, type Matchday, type SeasonLedger,
 } from '@ace/world';
@@ -145,10 +145,25 @@ const remap = (oldId: string, newId: string) => {
   myTactics.value = JSON.parse(JSON.stringify(myTactics.value).split(oldId).join(newId));
   if (myComp.value[oldId]) { const c = { ...myComp.value }; delete c[oldId]; myComp.value = c; }
 };
+const retag = (p: Player, clubId: string, igl?: boolean): Player => ({ ...p, id: `${clubId}-${p.handle.toLowerCase()}`, igl });
+const release = (p: Player): Player => ({ ...p, id: `fa-${p.handle.toLowerCase()}`, igl: false });
 
-/** A club-to-club trade: `buyer` takes `sellerPlayerId`, their same-role player
- *  goes the other way, and the buyer pays the value difference. The whole market
- *  is built from this one move (your buy, your sale, and AI moves all reduce to it). */
+// a club that lost a player restocks from free agency — the best same-role free
+// agent (or, if the pool is dry there, a generated journeyman). Pure deterministic
+// generation (no Math.random), keyed by a move counter.
+let moveSeq = 0;
+function backfillFor(role: Role): Player {
+  const same = freeAgentPool.value.filter(p => p.role === role).sort((a, b) => playerValue(b) - playerValue(a));
+  if (same.length) { freeAgentPool.value = freeAgentPool.value.filter(p => p !== same[0]); return same[0]; }
+  const used = new Set([...leagueHandles(), ...freeAgentPool.value.map(p => p.handle)]);
+  const handle = HANDLES.find(h => !used.has(h)) ?? `Sub${moveSeq}`;
+  return makePlayer(new Rng((seasonSeed.value ^ (++moveSeq * 0x9e3779b9)) >>> 0), role, handle, 'fa', 0.4);
+}
+
+/** A transfer is a cash purchase, not a player-for-player swap: `buyer` pays for
+ *  `sellerPlayerId`; the buyer's same-role player is released to free agency; and
+ *  the seller takes the cash and restocks that slot from free agency. The whole
+ *  market — your buy, your sale, AI moves — reduces to this one move. */
 function trade(buyerIdx: number, sellerIdx: number, sellerPlayerId: string) {
   const buyer = clubs.value[buyerIdx], seller = clubs.value[sellerIdx];
   const sIdx = seller.team.players.findIndex(p => p.id === sellerPlayerId);
@@ -157,11 +172,12 @@ function trade(buyerIdx: number, sellerIdx: number, sellerPlayerId: string) {
   const bIdx = buyer.team.players.findIndex(p => p.role === incoming.role);
   const buyerOld = buyer.team.players[bIdx];
   const fee = playerValue(incoming) - playerValue(buyerOld);
-  const toBuyer: Player = { ...incoming, id: `${buyer.team.id}-${incoming.handle.toLowerCase()}`, igl: buyerOld.igl };
-  const toSeller: Player = { ...buyerOld, id: `${seller.team.id}-${buyerOld.handle.toLowerCase()}`, igl: incoming.igl };
+  const toBuyer = retag(incoming, buyer.team.id, buyerOld.igl);
+  const toSeller = retag(backfillFor(incoming.role as Role), seller.team.id, incoming.igl);  // seller restocks from FA
   clubs.value = clubs.value.map((c, i) => i === buyerIdx ? withPlayer(c, bIdx, toBuyer)
     : i === sellerIdx ? withPlayer(c, sIdx, toSeller) : c);
   balances.value = balances.value.map((b, i) => i === buyerIdx ? b - fee : i === sellerIdx ? b + fee : b);
+  freeAgentPool.value = [release(buyerOld), ...freeAgentPool.value];   // your dropped player → free agency, not the seller
   if (buyerIdx === myClub.value) remap(buyerOld.id, toBuyer.id);
   if (sellerIdx === myClub.value) remap(incoming.id, toSeller.id);
   listings.value = listings.value.filter(l => l.playerId !== sellerPlayerId);
@@ -178,11 +194,11 @@ function acquire(e: MarketEntry) {
   const idx = team.players.findIndex(p => p.role === e.player.role);
   const old = team.players[idx];
   const fee = playerValue(e.player) - playerValue(old);
-  const signed: Player = { ...e.player, id: `${team.id}-${e.player.handle.toLowerCase()}`, igl: old.igl };
+  const signed = retag(e.player, team.id, old.igl);
   clubs.value = clubs.value.map((c, i) => i === myClub.value ? withPlayer(c, idx, signed) : c);
   balances.value = balances.value.map((b, i) => i === myClub.value ? b - fee : b);
   remap(old.id, signed.id);
-  freeAgentPool.value = [{ ...old, id: `fa-${old.handle.toLowerCase()}` }, ...freeAgentPool.value.filter(p => p.id !== e.player.id)];
+  freeAgentPool.value = [release(old), ...freeAgentPool.value.filter(p => p.id !== e.player.id)];
 }
 
 /** Put one of your players up for sale (toggle). A listed player may be bought

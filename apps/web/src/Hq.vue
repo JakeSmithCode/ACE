@@ -100,7 +100,7 @@ onUnmounted(() => { viewer?.destroy(); });
           </span>
           <button class="hq-list" :class="{ on: w.isListed(p.id) }" @click="w.toggleList(p.id)">{{ w.isListed(p.id) ? '● listed' : 'list' }}</button>
         </div>
-        <div class="hq-compnote">Your comp is fielded in your fixtures (off-pool plays rough). <b>List</b> a player to sell — a rival who'd upgrade may buy them between match-days, sending you their player + cash.</div>
+        <div class="hq-compnote">Your comp is fielded in your fixtures (off-pool plays rough). <b>List</b> a player to sell — a rival who'd upgrade may buy them between match-days for cash, and you restock the slot from free agency.</div>
       </div>
     </div>
 
