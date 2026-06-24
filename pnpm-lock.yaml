@@ -90,6 +90,25 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/world:
+    dependencies:
+      '@ace/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@ace/maps':
+        specifier: workspace:*
+        version: link:../maps
+      '@ace/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
 packages:
 
   '@babel/helper-string-parser@7.29.7':

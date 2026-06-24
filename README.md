@@ -17,9 +17,12 @@ packages/
   shared/   the timeline contract + data models — the spine both sides import
   maps/     map assets + alpha→mask→navmesh pipeline + A* pathfinding
   engine/   deterministic seeded sim:  simulateMatch(input) → MatchTimeline
+  world/    deterministic league core: generate AI clubs, schedule, resolve a season
 apps/
-  web/      Vue 3 + Vite viewer — renders a MatchTimeline on the real map
+  web/      Vue 3 + Vite viewer + tactics editor — runs the engine live in the browser
 ```
+
+`world/` is pure and deterministic just like the engine (the navmesh is injected), so the **single-player season loop runs entirely client-side now**, and the **same code is what the Phase-2 server worker will call** to resolve scheduled ticks at scale — no rewrite. A whole season is a function of one seed.
 
 ### The contract — `packages/shared/src/timeline.ts`
 
@@ -66,6 +69,7 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 | command | what it does |
 |---|---|
 | `pnpm sim -- --seed N` | simulate a full match with a given seed |
+| `pnpm season -- --seed N --clubs 8` | generate a league and resolve a full season into a table |
 | `pnpm navmesh` | rebuild the Ascent navmesh from its minimap |
 | `pnpm typecheck` | typecheck every package |
 | `pnpm build` | typecheck packages + build the web app |
@@ -122,7 +126,9 @@ A sample `timeline.json` is committed under `apps/web/public/`, so a fresh clone
 
 The three round-dynamics steps (trading, info-gated rotations, retake) are done — adaptive mid-round reads are parked as an **IGL** trait for the player model.
 
+**The world core — in (Phase 1 begins):** `@ace/world` generates a believable league out of one seed — AI clubs with role-shaped rosters (duelists live on aim/entry, sentinels on gameSense/clutch), distinct house tactics, and a talent hierarchy with noise — then schedules a round-robin and resolves a full season through the same `simulateMatch` the viewer uses. `pnpm season -- --seed 7` prints a real table: a clear top/bottom, sane round differentials, and ~85% strength→rank agreement (the rest are honest upsets — tactics and variance matter, the ladder isn't fixed). It's pure and deterministic like the engine, so the single-player loop runs client-side now and the **same code resolves scheduled ticks on the server later**. This is the spine of the prep→resolve→learn→adjust loop.
+
 Next, in order (see `docs/DESIGN.md` §17):
-1. **Tactics editor (v2) — drawn, both sides** — drag-to-place holds, kill points, routes, routed kill-points (with a waypoint budget), authored facing/crossfires, death/contact/time triggers, utility lineups, walkability feedback, attack-side executes (with a forced site), **and an A/B mirror** are all in — the editor covers attack and defense end to end. The one piece left, a **play library** (save/name/reuse a playbook), is deferred to Phase 2: it needs accounts + persistence, so it belongs with the real webapp, not in-memory state.
-2. **The persistent world** — scheduling, the resolution worker, accounts, clubs (NestJS + Supabase + Stripe, Phase 2) — where these match inputs (roster, comp, tactics) come from real owners.
-3. **Per-map tuning + N-site support** — all 11 maps are navmeshed and simulate; tune each map's anchors (and scale rotation timing to map size) so they play as balanced as Ascent, and teach the engine 3-site maps (Haven, Lotus). Staying 2D — a per-map height layer only if a vertical map needs it.
+1. **Phase 1 — the vertical slice (the loop).** The world core is in; next is the loop *around* it: an HQ where you own a club, a season screen (your schedule + the live table), "play the next match-day" resolving your fixture + the AI fixtures and letting you **watch your match** in the existing viewer, plus a basic between-tick development + finances pass. Built client-side (the engine runs in the browser) — no backend until the loop is proven fun. **Gate:** a solo player wants one more match-day.
+2. **Phase 2 — persistence & real owners.** Accounts (self-owned auth, *not* a vendor), persistent clubs, the league pyramid, scheduled resolution at scale, the public club page, shareable replays. This is where a *play library* (save/name/reuse a playbook) lands, since it finally has somewhere to live.
+3. **Per-map tuning + N-site support** — tune the other 10 maps' anchors so they play as balanced as Ascent, and teach the engine 3-site maps (Haven, Lotus). Staying 2D.

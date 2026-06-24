@@ -14,7 +14,8 @@
     "paths": {
       "@ace/shared": ["packages/shared/src/index.ts"],
       "@ace/maps": ["packages/maps/src/index.ts"],
-      "@ace/engine": ["packages/engine/src/index.ts"]
+      "@ace/engine": ["packages/engine/src/index.ts"],
+      "@ace/world": ["packages/world/src/index.ts"]
     }
   }
 }

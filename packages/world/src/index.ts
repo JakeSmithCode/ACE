@@ -1,0 +1,8 @@
+// @ace/world — the persistent-world core: deterministic club & league
+// generation, scheduling, and season resolution. Pure (the navmesh is injected),
+// so it runs in the browser for the single-player loop now and on the server
+// worker later, unchanged.
+export * from './names.js';
+export * from './clubs.js';
+export * from './schedule.js';
+export * from './season.js';
