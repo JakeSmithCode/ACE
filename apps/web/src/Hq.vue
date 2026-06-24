@@ -8,6 +8,7 @@ import { simulateMatch } from '@ace/engine';
 import { ROLE_AGENTS } from '@ace/world';
 import { Viewer } from './viewer';
 import Roster from './Roster.vue';
+import Market from './Market.vue';
 import { useWorld, MAP } from './world';
 
 const w = useWorld();
@@ -15,7 +16,7 @@ const { clubs, myClub, season, prevById, myComp, balance, ledger,
   table, total, done, dayIdx, myStanding, myResults, nextFixture } = w;
 const N = w.N;
 
-const hqTab = ref<'season' | 'squad'>('season');
+const hqTab = ref<'season' | 'squad' | 'market'>('season');
 
 const club = (i: number) => clubs.value[i];
 const tagOf = (i: number) => club(i).team.tag;
@@ -69,6 +70,7 @@ onUnmounted(() => { viewer?.destroy(); });
       <div class="hq-tabs">
         <button :class="{ on: hqTab === 'season' }" @click="hqTab = 'season'">Season</button>
         <button :class="{ on: hqTab === 'squad' }" @click="hqTab = 'squad'">Squad &amp; Comp</button>
+        <button :class="{ on: hqTab === 'market' }" @click="hqTab = 'market'">Market</button>
       </div>
       <div class="hq-actions">
         <button v-if="!done" class="hq-go" @click="w.resolveDay()">▶ Resolve match-day</button>
@@ -79,8 +81,11 @@ onUnmounted(() => { viewer?.destroy(); });
       </div>
     </div>
 
+    <!-- MARKET -->
+    <Market v-if="hqTab === 'market'" />
+
     <!-- SQUAD & COMP -->
-    <div v-if="hqTab === 'squad'" class="hq-grid">
+    <div v-else-if="hqTab === 'squad'" class="hq-grid">
       <Roster :team="club(myClub).team" :prev-by-id="prevById" />
       <div class="hq-panel hq-comp">
         <h3><span class="b"></span>Comp <span class="rs-sub">field each player's agent</span></h3>

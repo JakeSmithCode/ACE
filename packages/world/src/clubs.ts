@@ -29,44 +29,50 @@ const AGENTS = ROLE_AGENTS;
 
 const clamp = (v: number, lo = 35, hi = 95) => Math.max(lo, Math.min(hi, Math.round(v)));
 
+/** Generate one player — role-shaped attributes, an age, age-scaled potential,
+ *  and a mastered agent pool. Used for league squads and free agents alike, so
+ *  a signing is the same kind of object as a homegrown player. `idPrefix` namespaces
+ *  the id (a club tag, or 'fa' for a free agent). */
+export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: string, strength: number): Player {
+  const base = 42 + strength * 46;                 // ~42..88 talent center
+  const shape = ROLE_SHAPE[role];
+  const roll = (k: keyof Attributes) => clamp(base + (shape[k] ?? 0) + rng.range(-6, 6));
+  const attr: Attributes = {
+    aim: roll('aim'), movement: roll('movement'), gameSense: roll('gameSense'),
+    utility: roll('utility'), clutch: roll('clutch'), entry: roll('entry'),
+  };
+  // duelists skew young, anchors skew veteran — flavour, and the hook for aging
+  const age = role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27);
+  // potential = current + age-scaled headroom × a per-player gift; the young
+  // carry real upside, a veteran is ~already there. (Hidden — Phase-3 scouting.)
+  const youth = Math.max(0, (24 - age) / 8);       // 1 at ≤16 .. 0 at ≥24
+  const gift = rng.range(0.6, 1.5);                // some players have more upside than others
+  const head = (k: keyof Attributes) => clamp(attr[k] + Math.round(youth * gift * (9 + rng.range(0, 14))), attr[k], 99);
+  const potential: Attributes = {
+    aim: head('aim'), movement: head('movement'), gameSense: head('gameSense'),
+    utility: head('utility'), clutch: head('clutch'), entry: head('entry'),
+  };
+  // a role-appropriate main + secondary agent, mastery scaling with talent
+  const roster = [...AGENTS[role]];
+  const main = roster.splice(rng.int(0, roster.length - 1), 1)[0];
+  const second = roster.splice(rng.int(0, roster.length - 1), 1)[0];
+  const agents = [
+    { agent: main, level: clamp(70 + strength * 22 + rng.range(-4, 6), 50, 99) },
+    { agent: second, level: clamp(55 + strength * 18 + rng.range(-6, 6), 40, 90) },
+  ];
+  return { id: `${idPrefix}-${handle.toLowerCase()}`, handle, role, age, attr, potential, agents };
+}
+
 /** Build one club. `strength` (0..1) sets the talent floor; role shape + a small
  *  per-attribute roll give each player a believable, distinct profile. Handles
  *  are pulled from `pool` (consumed, so a league never repeats a handle). */
 export function makeClub(rng: Rng, identity: { name: string; tag: string }, strength: number, pool: string[]): Team {
-  const base = 42 + strength * 46;                 // ~42..88 talent center
   const iglIdx = 4;                                // the sentinel calls (like the sample veterans)
   const players: Player[] = COMP.map((role, i) => {
-    const shape = ROLE_SHAPE[role];
-    const roll = (k: keyof Attributes) => clamp(base + (shape[k] ?? 0) + rng.range(-6, 6));
-    const attr: Attributes = {
-      aim: roll('aim'), movement: roll('movement'), gameSense: roll('gameSense'),
-      utility: roll('utility'), clutch: roll('clutch'), entry: roll('entry'),
-    };
-    // duelists skew young, anchors skew veteran — flavour, and the hook for aging
-    const age = role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27);
-    // potential = current + age-scaled headroom × a per-player gift; the young
-    // carry real upside, a veteran is ~already there. The development tick grows
-    // current toward this ceiling. (Hidden from the manager — Phase-3 scouting.)
-    const youth = Math.max(0, (24 - age) / 8);     // 1 at ≤16 .. 0 at ≥24
-    const gift = rng.range(0.6, 1.5);              // some players have more upside than others
-    const head = (k: keyof Attributes) => clamp(attr[k] + Math.round(youth * gift * (9 + rng.range(0, 14))), attr[k], 99);
-    const potential: Attributes = {
-      aim: head('aim'), movement: head('movement'), gameSense: head('gameSense'),
-      utility: head('utility'), clutch: head('clutch'), entry: head('entry'),
-    };
-    const handle = pool.pop()!;
-    // a role-appropriate main + 1–2 secondary agents, mastery scaling with talent
-    const roster = [...AGENTS[role]];
-    const main = roster.splice(rng.int(0, roster.length - 1), 1)[0];
-    const second = roster.splice(rng.int(0, roster.length - 1), 1)[0];
-    const agents = [
-      { agent: main, level: clamp(70 + strength * 22 + rng.range(-4, 6), 50, 99) },
-      { agent: second, level: clamp(55 + strength * 18 + rng.range(-6, 6), 40, 90) },
-    ];
-    return {
-      id: `${identity.tag.toLowerCase()}-${handle.toLowerCase()}`,
-      handle, role, igl: i === iglIdx, age, attr, potential, agents,
-    };
+    const handle = pool.pop()!;                    // (non-rng; draw order is identical to inline)
+    const p = makePlayer(rng, role, handle, identity.tag.toLowerCase(), strength);
+    if (i === iglIdx) p.igl = true;
+    return p;
   });
   return { id: identity.tag.toLowerCase(), tag: identity.tag, name: identity.name, players };
 }

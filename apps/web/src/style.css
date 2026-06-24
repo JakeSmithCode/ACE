@@ -375,3 +375,26 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ed-mine,.ed-opp{font-family:var(--label);font-size:8px;letter-spacing:.1em;padding:2px 5px;margin-left:8px;vertical-align:middle}
 .ed-mine{background:rgba(34,211,238,.16);color:var(--att)}
 .ed-opp{background:rgba(255,92,110,.12);color:var(--def)}
+
+/* Transfer market */
+.mk h3{justify-content:flex-start}
+.mk-bal{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.04em;text-transform:none;color:var(--muted)}
+.mk-bal b{font-family:var(--display);font-size:17px;color:var(--win);margin-left:5px}
+.mk-bal b.neg{color:var(--def)}
+.mk-filters{display:flex;gap:4px;margin-bottom:10px}
+.mk-filters button{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:4px 11px;cursor:pointer}
+.mk-filters button:hover{color:var(--text)}
+.mk-filters button.on{background:var(--bg-3);color:var(--text);border-color:var(--brand)}
+.mk-row{display:grid;grid-template-columns:1.7fr 40px 46px 86px 64px 1.2fr 70px 76px;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line);font-size:13px;font-variant-numeric:tabular-nums}
+.mk-row span{color:var(--muted)}
+.mk-row .c{display:flex;align-items:center;gap:9px;color:var(--text)}
+.mk-row .c b{font-family:var(--display);font-weight:700;font-size:16px}
+.mk-row .ovr{font-family:var(--display);font-weight:700;font-size:17px;color:var(--text)}
+.mk-row .rs-stars{font-size:11px;letter-spacing:0}
+.mk-row .vs{color:var(--muted)}.mk-row .vs i{font-style:normal;color:var(--text);font-weight:600;margin-left:3px}
+.mk-row .fe{font-weight:700}.mk-row .fe.pos{color:var(--win)}.mk-row .fe.neg{color:var(--def)}
+.mk-head{cursor:default;border-bottom:1px solid var(--line-2)}
+.mk-head span{font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.mk-sign{background:var(--brand);border:1px solid var(--brand);color:var(--bg);font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.04em;padding:5px 0;cursor:pointer}
+.mk-sign:hover{filter:brightness(1.08)}
+.mk-sign:disabled{background:transparent;color:var(--muted-2);border-color:var(--line);cursor:default}
