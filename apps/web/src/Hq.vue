@@ -89,7 +89,7 @@ onUnmounted(() => { viewer?.destroy(); });
       <Roster :team="club(myClub).team" :prev-by-id="prevById" />
       <div class="hq-panel hq-comp">
         <h3><span class="b"></span>Comp <span class="rs-sub">field each player's agent</span></h3>
-        <div v-for="p in club(myClub).team.players" :key="p.id" class="hq-comprow">
+        <div v-for="p in club(myClub).team.players" :key="p.id" class="hq-comprow" :class="{ listed: w.isListed(p.id) }">
           <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
           <span class="hq-cph">{{ p.handle }}</span>
           <select :value="pick(p)" @change="setComp(p, ($event.target as HTMLSelectElement).value)">
@@ -98,8 +98,9 @@ onUnmounted(() => { viewer?.destroy(); });
           <span class="hq-mast" :class="{ off: masteryOf(p, pick(p)) < 50 }">
             {{ masteryOf(p, pick(p)) >= 50 ? 'mastery ' + masteryOf(p, pick(p)) : 'off-pool' }}
           </span>
+          <button class="hq-list" :class="{ on: w.isListed(p.id) }" @click="w.toggleList(p.id)">{{ w.isListed(p.id) ? '● listed' : 'list' }}</button>
         </div>
-        <div class="hq-compnote">Your comp is fielded in your fixtures. An off-pool pick plays rough (low mastery hurts the duel + utility).</div>
+        <div class="hq-compnote">Your comp is fielded in your fixtures (off-pool plays rough). <b>List</b> a player to sell — a rival who'd upgrade may buy them between match-days, sending you their player + cash.</div>
       </div>
     </div>
 

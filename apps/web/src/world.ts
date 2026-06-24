@@ -9,7 +9,7 @@ import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, doubleRoundRobin, standings, fixtureSeed, developLeague,
-  startingBalance, settleSeason, freeAgents, playerValue, squadRating,
+  startingBalance, settleSeason, freeAgents, playerValue, squadRating, aiListings, aiWantsToBuy,
   type Club, type MatchResult, type Matchday, type SeasonLedger,
 } from '@ace/world';
 
@@ -17,6 +17,11 @@ export const N = 8;
 export const MAP: MapId = 'ascent';
 const RESOLVE_FORKS = 3;            // standings only need the final score
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));
+
+/** A buyable slot on the always-open market: a player + where they come from
+ *  (`from === -1` a free agent, else the club index selling them). */
+export interface MarketEntry { player: Player; from: number }
 
 const seasonSeed = ref(7);
 const clubs = shallowRef<Club[]>(makeLeague(seasonSeed.value, N));
@@ -28,11 +33,15 @@ const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
 const myTactics = ref<Tactics>(clone(clubs.value[myClub.value].tactics));  // your authored tactics (overlay)
-const balance = ref(startingBalance(clubs.value[myClub.value].strength));
+const balances = ref<number[]>(clubs.value.map(c => startingBalance(c.strength)));  // every club's bank
 const ledger = ref<SeasonLedger | null>(null);
 const leagueHandles = () => new Set(clubs.value.flatMap(c => c.team.players.map(p => p.handle)));
 const marketSeed = () => (seasonSeed.value ^ (season.value * 0x85ebca6b)) >>> 0;
-const market = shallowRef<Player[]>(freeAgents(marketSeed(), leagueHandles()));
+const freeAgentPool = shallowRef<Player[]>(freeAgents(marketSeed(), leagueHandles()));  // unowned, mutable
+const listings = shallowRef<{ club: number; playerId: string }[]>(aiListings(clubs.value, myClub.value));  // AI players for sale
+const myListed = ref<Set<string>>(new Set());          // your player ids put up for sale
+
+const balance = computed(() => balances.value[myClub.value]);
 
 let nav: Navmesh | null = null;
 
@@ -49,6 +58,14 @@ const nextOpponent = computed(() => {
   const fx = nextFixture.value ?? schedule.value[0].find(f => f.home === myClub.value || f.away === myClub.value)!;
   return fx.home === myClub.value ? fx.away : fx.home;
 });
+// the always-open board: free agents + every AI club's listed player (resolved
+// live so it reflects development; stale listings are filtered out)
+const market = computed<MarketEntry[]>(() => [
+  ...freeAgentPool.value.map(p => ({ player: p, from: -1 })),
+  ...listings.value
+    .map(l => ({ player: clubs.value[l.club].team.players.find(p => p.id === l.playerId), from: l.club }))
+    .filter((e): e is MarketEntry => !!e.player),
+]);
 
 // build a fixture's MatchInput, overlaying YOUR comp + tactics when you play
 function buildInput(fx: { home: number; away: number }, seed: number): MatchInput {
@@ -70,28 +87,36 @@ function resolveDay() {
   const fresh = schedule.value[dayIdx.value].map((fx, slot) => simFixture(fx, fixtureSeed(seasonSeed.value, dayIdx.value, slot)));
   results.value = [...results.value, ...fresh];
   dayIdx.value++;
+  resolveListings();   // the market is always live — your listed players may sell each match-day
 }
 function simSeason() { while (!done.value) resolveDay(); }
 
-// the off-season: settle your books by final rank, then develop every squad.
-// Your authored tactics/comp carry over (player ids are stable through a tick).
+// the off-season: settle EVERY club's books by final rank, then develop every
+// squad, then refresh the board. Your authored tactics/comp carry over (player
+// ids are stable through a tick).
 function advanceSeason() {
   if (!done.value) return;
+  balances.value = balances.value.map((b, i) => b + settleSeason(clubs.value[i].team, rankOf(i), N, season.value).net);
   ledger.value = settleSeason(myTeam.value, rankOf(myClub.value), N, season.value);
-  balance.value += ledger.value.net;
   prevById.value = new Map(clubs.value.flatMap(c => c.team.players.map(p =>
     [p.id, { age: p.age, attr: { ...p.attr } }] as const)));
   clubs.value = developLeague(clubs.value, new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0));
   season.value++;
   results.value = []; dayIdx.value = 0;
-  market.value = freeAgents(marketSeed(), leagueHandles());
+  refreshMarket();
+}
+function refreshMarket() {
+  freeAgentPool.value = freeAgents(marketSeed(), leagueHandles());
+  listings.value = aiListings(clubs.value, myClub.value);
+  myListed.value = new Set();
 }
 function selectClub(i: number) {
   myClub.value = i;
   myComp.value = {};
   myTactics.value = clone(clubs.value[i].tactics);
-  balance.value = startingBalance(clubs.value[i].strength);
   ledger.value = null;
+  listings.value = aiListings(clubs.value, i);
+  myListed.value = new Set();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -101,32 +126,82 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   prevById.value = new Map();
   myComp.value = {};
   myTactics.value = clone(clubs.value[myClub.value].tactics);
-  balance.value = startingBalance(clubs.value[myClub.value].strength);
+  balances.value = clubs.value.map(c => startingBalance(c.strength));
   ledger.value = null;
-  market.value = freeAgents(marketSeed(), leagueHandles());
+  refreshMarket();
 }
 
-// --- transfer market: sign a free agent to replace your same-role player ----
+// --- the always-open market --------------------------------------------------
 const myPlayerOf = (role: string) => myTeam.value.players.find(p => p.role === role);
-const netFee = (fa: Player) => playerValue(fa) - playerValue(myPlayerOf(fa.role)!);  // <0 = you bank cash
-const canAfford = (fa: Player) => netFee(fa) <= balance.value;
-function signPlayer(fa: Player) {
+const netFee = (e: MarketEntry) => playerValue(e.player) - playerValue(myPlayerOf(e.player.role)!);  // <0 = you bank cash
+const canAfford = (e: MarketEntry) => netFee(e) <= balance.value;
+const isListed = (id: string) => myListed.value.has(id);
+
+const withPlayer = (c: Club, idx: number, p: Player): Club => {
+  const team = { ...c.team, players: c.team.players.map((q, i) => i === idx ? p : q) };
+  return { ...c, team, strength: clampStr(squadRating(team) / 100) };
+};
+const remap = (oldId: string, newId: string) => {
+  myTactics.value = JSON.parse(JSON.stringify(myTactics.value).split(oldId).join(newId));
+  if (myComp.value[oldId]) { const c = { ...myComp.value }; delete c[oldId]; myComp.value = c; }
+};
+
+/** A club-to-club trade: `buyer` takes `sellerPlayerId`, their same-role player
+ *  goes the other way, and the buyer pays the value difference. The whole market
+ *  is built from this one move (your buy, your sale, and AI moves all reduce to it). */
+function trade(buyerIdx: number, sellerIdx: number, sellerPlayerId: string) {
+  const buyer = clubs.value[buyerIdx], seller = clubs.value[sellerIdx];
+  const sIdx = seller.team.players.findIndex(p => p.id === sellerPlayerId);
+  if (sIdx < 0) return;
+  const incoming = seller.team.players[sIdx];
+  const bIdx = buyer.team.players.findIndex(p => p.role === incoming.role);
+  const buyerOld = buyer.team.players[bIdx];
+  const fee = playerValue(incoming) - playerValue(buyerOld);
+  const toBuyer: Player = { ...incoming, id: `${buyer.team.id}-${incoming.handle.toLowerCase()}`, igl: buyerOld.igl };
+  const toSeller: Player = { ...buyerOld, id: `${seller.team.id}-${buyerOld.handle.toLowerCase()}`, igl: incoming.igl };
+  clubs.value = clubs.value.map((c, i) => i === buyerIdx ? withPlayer(c, bIdx, toBuyer)
+    : i === sellerIdx ? withPlayer(c, sIdx, toSeller) : c);
+  balances.value = balances.value.map((b, i) => i === buyerIdx ? b - fee : i === sellerIdx ? b + fee : b);
+  if (buyerIdx === myClub.value) remap(buyerOld.id, toBuyer.id);
+  if (sellerIdx === myClub.value) remap(incoming.id, toSeller.id);
+  listings.value = listings.value.filter(l => l.playerId !== sellerPlayerId);
+  if (myListed.value.has(sellerPlayerId)) { const s = new Set(myListed.value); s.delete(sellerPlayerId); myListed.value = s; }
+}
+
+/** You acquire a market entry — a free agent (swap through the unowned pool) or
+ *  an AI club's listed player (a direct trade). */
+function acquire(e: MarketEntry) {
+  if (!canAfford(e)) return;
+  if (e.from >= 0) { trade(myClub.value, e.from, e.player.id); return; }
+  // free agent: your same-role player is released to the pool, the FA joins you
   const team = clubs.value[myClub.value].team;
-  const idx = team.players.findIndex(p => p.role === fa.role);
-  if (idx < 0 || !canAfford(fa)) return;
+  const idx = team.players.findIndex(p => p.role === e.player.role);
   const old = team.players[idx];
-  const fee = playerValue(fa) - playerValue(old);   // capture BEFORE the swap (myPlayerOf changes)
-  const signed: Player = { ...fa, id: `${team.id}-${fa.handle.toLowerCase()}`, igl: old.igl };
-  const players = team.players.map((p, i) => i === idx ? signed : p);
-  const newTeam = { ...team, players };
-  clubs.value = clubs.value.map((c, i) => i === myClub.value
-    ? { ...c, team: newTeam, strength: Math.max(0.3, Math.min(0.95, squadRating(newTeam) / 100)) } : c);
-  balance.value -= fee;
-  // keep tactical references coherent: the new player inherits the slot's role
-  myTactics.value = JSON.parse(JSON.stringify(myTactics.value).split(old.id).join(signed.id));
-  if (myComp.value[old.id]) { const c = { ...myComp.value }; delete c[old.id]; myComp.value = c; }
-  // market: sign out the FA, list the replaced player as a free agent
-  market.value = [{ ...old, id: `fa-${old.handle.toLowerCase()}` }, ...market.value.filter(p => p.id !== fa.id)];
+  const fee = playerValue(e.player) - playerValue(old);
+  const signed: Player = { ...e.player, id: `${team.id}-${e.player.handle.toLowerCase()}`, igl: old.igl };
+  clubs.value = clubs.value.map((c, i) => i === myClub.value ? withPlayer(c, idx, signed) : c);
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b - fee : b);
+  remap(old.id, signed.id);
+  freeAgentPool.value = [{ ...old, id: `fa-${old.handle.toLowerCase()}` }, ...freeAgentPool.value.filter(p => p.id !== e.player.id)];
+}
+
+/** Put one of your players up for sale (toggle). A listed player may be bought
+ *  by an AI club on any match-day (resolveListings). */
+function toggleList(id: string) {
+  const s = new Set(myListed.value);
+  s.has(id) ? s.delete(id) : s.add(id);
+  myListed.value = s;
+}
+/** The market is always live: each match-day, an AI club that would upgrade by
+ *  signing one of your listed players (and can afford it) buys them — you get
+ *  their same-role player plus the cash difference. */
+function resolveListings() {
+  for (const pid of [...myListed.value]) {
+    const mine = myTeam.value.players.find(p => p.id === pid);
+    if (!mine) { const s = new Set(myListed.value); s.delete(pid); myListed.value = s; continue; }
+    const buyer = clubs.value.findIndex((_, i) => i !== myClub.value && aiWantsToBuy(clubs.value, balances.value, i, mine));
+    if (buyer >= 0) trade(buyer, myClub.value, pid);
+  }
 }
 async function ensureNav() { if (!nav) nav = await fetch(`/${MAP}.navmesh.json`).then(r => r.json()); }
 const getNav = () => nav;
@@ -134,9 +209,9 @@ const getNav = () => nav;
 export function useWorld() {
   return {
     N, MAP, seasonSeed, clubs, schedule, results, dayIdx, myClub, season, prevById,
-    myComp, myTactics, balance, ledger, market,
+    myComp, myTactics, balance, balances, ledger, market, myListed,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, advanceSeason, selectClub, newWorld, ensureNav, getNav,
-    myPlayerOf, netFee, canAfford, signPlayer,
+    myPlayerOf, netFee, canAfford, isListed, acquire, toggleList,
   };
 }

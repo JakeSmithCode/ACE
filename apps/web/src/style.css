@@ -398,3 +398,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .mk-sign{background:var(--brand);border:1px solid var(--brand);color:var(--bg);font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.04em;padding:5px 0;cursor:pointer}
 .mk-sign:hover{filter:brightness(1.08)}
 .mk-sign:disabled{background:transparent;color:var(--muted-2);border-color:var(--line);cursor:default}
+
+/* always-open market additions */
+.mk-open{font-family:var(--label);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--win);background:rgba(59,209,127,.12);padding:2px 7px;margin-left:9px}
+.mk-row{grid-template-columns:1.5fr 64px 36px 44px 80px 60px 1fr 66px 72px}
+.mk-row .src{font-family:var(--label);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-2)}
+.mk-row .src.club{color:var(--gold)}
+.hq-comprow{grid-template-columns:42px 1fr 124px 78px 64px}
+.hq-list{background:transparent;border:1px solid var(--line-2);color:var(--muted-2);font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:4px 0;cursor:pointer}
+.hq-list:hover{color:var(--text);border-color:var(--gold)}
+.hq-list.on{background:rgba(229,181,103,.14);color:var(--gold);border-color:rgba(229,181,103,.5)}
+.hq-comprow.listed{box-shadow:inset 2px 0 0 var(--gold)}
