@@ -9,6 +9,7 @@ import PlayEditor from './PlayEditor.vue';
 
 const MAP = 'ascent';
 const ATK_SPAWN: [number, number] = [485, 60];   // Ascent attacker spawn — the default angle defenders watch
+const SITES: { A: [number, number]; B: [number, number] } = { A: [310, 150], B: [270, 793] };  // Ascent site centers (for A/B mirror)
 const FORKS = 50;                 // fewer than the CLI's 120 — snappier live re-sim
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
@@ -155,6 +156,7 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
           :mode="authoring.side"
           :play="playRef(authoring.team, authoring.side).play!"
           :atk-spawn="ATK_SPAWN"
+          :sites="SITES"
           :nav="nav!"
           @update="(p) => onPlay(authoring!.team, authoring!.side, p)"
         />

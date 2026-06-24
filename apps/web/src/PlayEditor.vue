@@ -11,7 +11,7 @@ import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
 import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; nav: Navmesh }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2 }; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
 
 // --- walkability feedback: flag holds/waypoints in a wall and route segments
@@ -60,6 +60,28 @@ function faceNub(pl: PlayerPlan): Vec2 {
   return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
 }
 function setSite(s: 'A' | 'B') { commit(p => { p.site = s; }); }
+
+// A/B mirror: Ascent's sites aren't reflections, so we TRANSPLANT the formation —
+// translate every point by (otherSite − thisSite) and flip the execute site. A
+// rough starting template for the other site that the owner then tunes (the
+// walkability feedback flags whatever lands in a wall).
+const otherSite = (): 'A' | 'B' => (props.play.site ?? 'A') === 'A' ? 'B' : 'A';
+function mirror() {
+  const cur = props.play.site ?? 'A', nxt = otherSite();
+  const dx = props.sites[nxt][0] - props.sites[cur][0], dy = props.sites[nxt][1] - props.sites[cur][1];
+  const clamp = (v: number) => Math.max(0, Math.min(1000, Math.round(v)));
+  const sh = (p: Vec2): Vec2 => [clamp(p[0] + dx), clamp(p[1] + dy)];
+  commit(p => {
+    p.site = nxt;
+    for (const pl of p.plans) {
+      pl.pos = sh(pl.pos);
+      if (pl.face) pl.face = sh(pl.face);
+      if (pl.route) pl.route = pl.route.map(sh);
+      if (pl.rotate) { pl.rotate.pos = sh(pl.rotate.pos); if (pl.rotate.route) pl.rotate.route = pl.rotate.route.map(sh); }
+    }
+    for (const ln of p.lineups ?? []) ln.at = sh(ln.at);
+  });
+}
 
 function commit(mut: (p: Play) => void) {
   const next: Play = JSON.parse(JSON.stringify(props.play));   // cheap (5 plans); avoids mutating the prop
@@ -296,6 +318,7 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         Execute site
         <button :class="{ on: (play.site ?? 'A') === 'A' }" @click="setSite('A')">A</button>
         <button :class="{ on: play.site === 'B' }" @click="setSite('B')">B</button>
+        <button class="pe-mirror" @click="mirror" title="Transplant this formation to the other site, then tune">⇄ mirror to {{ otherSite() }}</button>
         <span class="pe-site-note">forces the round to this site</span>
       </div>
       <div class="pe-hint" v-if="routing">
