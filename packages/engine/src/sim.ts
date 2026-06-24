@@ -4,7 +4,7 @@ import type {
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
-import { ANCHORS, pathfind, inView, posAlong, siteIds, sitePt as siteAnchor, type Navmesh } from '@ace/maps';
+import { ANCHORS, pathfind, inView, posAlong, siteIds, sitePt as siteAnchor, type Navmesh, type MapAnchors } from '@ace/maps';
 
 // ---- tuning ----------------------------------------------------------------
 const STEP = 0.015;        // simulation tick (normalized round time)
@@ -130,6 +130,22 @@ const ease = (p: number) => p * (2 - p);
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const lerp = (a: Vec2, b: Vec2, f: number): Vec2 => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
 
+// Map scale normalization. SPEED is calibrated to Ascent, so on a larger map
+// attackers reach site (and plant) before Ascent-speed rotations can land —
+// the documented attacker-sidedness of far-apart-site maps. We derive each map's
+// characteristic distance (mean attacker spawn→site, plus mean mid→site for the
+// rotation leg) and scale movement speed by it, so a push and a rotation cost the
+// same *fraction of the round* on every map as they do on Ascent. Pure geometry,
+// no magic per-map numbers — and Ascent's scale is exactly 1, so seed 42 is
+// byte-identical (every arrive time is multiplied by 1).
+function charDist(a: MapAnchors): number {
+  const pts = siteIds(a).map(s => siteAnchor(a, s));
+  const mean = (ds: number[]) => ds.reduce((x, y) => x + y, 0) / ds.length;
+  return mean(pts.map(p => dist(a.atkSpawn, p))) * 0.6 + mean(pts.map(p => dist(a.mid, p))) * 0.4;
+}
+const ASCENT_CHAR = charDist(ANCHORS.ascent!);
+const mapScale = (a: MapAnchors): number => charDist(a) / ASCENT_CHAR;
+
 /** A vision-blocking smoke and a first-shot-granting recon/flash pulse — the
  *  two ways utility reaches into a round. Both are pure geometry over time. */
 interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
@@ -239,7 +255,7 @@ function forkSeed(seed: number, n: number, i: number): number {
  *  mutated (alive/death), so callers pass a throwaway copy for forks. */
 function resolveRound(
   agents: Ag[], smokes: Smoke[], pulses: Pulse[], nav: Navmesh,
-  sitePt: Vec2, site: SiteId, attacker: 0 | 1, defender: 0 | 1, rng: Rng,
+  sitePt: Vec2, site: SiteId, attacker: 0 | 1, defender: 0 | 1, scale: number, rng: Rng,
 ): { winner: 0 | 1; method: RoundMethod; events: MatchEvent[] } {
   // a smoke is directional: it blinds the ENEMY's vision through it, not the
   // side that threw it (you play around your own smoke).
@@ -263,7 +279,7 @@ function resolveRound(
   const fireRotation = (ag: Ag, t: number) => {
     const rp = ag.rotatePlan!, here = posAt(ag, t);
     ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
-    ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED); ag.rotatePlan = null;
+    ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED * scale); ag.rotatePlan = null;
   };
 
   const resolvedThisStep = new Set<string>();
@@ -376,6 +392,7 @@ function simulateRound(
 ): Round {
   const defender: 0 | 1 = attacker === 0 ? 1 : 0;
   const A = ANCHORS[input.map]!;
+  const scale = mapScale(A);   // normalize movement to Ascent's timing (1.0 on Ascent)
   const pistol = n === 1 || n === 13;
 
   const buy: Record<'0' | '1', Buy> = {
@@ -409,7 +426,7 @@ function simulateRound(
 
   // attackers: stack at spawn, execute the chosen site. Tempo sets the pace —
   // a fast hit reaches site sooner; a slow default arrives later (more map control).
-  const atkSpeed = 0.8 + atkTac.attack.tempo * 0.5;
+  const atkSpeed = (0.8 + atkTac.attack.tempo * 0.5) * scale;
   if (atkTac.attack.play) {
     // AUTHORED execute: each attacker walks an authored route to a placed spot,
     // watches an authored angle, and can carry a push trigger (death/contact/time
@@ -478,7 +495,7 @@ function simulateRound(
       const rt = plan?.rotate, trig = rt ? resolveTrig(rt.trigger, byId) : null;
       agents.push({
         p, side: defender, handle: p.handle, path, departT: 0,
-        arrive: route ? arriveTime(path) : 0.12,            // a longer route = set up later
+        arrive: route ? arriveTime(path, scale) : 0.12,     // a longer route = set up later
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: true,
         // watch the authored angle if given, else default to facing the attacker spawn
@@ -499,7 +516,7 @@ function simulateRound(
     const readSite = SITES[readIndex(defTac.defense.read, SITES.length)];
     const otherSites = SITES.filter(s => s !== readSite);   // each gets one watcher, in order
     const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
-    const rotSpeed = ROTATE_SPEED * iglRotateMul(defTeam);   // a sharp IGL gets rotators there faster
+    const rotSpeed = ROTATE_SPEED * iglRotateMul(defTeam) * scale;   // sharp IGL + map-scale normalized
     const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
     const slots: { from: Vec2; site: SiteId | 'M' }[] = [];
     for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, siteAnchor(A, readSite), 30), site: readSite });
@@ -587,12 +604,12 @@ function simulateRound(
   let atkForkWins = 0;
   for (let i = 0; i < forks; i++) {
     const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1 }));
-    const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, new Rng(forkSeed(input.seed, n, i)));
+    const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }
 
   // Canonical resolution draws from the match rng (same order as ever).
-  const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, rng);
+  const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, scale, rng);
   events.push(...res.events);
 
   // emit one move event per agent (full path + arrival); viewer freezes on death
