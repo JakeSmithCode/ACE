@@ -6,12 +6,39 @@
 // points (rotate when a teammate dies) — and the rotation can have its OWN
 // authored route. Routes are capped at MAX_ROUTE_WAYPOINTS (a play is a sketch,
 // not micro). Mutations clone-and-emit so the parent re-sims.
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
 import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team } from '@ace/shared';
+import type { Navmesh } from '@ace/maps';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; atkSpawn: Vec2 }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; atkSpawn: Vec2; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
+
+// --- walkability feedback: flag holds/waypoints in a wall and route segments
+// that clip one (authored routes are walked verbatim, so a wall-crossing segment
+// means the player would walk THROUGH it). Same grid the engine pathfinds on.
+const walkable = (pt: Vec2) => {
+  const n = props.nav, c = Math.floor(pt[0] / n.cell), r = Math.floor(pt[1] / n.cell);
+  return c >= 0 && c < n.cols && r >= 0 && r < n.rows && n.walk[r * n.cols + c] === 1;
+};
+const inWall = (pt: Vec2) => !walkable(pt);
+function segHitsWall(a: Vec2, b: Vec2): boolean {
+  const step = props.nav.cell * 0.6, len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const n = Math.max(1, Math.ceil(len / step));
+  for (let i = 0; i <= n; i++) { const f = i / n; if (inWall([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])) return true; }
+  return false;
+}
+// the red overlay segments for a path (consecutive wall-clipping pairs)
+function badSegs(points: Vec2[]): [Vec2, Vec2][] {
+  const out: [Vec2, Vec2][] = [];
+  for (let i = 1; i < points.length; i++) if (segHitsWall(points[i - 1], points[i])) out.push([points[i - 1], points[i]]);
+  return out;
+}
+// hold paths are walked verbatim, so always check them. An UNROUTED rotation is
+// pathfound (A*, wall-aware) by the engine, so only flag a rotation's segments
+// when the owner authored its route (then it IS walked verbatim).
+const holdBad = (pl: PlayerPlan) => badSegs(holdPath(pl));
+const rotBad = (pl: PlayerPlan) => (pl.rotate?.route?.length ? badSegs(rotPath(pl)) : []);
 
 type Target = 'hold' | 'rotate';
 const handleOf = (id: string) => props.team.players.find(p => p.id === id)?.handle ?? id;
@@ -147,8 +174,27 @@ function setTime(player: string, t: number) {
 
 // polyline point strings: the hold path ends AT the hold; the rotation path
 // runs hold → waypoints → rotate target.
-const holdPts = (pl: PlayerPlan) => [...(pl.route ?? []), pl.pos].map(p => p.join(',')).join(' ');
-const rotPts = (pl: PlayerPlan) => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), pl.rotate.pos].map(p => p.join(',')).join(' ') : '';
+const holdPath = (pl: PlayerPlan): Vec2[] => [...(pl.route ?? []), pl.pos];
+const rotPath = (pl: PlayerPlan): Vec2[] => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), pl.rotate.pos] : [];
+const holdPts = (pl: PlayerPlan) => holdPath(pl).map(p => p.join(',')).join(' ');
+const rotPts = (pl: PlayerPlan) => rotPath(pl).map(p => p.join(',')).join(' ');
+const segStr = (s: [Vec2, Vec2]) => `${s[0][0]},${s[0][1]} ${s[1][0]},${s[1][1]}`;
+
+// total off-mesh warnings, for the summary line
+const warnCount = computed(() => {
+  let n = 0;
+  for (const pl of props.play.plans) {
+    if (inWall(pl.pos)) n++;
+    for (const wp of pl.route ?? []) if (inWall(wp)) n++;
+    n += holdBad(pl).length;
+    if (pl.rotate) {
+      if (inWall(pl.rotate.pos)) n++;
+      for (const wp of pl.rotate.route ?? []) if (inWall(wp)) n++;
+      n += rotBad(pl).length;
+    }
+  }
+  return n;
+});
 
 // --- utility lineups ------------------------------------------------------
 function addLineup(kind: UtilKind) {
@@ -187,7 +233,7 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         <polyline v-if="pl.rotate" :points="rotPts(pl)" class="pe-link" :class="{ active: isRouting(pl.player, 'rotate') }" />
         <g v-for="(wp, i) in (pl.rotate?.route || [])" :key="'rw' + i" class="pe-mark wp gold"
            :transform="`translate(${wp[0]},${wp[1]})`" @pointerdown="startDrag(pl.player, 'wp', 'rotate', i, $event)">
-          <circle r="10" class="pe-wp-dot gold" /><text class="pe-wp-ix" y="3.5">{{ i + 1 }}</text>
+          <circle v-if="inWall(wp)" r="16" class="pe-warn" /><circle r="10" class="pe-wp-dot gold" /><text class="pe-wp-ix" y="3.5">{{ i + 1 }}</text>
         </g>
       </g>
 
@@ -197,8 +243,14 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
                   class="pe-route" :class="{ active: isRouting(pl.player, 'hold') }" />
         <g v-for="(wp, i) in (pl.route || [])" :key="i" class="pe-mark wp"
            :transform="`translate(${wp[0]},${wp[1]})`" @pointerdown="startDrag(pl.player, 'wp', 'hold', i, $event)">
-          <circle r="11" class="pe-wp-dot" /><text class="pe-wp-ix" y="3.5">{{ i + 1 }}</text>
+          <circle v-if="inWall(wp)" r="17" class="pe-warn" /><circle r="11" class="pe-wp-dot" /><text class="pe-wp-ix" y="3.5">{{ i + 1 }}</text>
         </g>
+      </g>
+
+      <!-- walkability: route segments that clip a wall (the player would walk through it) -->
+      <g v-for="pl in play.plans" :key="'bs' + pl.player">
+        <polyline v-for="(s, i) in holdBad(pl)" :key="'bh' + i" :points="segStr(s)" class="pe-badseg" />
+        <polyline v-for="(s, i) in rotBad(pl)" :key="'br' + i" :points="segStr(s)" class="pe-badseg" />
       </g>
 
       <!-- rotate targets -->
@@ -206,7 +258,7 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         <g v-if="pl.rotate" class="pe-mark rot" :class="side"
            :transform="`translate(${pl.rotate.pos[0]},${pl.rotate.pos[1]})`"
            @pointerdown="startDrag(pl.player, 'rotate', 'rotate', 0, $event)">
-          <circle r="15" class="pe-dot" /><text class="pe-rot-ic" y="5">↻</text>
+          <circle v-if="inWall(pl.rotate.pos)" r="21" class="pe-warn" /><circle r="15" class="pe-dot" /><text class="pe-rot-ic" y="5">↻</text>
         </g>
       </g>
 
@@ -215,7 +267,7 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
          :class="[side, { sel: routing?.player === pl.player }]"
          :transform="`translate(${pl.pos[0]},${pl.pos[1]})`"
          @pointerdown="startDrag(pl.player, 'pos', 'hold', 0, $event)">
-        <circle r="17" class="pe-dot" /><text class="pe-hl" y="-24">{{ handleOf(pl.player) }}</text>
+        <circle v-if="inWall(pl.pos)" r="23" class="pe-warn" /><circle r="17" class="pe-dot" /><text class="pe-hl" y="-24">{{ handleOf(pl.player) }}</text>
       </g>
 
       <!-- facing handles: the angle each defender watches (drag to aim) -->
@@ -245,6 +297,7 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         they walk in (longer = set up later); <b>kill point</b> = rotate (↻) when its trigger fires —
         a teammate's death, first contact, or the clock. Up to {{ CAP }} waypoints each.
       </div>
+      <div v-if="warnCount" class="pe-warnline">⚠ {{ warnCount }} off-mesh — a spot or path crosses a wall (red); the player can't stand or walk there.</div>
       <div v-for="pl in play.plans" :key="pl.player" class="pe-row"
            :class="{ keyed: pl.rotate, routing: routing?.player === pl.player }">
         <span class="pe-name" :class="side">{{ handleOf(pl.player) }}</span>
