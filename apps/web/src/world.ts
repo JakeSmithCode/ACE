@@ -8,10 +8,11 @@ import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tac
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
-  makeLeague, standings, fixtureSeed, developLeague, developPlayer, makePlayer, HANDLES,
+  makeLeague, standings, developLeague, developPlayer, makePlayer, HANDLES,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
-  seasonIncome, playerWage, ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
+  ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
+  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
 } from '@ace/world';
 
@@ -139,46 +140,33 @@ const market = computed<MarketEntry[]>(() => [
     .filter((e): e is MarketEntry => !!e.player),
 ]);
 
-// build a fixture's MatchInput, overlaying YOUR comp + tactics when you play
+// build a fixture's MatchInput (shared `buildMatchInput`), overlaying YOUR comp +
+// tactics when you play; AI clubs use their stored plan (as the server will)
 function buildInput(fx: { home: number; away: number }, seed: number): MatchInput {
-  const tac = (i: number) => i === myClub.value ? clone(myTactics.value) : clubs.value[i].tactics;
-  const cmp = (i: number) => i === myClub.value ? clone(myComp.value) : {};
-  return {
+  const tac = (i: number): Tactics => i === myClub.value ? clone(myTactics.value) : clubs.value[i].tactics;
+  const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
+  return buildMatchInput({
     seed, map: MAP, patch: patch.value,
-    teams: [clubs.value[fx.home].team, clubs.value[fx.away].team],
-    tactics: [tac(fx.home), tac(fx.away)],
-    comp: [cmp(fx.home), cmp(fx.away)],
-  };
+    home: clubs.value[fx.home].team, away: clubs.value[fx.away].team,
+    tactics: [tac(fx.home), tac(fx.away)], comp: [cmp(fx.home), cmp(fx.away)],
+  });
 }
 function simFixture(fx: { home: number; away: number }, seed: number): MatchResult {
   const [hs, as] = simulateMatch(buildInput(fx, seed), nav!, RESOLVE_FORKS).finalScore;
   return { home: fx.home, away: fx.away, score: [hs, as], winner: hs > as ? fx.home : fx.away, seed };
 }
-// distant tiers don't need a full engine sim — resolve them from club strength
-// (deterministic from the fixture seed). The scoreline is plausible, never
-// watched, and keeps a 110-club world fast. Your own tier always full-sims.
-function quickResult(fx: { home: number; away: number }, seed: number): MatchResult {
-  const hs = clubs.value[fx.home].strength, as = clubs.value[fx.away].strength;
-  const rng = new Rng(seed >>> 0);
-  const homeWins = rng.next() < 1 / (1 + Math.exp(-(hs - as) * 6));
-  const gap = Math.abs(hs - as);
-  const loser = Math.max(3, Math.min(11, Math.round(11 - gap * 14 + rng.range(-2, 3))));
-  return homeWins
-    ? { home: fx.home, away: fx.away, score: [13, loser], winner: fx.home, seed }
-    : { home: fx.home, away: fx.away, score: [loser, 13], winner: fx.away, seed };
-}
+// distant tiers are quick-resolved from club strength (shared `quickResult`) —
+// deterministic, plausible, never watched; your own tier always full-sims
+const quickFixture = (fx: { home: number; away: number }, seed: number): MatchResult =>
+  quickResultPure(fx.home, fx.away, clubs.value[fx.home].strength, clubs.value[fx.away].strength, seed);
 function resolveDay() {
   if (done.value || !nav) return;
-  // the whole world advances each match-day: your tier full-sims (watchable),
-  // every other tier is quick-resolved by strength
-  const fresh: MatchResult[] = [];
-  for (let d = 0; d < DIVS; d++) {
-    const full = d === myDivision.value;
-    schedules.value[d][dayIdx.value].forEach((fx, slot) => {
-      const seed = fixtureSeed(seasonSeed.value, dayIdx.value, slot + d * 1000);
-      fresh.push(full ? simFixture(fx, seed) : quickResult(fx, seed));
-    });
-  }
+  // the whole world advances each match-day (shared `resolveWorldDay`): your tier
+  // full-sims (watchable), every other tier is quick-resolved by strength
+  const fresh = resolveWorldDay({
+    schedules: schedules.value, day: dayIdx.value, seasonSeed: seasonSeed.value,
+    full: d => d === myDivision.value, sim: simFixture, quick: quickFixture,
+  });
   results.value = [...results.value, ...fresh];
   dayIdx.value++;
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -199,22 +187,18 @@ function enterPlayoffs() {
 // the off-season: settle EVERY club's books by final rank in its OWN division
 // (the top tier pays more), apply promotion/relegation, then develop every squad
 // and refresh the board. Your authored tactics/comp carry over (ids are stable).
-const divMult = (d: number) => Math.max(0.18, 1 - d * 0.075);   // each tier down earns less — the Premier is where the money is
 function advanceSeason() {
   if (!done.value) return;
   const bracket = playoffs.value;
   const tables = Array.from({ length: DIVS }, (_, d) => tableOf(d));   // final regular-season tables (pre-swap)
   const rankIn = (i: number) => tables[division.value[i]].findIndex(s => s.club === i) + 1;
   const poPrize = (i: number) => bracket ? playoffPrize(finishOf(bracket, i)) : 0;
-  // settle every club by its division rank; YOUR wage bill is over the whole roster
-  const incomeOf = (i: number) => { const d = division.value[i]; const { sponsor, prize } = seasonIncome(rankIn(i), DIV_SIZE); return Math.round((sponsor + prize) * divMult(d)); };
-  const myWages = myRoster.value.reduce((s, p) => s + playerWage(p), 0);
-  const my = division.value[myClub.value];
-  const myInc = seasonIncome(rankIn(myClub.value), DIV_SIZE);
-  const mySponsor = Math.round(myInc.sponsor * divMult(my)), myPrizeMoney = Math.round(myInc.prize * divMult(my)), myPo = poPrize(myClub.value);
-  ledger.value = { season: season.value, sponsor: mySponsor, prize: myPrizeMoney, playoff: myPo, wages: myWages, net: mySponsor + myPrizeMoney + myPo - myWages };
+  // settle every club by its division rank (shared `settleClub`); YOUR wage bill
+  // is over the whole roster (depth), an AI club's over its five
+  const settle = (i: number, wages: number) => settleClub({ rank: rankIn(i), divSize: DIV_SIZE, tier: division.value[i], wages, playoff: poPrize(i) });
+  ledger.value = { season: season.value, ...settle(myClub.value, squadWageBill(myRoster.value)) };
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net : b + incomeOf(i) + poPrize(i) - clubs.value[i].team.players.reduce((s, p) => s + playerWage(p), 0));
+    i === myClub.value ? b + ledger.value!.net : b + settle(i, squadWageBill(clubs.value[i].team.players)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
   const pr = promoteRelegate(division.value, tables, PROMO);
   division.value = pr.division; lastMoves.value = pr.moves;
