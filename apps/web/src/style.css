@@ -475,9 +475,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .po-team.win{color:var(--text)}.po-team.win b{color:var(--win)}
 .po-team.out{opacity:.5}
 .po-team.me{box-shadow:inset 3px 0 0 var(--brand)}
-.po-games{display:flex;gap:4px;padding:7px 12px;background:var(--bg-3);border-top:1px solid var(--line)}
+.po-games{display:flex;flex-wrap:wrap;gap:4px;padding:7px 12px;background:var(--bg-3);border-top:1px solid var(--line)}
 .po-game{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.04em;padding:3px 8px;cursor:pointer}
-.po-game:hover{color:var(--text);border-color:var(--brand)}
+.po-game i{font-style:normal;color:var(--muted-2);text-transform:uppercase;font-size:9px}
+.po-game:hover{color:var(--text);border-color:var(--brand)}.po-game:hover i{color:var(--brand)}
+/* map veto strip */
+.po-veto{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:6px 12px;border-top:1px solid var(--line);font-family:var(--label);font-size:9px;letter-spacing:.03em}
+.po-need{color:var(--gold);font-weight:700;margin-right:2px}
+.po-vstep{color:var(--muted-2);text-transform:uppercase}
+.po-vstep i{font-style:normal;margin:0 2px}
+.po-vstep.ban{color:var(--def);opacity:.7;text-decoration:line-through}
+.po-vstep.pick{color:var(--text)}
+.po-vstep.decider{color:var(--gold)}
 .po-champ{margin-top:4px;padding:9px 12px;background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--display);font-weight:700;font-size:14px}
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
 .hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}

@@ -105,8 +105,9 @@ export function advanceWorld(w: WorldState): Rollover {
   const tables = tablesOf(w);
   const div = divisionOf(w);
   const rankIn = (i: number) => tables[div[i]].findIndex(s => s.club === i) + 1;
-  // the Premier crowns a champion via a best-of-three bracket (quick-resolved)
-  const bracket = runPlayoffs(tables[0], w.seed, w.season, (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
+  // the Premier crowns a champion via the playoff bracket (quick-resolved, so the
+  // map veto is trivial here — strength-vs-strength is map-agnostic)
+  const bracket = runPlayoffs(tables[0], w.seed, w.season, ['ascent'], () => 0, (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
   const champion = bracket.champion ?? tables[0][0].club;
   const poPrize = (i: number) => div[i] === 0 ? playoffPrize(finishOf(bracket, i)) : 0;
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);

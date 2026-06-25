@@ -12,7 +12,7 @@ import {
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
-  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill,
+  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
 } from '@ace/world';
 
@@ -155,26 +155,38 @@ const market = computed<MarketEntry[]>(() => [
     .filter((e): e is MarketEntry => !!e.player),
 ]);
 
-// build a fixture's MatchInput on its (seed-derived) map, overlaying YOUR comp +
-// tactics when you play. Your authored PLAYS are Ascent-coordinates, so on any
-// other pool map they're dropped — your dials (map-agnostic) still apply.
-function buildInput(fx: { home: number; away: number }, seed: number): MatchInput {
-  const m = fixtureMap(seed);
+// a club plays a touch better on its comfort maps (mapAffinity), worse on its
+// weak ones — bump the fielded five's attrs by the map's affinity. This is what
+// makes the playoff map veto strategic.
+const AFFINITY_ATTRS = ['aim', 'movement', 'gameSense', 'utility', 'clutch', 'entry'] as const;
+function withAffinity(team: Club['team'], m: MapId): Club['team'] {
+  const d = mapAffinity(team.id, m);
+  return { ...team, players: team.players.map(p => {
+    const attr = { ...p.attr };
+    for (const k of AFFINITY_ATTRS) attr[k] = Math.max(1, Math.min(99, attr[k] + d));
+    return { ...p, attr };
+  }) };
+}
+// build a fixture's MatchInput on its map (seed-derived, or an explicit veto map),
+// overlaying YOUR comp + tactics + each club's map affinity. Your authored PLAYS
+// are Ascent-coordinates, so on any other pool map they're dropped — your dials
+// (map-agnostic) still apply.
+function buildInput(fx: { home: number; away: number }, seed: number, map: MapId = fixtureMap(seed)): MatchInput {
   const tac = (i: number): Tactics => {
     if (i !== myClub.value) return clubs.value[i].tactics;
     const t = clone(myTactics.value);
-    if (m !== MAP) { t.attack.play = undefined; t.defense.play = undefined; }
+    if (map !== MAP) { t.attack.play = undefined; t.defense.play = undefined; }
     return t;
   };
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
   return buildMatchInput({
-    seed, map: m, patch: patch.value,
-    home: clubs.value[fx.home].team, away: clubs.value[fx.away].team,
+    seed, map, patch: patch.value,
+    home: withAffinity(clubs.value[fx.home].team, map), away: withAffinity(clubs.value[fx.away].team, map),
     tactics: [tac(fx.home), tac(fx.away)], comp: [cmp(fx.home), cmp(fx.away)],
   });
 }
-function simFixture(fx: { home: number; away: number }, seed: number): MatchResult {
-  const [hs, as] = simulateMatch(buildInput(fx, seed), navOf(fixtureMap(seed))!, RESOLVE_FORKS).finalScore;
+function simFixture(fx: { home: number; away: number }, seed: number, map: MapId = fixtureMap(seed)): MatchResult {
+  const [hs, as] = simulateMatch(buildInput(fx, seed, map), navOf(map)!, RESOLVE_FORKS).finalScore;
   return { home: fx.home, away: fx.away, score: [hs, as], winner: hs > as ? fx.home : fx.away, seed };
 }
 // distant tiers are quick-resolved from club strength (shared `quickResult`) —
@@ -207,7 +219,8 @@ function simSeason() { while (!done.value) resolveDay(); }
 // game is re-simmable to watch. The champion banks a title.
 function enterPlayoffs() {
   if (!done.value || playoffs.value || !navReady) return;
-  const bracket = runPlayoffs(table.value, seasonSeed.value, season.value, (home, away, seed) => simFixture({ home, away }, seed));
+  const affinityOf = (c: number, m: MapId) => mapAffinity(clubs.value[c].team.id, m);
+  const bracket = runPlayoffs(table.value, seasonSeed.value, season.value, MAP_POOL, affinityOf, (home, away, seed, map) => simFixture({ home, away }, seed, map));
   if (bracket.champion != null) titles.value = titles.value.map((t, i) => i === bracket.champion ? t + 1 : t);
   playoffs.value = bracket;
 }

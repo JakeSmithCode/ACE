@@ -61,13 +61,16 @@ const omit = (o: Record<string, string>, k: string) => { const c = { ...o }; del
 // --- watch a fixture back -------------------------------------------------
 const watchHost = ref<HTMLElement | null>(null);
 const watching = ref<typeof w.myResults.value[number] | null>(null);
+const watchedMap = ref('ascent');
 let viewer: Viewer | null = null;
-function watch(r: NonNullable<typeof watching.value>) {
-  const map = w.fixtureMap(r.seed), nav = w.navOf(map); if (!nav) return;   // the fixture's own map
-  watching.value = r;
+// `mapOverride` forces the map (a playoff game runs on its veto map, not the
+// seed-derived one); regular fixtures default to their own map.
+function watch(r: NonNullable<typeof watching.value>, mapOverride?: string) {
+  const map = (mapOverride ?? w.fixtureMap(r.seed)) as ReturnType<typeof w.fixtureMap>, nav = w.navOf(map); if (!nav) return;
+  watching.value = r; watchedMap.value = map;
   // re-sim from the fixture seed at higher fork count for True Odds; buildInput
-  // overlays YOUR comp + tactics, so watching your own fixture shows your plan.
-  const out = simulateMatch(w.buildInput(r, r.seed), nav, 50);
+  // overlays YOUR comp + tactics + map affinity, so watching shows your plan.
+  const out = simulateMatch(w.buildInput(r, r.seed, map), nav, 50);
   requestAnimationFrame(() => { viewer?.destroy(); if (watchHost.value) viewer = new Viewer(watchHost.value, out, `/${map}.png`, nav as any); });
 }
 
@@ -143,7 +146,7 @@ onUnmounted(() => { viewer?.destroy(); });
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">
-      <h3><span class="b"></span>Playoffs <span class="rs-sub">top 4 · best of 3{{ playoffs.champion != null ? ` · champion ${tagOf(playoffs.champion)}` : '' }}</span></h3>
+      <h3><span class="b"></span>Playoffs <span class="rs-sub">top 4 · Bo3 semis · Bo5 final · map veto{{ playoffs.champion != null ? ` · champion ${tagOf(playoffs.champion)}` : '' }}</span></h3>
       <div class="po-cols">
         <div class="po-col">
           <div class="po-colh">Semifinals</div>
@@ -154,7 +157,8 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="po-team" :class="{ win: s.winner === s.lo, me: s.lo === myClub, out: s.winner != null && s.winner !== s.lo }">
               <span class="po-seed">{{ seedNo(s.lo) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.lo)} 65% 55%)` }"></i>{{ tagOf(s.lo) }}<b>{{ s.wins[1] }}</b>
             </div>
-            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g)" :title="`watch game ${gi + 1}`">G{{ gi + 1 }}</button></div>
+            <div class="po-veto"><span class="po-need">Bo{{ s.need * 2 - 1 }}</span><span v-for="(v, vi) in s.veto" :key="vi" class="po-vstep" :class="v.action">{{ tagOf(v.team === 'hi' ? s.hi : s.lo) }}<i>{{ v.action === 'ban' ? '✕' : v.action === 'pick' ? '✓' : '◆' }}</i>{{ v.map }}</span></div>
+            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g, s.maps[gi])" :title="`watch game ${gi + 1} · ${s.maps[gi]}`">G{{ gi + 1 }} <i>{{ s.maps[gi] }}</i></button></div>
           </div>
         </div>
         <div class="po-col">
@@ -166,12 +170,13 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="po-team" :class="{ win: s.winner === s.lo, me: s.lo === myClub, out: s.winner != null && s.winner !== s.lo }">
               <span class="po-seed">{{ seedNo(s.lo) }}</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.lo)} 65% 55%)` }"></i>{{ tagOf(s.lo) }}<b>{{ s.wins[1] }}</b>
             </div>
-            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g)" :title="`watch game ${gi + 1}`">G{{ gi + 1 }}</button></div>
+            <div class="po-veto"><span class="po-need">Bo{{ s.need * 2 - 1 }}</span><span v-for="(v, vi) in s.veto" :key="vi" class="po-vstep" :class="v.action">{{ tagOf(v.team === 'hi' ? s.hi : s.lo) }}<i>{{ v.action === 'ban' ? '✕' : v.action === 'pick' ? '✓' : '◆' }}</i>{{ v.map }}</span></div>
+            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g, s.maps[gi])" :title="`watch game ${gi + 1} · ${s.maps[gi]}`">G{{ gi + 1 }} <i>{{ s.maps[gi] }}</i></button></div>
           </div>
           <div v-if="playoffs.champion != null" class="po-champ" :class="{ me: playoffs.champion === myClub }">🏆 {{ cname(playoffs.champion) }} — champion</div>
         </div>
       </div>
-      <div class="hq-compnote">The top four seed a single-elim bracket; each tie is best-of-three. Your ties run your comp + tactics — click any <b>G</b> to watch it back. Win it for the title (and the prize). Then <b>Advance</b> to settle the books and start next season.</div>
+      <div class="hq-compnote">The top four seed a single-elim bracket — <b>Bo3</b> semis, a <b>Bo5</b> final. Each series opens with a <b>map veto</b> (each club bans its weak maps and picks its comfort ones from the pool) — and clubs play a touch better on the maps they like. Click any <b>G</b> to watch that game on its map. Win it for the title; then <b>Advance</b> to settle the books.</div>
     </div>
 
     <div class="hq-grid">
@@ -261,7 +266,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <div v-if="watching" class="hq-watchwrap">
       <div class="hq-watchhead">
         <b>{{ tagOf(watching.home) }}</b> {{ watching.score[0] }} – {{ watching.score[1] }} <b>{{ tagOf(watching.away) }}</b>
-        · <span class="hq-rmap">{{ mapOf(watching.seed) }}</span> · re-simmed from seed {{ watching.seed }}
+        · <span class="hq-rmap">{{ watchedMap }}</span> · re-simmed from seed {{ watching.seed }}
         <button class="ed-close" @click="watching = null; viewer?.destroy(); viewer = null">close</button>
       </div>
       <div ref="watchHost" class="ace-host"></div>
