@@ -295,6 +295,7 @@ function resolveDay() {
   dayIdx.value++;
   syncLineup();        // re-derive your five + strength from the developed roster
   resolveListings();   // the market is always live — your listed players may sell each match-day
+  resolveAiMarket();   // ...and AI clubs sign players on their own — gems get snapped up
 }
 function simSeason() { while (!done.value) resolveDay(); }
 
@@ -622,6 +623,59 @@ function resolveListings() {
     myRoster.value = myRoster.value.filter(p => p.id !== pid);
     unlist(pid);
     syncLineup();
+  }
+}
+
+// The LIVING MARKET — the board moves even when you're not in it. Each match-day a
+// couple of motivated AI clubs (rising/rebuilding, with cash) sign the best upgrade
+// they can find from free agency OR another club's listed players. A signing is a
+// SWAP (AI squads are five): the buyer's weaker same-role player goes the other way
+// (to free agency, or the seller restocks), so the pool churns — the gems get
+// snapped up. This is the urgency: spot a free agent and bid before a rival takes
+// him. Deterministic (no rng beyond the existing restock), bounded per day.
+const AI_SIGNINGS_PER_DAY = 2;
+function executeAiSigning(buyer: number, t: MarketEntry, price: number) {
+  const bteam = clubs.value[buyer].team;
+  const slot = bteam.players.findIndex(p => p.role === t.player.role);
+  const dropped = bteam.players[slot];
+  clubs.value = clubs.value.map((c, i) => i === buyer ? withPlayer(c, slot, retag(t.player, bteam.id, dropped.igl)) : c);
+  balances.value = balances.value.map((b, i) => i === buyer ? b - price : b);
+  if (t.from === -1) {                       // from free agency: dropped player replaces the signed FA in the pool
+    freeAgentPool.value = [release(dropped), ...freeAgentPool.value.filter(p => p.id !== t.player.id)];
+  } else {                                   // club-to-club: seller banks the fee + restocks; dropped → free agency
+    balances.value = balances.value.map((b, i) => i === t.from ? b + price : b);
+    sellerRestock(t.from, t.player.id);
+    listings.value = listings.value.filter(l => !(l.club === t.from && l.playerId === t.player.id));
+    freeAgentPool.value = [release(dropped), ...freeAgentPool.value];
+  }
+}
+function resolveAiMarket() {
+  if (!navReady) return;
+  const targets: MarketEntry[] = [
+    ...freeAgentPool.value.map(p => ({ player: p, from: -1 })),
+    ...listings.value.map(l => { const p = clubs.value[l.club]?.team.players.find(q => q.id === l.playerId); return p ? { player: p, from: l.club } : null; }).filter((e): e is MarketEntry => !!e),
+  ];
+  // motivated buyers: rising/rebuilding AI clubs, richest first (deterministic, no rng)
+  const buyers = clubs.value.map((_, i) => i)
+    .filter(i => i !== myClub.value && ['rising', 'rebuilding'].includes(clubPhase(clubs.value[i].team)))
+    .sort((a, b) => balances.value[b] - balances.value[a]);
+  let moves = 0;
+  for (const buyer of buyers) {
+    if (moves >= AI_SIGNINGS_PER_DAY) break;
+    const bank = balances.value[buyer];
+    let best: { t: MarketEntry; gain: number; price: number } | null = null;
+    for (const t of targets) {
+      if (t.from === buyer) continue;
+      const mine = clubs.value[buyer].team.players.find(p => p.role === t.player.role);
+      if (!mine || overall(t.player) - overall(mine) <= 1) continue;   // a real upgrade only
+      const price = value(t.player);
+      if (price > bank * 0.55) continue;                               // prudent — keep a reserve
+      if (!best || overall(t.player) - overall(mine) > best.gain) best = { t, gain: overall(t.player) - overall(mine), price };
+    }
+    if (!best) continue;
+    executeAiSigning(buyer, best.t, best.price);
+    targets.splice(targets.indexOf(best.t), 1);   // don't double-sign this tick
+    moves++;
   }
 }
 async function ensureNav() {
