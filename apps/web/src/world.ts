@@ -162,6 +162,18 @@ const infraLevel = (i: number): number => i === myClub.value
   ? Math.round((facilities.value.bootcamp + facilities.value.recovery + facilities.value.analyst + academy.value.level) / 4)
   : clubInfra(clubs.value[i].strength);
 
+// global rankings (cross-division, the whole world) — POWER by current squad
+// rating, HQ by development infrastructure. A finer metric breaks ties (strength
+// under HQ) so the boards are a true order, not a pile of ties.
+const powerOf = (i: number) => squadRating(clubs.value[i].team);
+const powerRanking = computed(() => clubs.value
+  .map((_, i) => ({ club: i, rating: powerOf(i), hq: infraLevel(i) }))
+  .sort((a, b) => b.rating - a.rating || b.hq - a.hq));
+const hqRanking = computed(() => clubs.value
+  .map((c, i) => ({ club: i, rating: powerOf(i), hq: infraLevel(i), strength: c.strength }))
+  .sort((a, b) => b.hq - a.hq || b.strength - a.strength));
+const rankInList = (list: { club: number }[], i: number) => list.findIndex(r => r.club === i) + 1;
+
 // the matchday five is always the best player per comp slot from your roster;
 // the rest are reserves (depth). One IGL — the starting sentinel.
 function startingFive(roster: Player[]): Player[] {
@@ -661,7 +673,7 @@ export function useWorld() {
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
-    infraLevel, INFRA_MAX, retirements,
+    infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

@@ -519,6 +519,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ac-age{font-style:normal;font-family:var(--label);font-size:9.5px;letter-spacing:.04em;color:var(--muted-2);margin-left:6px}
 .ac-actions{flex:none;display:flex;gap:7px}
 .ac-empty{padding:18px 4px;color:var(--muted-2);font-size:12.5px;font-family:var(--body)}
+/* world rankings (power / HQ) */
+.rk-toggle{margin-left:auto;display:inline-flex;gap:0;border:1px solid var(--line-2)}
+.rk-toggle button{background:transparent;border:none;color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:5px 12px;cursor:pointer}
+.rk-toggle button.on{background:var(--brand);color:var(--bg);font-weight:700}
+.rk-row{display:grid;grid-template-columns:34px 1fr 96px 70px 44px 44px;align-items:center;gap:6px;padding:7px 6px;font-variant-numeric:tabular-nums;font-size:13px;border-bottom:1px solid var(--line)}
+.rk-row span{text-align:center;color:var(--muted)}
+.rk-row .r{color:var(--muted-2);font-family:var(--display);font-weight:700}
+.rk-row .c{text-align:left;color:var(--text);display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rk-row .d{font-family:var(--label);font-size:10px;letter-spacing:.03em;color:var(--muted-2)}
+.rk-row .pw b{color:var(--text);font-family:var(--display);font-size:15px}
+.rk-row .hq .hq-inf{display:inline-flex;gap:2px;justify-content:center}
+.rk-row .hq .hq-inf i{width:5px;height:11px;background:var(--bg-3);border:1px solid var(--line-2)}
+.rk-row .hq .hq-inf i.on{background:var(--brand);border-color:var(--brand)}
+.rk-head span{font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.rk-head{border-bottom:1px solid var(--line-2)}
+.rk-row.me{background:rgba(34,211,238,.09);box-shadow:inset 2px 0 0 var(--brand)}
+.rk-gap{text-align:center;color:var(--muted-2);font-size:11px;letter-spacing:.2em;padding:2px}
 .po-champ{margin-top:4px;padding:9px 12px;background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--display);font-weight:700;font-size:14px}
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
 .hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}

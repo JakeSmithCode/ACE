@@ -11,6 +11,7 @@ import Roster from './Roster.vue';
 import Market from './Market.vue';
 import Facilities from './Facilities.vue';
 import Academy from './Academy.vue';
+import Rankings from './Rankings.vue';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -43,7 +44,7 @@ const myRetirees = computed(() => w.retirements.value.filter(r => r.mine));
 const leagueRetired = computed(() => w.retirements.value.length);
 const roleName = (r: string) => r.slice(0, 3).toUpperCase();
 
-const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy'>('season');
+const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'rankings'>('season');
 
 const club = (i: number) => clubs.value[i];
 const tagOf = (i: number) => club(i).team.tag;
@@ -112,6 +113,7 @@ onUnmounted(() => { viewer?.destroy(); });
         <button :class="{ on: hqTab === 'market' }" @click="hqTab = 'market'">Market</button>
         <button :class="{ on: hqTab === 'hq' }" @click="hqTab = 'hq'">Facilities</button>
         <button :class="{ on: hqTab === 'academy' }" @click="hqTab = 'academy'">Academy</button>
+        <button :class="{ on: hqTab === 'rankings' }" @click="hqTab = 'rankings'">Rankings</button>
       </div>
       <div class="hq-actions">
         <button v-if="!done" class="hq-go" @click="w.resolveDay()">▶ Resolve match-day</button>
@@ -127,6 +129,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <Market v-if="hqTab === 'market'" />
     <Facilities v-else-if="hqTab === 'hq'" />
     <Academy v-else-if="hqTab === 'academy'" />
+    <Rankings v-else-if="hqTab === 'rankings'" />
 
     <!-- SQUAD & COMP -->
     <div v-else-if="hqTab === 'squad'" class="hq-squad">
