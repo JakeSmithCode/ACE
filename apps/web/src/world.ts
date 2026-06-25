@@ -10,7 +10,7 @@ import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
   shouldRetire, clubPhase, clubAgeChar,
-  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid,
+  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, SCOUT_MAX,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
@@ -101,9 +101,25 @@ const academy = ref<Academy>(defaultAcademy());           // your youth pipeline
 // last off-season's retirements (league-wide; `mine` flags your own) — for the banner
 const retirements = ref<{ handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[]>([]);
 
+// scouting reports you've commissioned (player id → level 0..SCOUT_MAX). A paid
+// investment that clears the fog on a player's potential — and lifts a revealed
+// gem's value, so you can flip a prospect you don't need.
+const scouted = ref<Map<string, number>>(new Map());
+const scoutLevelOf = (id: string) => scouted.value.get(id) ?? 0;
+
 const balance = computed(() => balances.value[myClub.value]);
-// value reflects the live meta — buffed-agent mains are worth more
-const value = (p: Player) => playerValue(p, patch.value);
+// value reflects the live meta AND your scouting — a gem you've scouted is worth
+// (and sells for) what you've revealed; an unscouted/rival player stays fogged
+const value = (p: Player) => playerValue(p, patch.value, scoutLevelOf(p.id));
+// scout the next level on a player you own (roster or academy) — cost rises per level
+const scoutCost = (id: string) => 1500 + scoutLevelOf(id) * 1500;     // 1.5k / 3k / 4.5k per level
+const canScout = (id: string) => scoutLevelOf(id) < SCOUT_MAX && balance.value >= scoutCost(id);
+function scoutPlayer(id: string) {
+  if (!canScout(id)) return;
+  const cost = scoutCost(id);
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b - cost : b);
+  scouted.value = new Map(scouted.value).set(id, scoutLevelOf(id) + 1);
+}
 
 // team chemistry (mirrors the engine's CHEM_CAP): a player gels with shared play;
 // a fresh signing (tenure 0) is 0%, fully gelled at CHEM_CAP seasons. Team cohesion
@@ -394,7 +410,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = [];
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; scouted.value = new Map();
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -413,7 +429,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = [];
+  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; scouted.value = new Map();
   refreshMarket();
 }
 
@@ -722,7 +738,7 @@ function snapshot() {
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
-    retirements: retirements.value,
+    retirements: retirements.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()],
   };
 }
@@ -744,6 +760,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
   retirements.value = o.retirements ?? [];
+  scouted.value = new Map(o.scouted ?? []);
   prevById.value = new Map(o.prevById);
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -759,7 +776,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, scouted],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -775,6 +792,7 @@ export function useWorld() {
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
+    scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
 }

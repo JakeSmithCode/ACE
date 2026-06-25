@@ -13,13 +13,14 @@ const ATTRS: { k: keyof Attributes; label: string }[] = [
   { k: 'utility', label: 'UTL' }, { k: 'clutch', label: 'CLT' }, { k: 'entry', label: 'ENT' },
 ];
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
-const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
-const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
+const sl = (p: Player) => w.scoutLevelOf(p.id);   // your commissioned scouting on this player
+const conf = (p: Player) => Math.round(scoutConfidence(p, true, sl(p)) * 100);
+const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true, sl(p)); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 const rank = (p: Player) => soloRank(overall(p));
 const rnd = (n: number) => Math.round(n);
 const chem = (p: Player) => Math.round(w.chemOf(p) * 100);   // 0..100% gelled with the squad
 const isMech = (k: keyof Attributes) => k === 'aim' || k === 'movement' || k === 'entry';
-const aceil = (p: Player, k: keyof Attributes) => scoutedAttr(p, k, true);   // per-skill scouted ceiling (owned)
+const aceil = (p: Player, k: keyof Attributes) => scoutedAttr(p, k, true, sl(p));   // per-skill scouted ceiling (sharpens as you scout)
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
 const delta = (p: Player, k: keyof Attributes) => {
@@ -45,8 +46,14 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
       <div class="rs-pot">
-        <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true) }">★</span></div>
+        <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true, sl(p)) }">★</span></div>
         <div class="rs-ovrl">CEIL <b class="rs-ceil">{{ ceiling(p) }}</b> · <span class="rs-conf" :class="{ lo: conf(p) < 55 }">{{ conf(p) }}%</span></div>
+        <button class="rs-scout" :disabled="!w.canScout(p.id)" @click="w.scoutPlayer(p.id)"
+          :title="sl(p) >= w.SCOUT_MAX ? 'fully scouted' : `commission a scouting report — clears the fog and reveals sale value`">
+          <i class="rs-scoutpips"><i v-for="n in w.SCOUT_MAX" :key="n" :class="{ on: n <= sl(p) }"></i></i>
+          <template v-if="sl(p) >= w.SCOUT_MAX">scouted</template>
+          <template v-else>scout <b>{{ money(w.scoutCost(p.id)) }}</b></template>
+        </button>
       </div>
       <div class="rs-attrs">
         <div v-for="a in ATTRS" :key="a.k" class="rs-attr">

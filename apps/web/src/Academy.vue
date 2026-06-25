@@ -11,7 +11,8 @@ import { useWorld } from './world';
 const w = useWorld();
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
 const rank = (p: Player) => soloRank(overall(p));
-const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
+const sl = (p: Player) => w.scoutLevelOf(p.id);
+const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true, sl(p)); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 // best in a role you already field — the bar a prospect must clear to start
 const prospects = () => [...w.academy.value.prospects].sort((a, b) => overall(b) - overall(a));
 </script>
@@ -47,8 +48,14 @@ const prospects = () => [...w.academy.value.prospects].sort((a, b) => overall(b)
         </div>
         <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
         <div class="rs-pot">
-          <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true) }">★</span></div>
+          <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true, sl(p)) }">★</span></div>
           <div class="rs-ovrl">CEIL <b class="rs-ceil">{{ ceiling(p) }}</b></div>
+          <button class="rs-scout" :disabled="!w.canScout(p.id)" @click="w.scoutPlayer(p.id)"
+            :title="sl(p) >= w.SCOUT_MAX ? 'fully scouted' : 'commission a scouting report — clears the fog on this prospect'">
+            <i class="rs-scoutpips"><i v-for="n in w.SCOUT_MAX" :key="n" :class="{ on: n <= sl(p) }"></i></i>
+            <template v-if="sl(p) >= w.SCOUT_MAX">scouted</template>
+            <template v-else>scout <b>{{ money(w.scoutCost(p.id)) }}</b></template>
+          </button>
         </div>
         <div class="ac-actions">
           <button class="rs-lx start" @click="w.promoteProspect(p.id)" title="graduate into your senior roster">promote ▲</button>

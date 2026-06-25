@@ -4,19 +4,25 @@ import { Rng } from '@ace/engine';
 import type { Player, Role, PatchState } from '@ace/shared';
 import { makePlayer, genHandles } from './clubs.js';
 import { overall } from './develop.js';
-import { scoutedPotential } from './scouting.js';
+import { scoutedPotential, SCOUT_MAX } from './scouting.js';
 
 /** A player's transfer value: ability is the floor, *scouted* potential (the
  *  market's fogged read, not the true ceiling) is the premium, and age past peak
  *  is a discount — so a young high-ceiling read is the dearest thing on the
  *  board and an ageing star is cheap. With a `patch`, a player who mains a
  *  buffed agent is worth more (specialists track the meta — DESIGN §7). */
-export function playerValue(p: Player, patch?: PatchState): number {
-  const ovr = overall(p), pot = scoutedPotential(p, false);   // market consensus, fogged
+export function playerValue(p: Player, patch?: PatchState, scoutLevel = 0): number {
+  // ability is the floor; the potential PREMIUM carries a risk discount when the
+  // player is unscouted (a buyer won't pay full for an unproven prospect) that YOUR
+  // commissioned `scoutLevel` removes — so a scouting report DE-RISKS a player and
+  // reliably lifts his sale value (never lowers it): the flip. The consensus center
+  // stays fogged (others' read); only the proof discount moves with your scouting.
+  const ovr = overall(p), pot = scoutedPotential(p, false);
   const upside = Math.max(0, pot - ovr);
   const youth = Math.max(0, (28 - p.age) / 12);          // prospects carry the premium
+  const proof = 0.55 + 0.45 * Math.min(1, scoutLevel / SCOUT_MAX);   // unscouted premium discounted → scouting unlocks
   const base = Math.pow(ovr, 2.5) * 0.32;                // ability floor
-  const premium = upside * youth * 2000;                 // potential premium
+  const premium = upside * youth * 2000 * proof;         // potential premium, de-risked by scouting
   const ageTax = p.age >= 27 ? Math.min(0.5, (p.age - 26) * 0.09) : 0;
   let v = (base + premium) * (1 - ageTax);
   if (patch) {
