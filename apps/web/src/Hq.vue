@@ -48,6 +48,10 @@ const cname = (i: number) => `${tagOf(i)} · ${nameOf(i)}`;
 const hue = (i: number) => (tagOf(i).charCodeAt(0) * 47 + tagOf(i).charCodeAt(1) * 13) % 360;
 const oppOf = (r: { home: number; away: number }) => (r.home === myClub.value ? r.away : r.home);
 const fmt = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
+// a club's development infrastructure (0..INFRA_MAX) — high = a rival academy that
+// out-develops and reloads talent, a long-term threat to watch
+const infra = (i: number) => w.infraLevel(i);
+const INFRA_MAX = w.INFRA_MAX;
 const mapOf = (seed: number) => w.fixtureMap(seed);   // each fixture's map (rotation over the pool)
 
 // --- comp builder ---------------------------------------------------------
@@ -199,11 +203,13 @@ onUnmounted(() => { viewer?.destroy(); });
         </h3>
         <div class="hq-trow hq-thead">
           <span class="r">#</span><span class="c">Club</span>
+          <span class="hq-infh" title="development infrastructure — well-run academies out-develop and reload talent">HQ</span>
           <span>P</span><span>W</span><span>L</span><span>RF</span><span>RA</span><span>Δ</span><span class="pts">Pts</span>
         </div>
         <div v-for="(s, rank) in shownTable" :key="s.club" class="hq-trow" :class="[zoneOf(rank + 1), { me: s.club === myClub }]" @click="selectClub(s.club)">
           <span class="r">{{ rank + 1 }}</span>
           <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i>{{ cname(s.club) }}</span>
+          <span class="hq-inf" :title="`infrastructure ${infra(s.club)}/${INFRA_MAX}`"><i v-for="n in INFRA_MAX" :key="n" :class="{ on: n <= infra(s.club) }"></i></span>
           <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
           <span>{{ s.rf }}</span><span>{{ s.ra }}</span>
           <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>

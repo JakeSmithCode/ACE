@@ -14,6 +14,7 @@ import {
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
   defaultFacilities, facilityBoost, facilityCost, FACILITY_MAX,
+  clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
   defaultAcademy, academyIntake, academyCost, academyWageBill, intakeSize, ACADEMY_MAX,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy,
@@ -151,6 +152,12 @@ function promoteProspect(id: string) {
 function releaseProspect(id: string) {
   academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== id) };
 }
+// a club's development infrastructure (0..INFRA_MAX), for the standings — your own
+// real HQ investment for your club, the strength-derived rating for the AI orgs.
+// A high rating flags a rival that out-develops + reloads talent: a long-term threat.
+const infraLevel = (i: number): number => i === myClub.value
+  ? Math.round((facilities.value.bootcamp + facilities.value.recovery + facilities.value.analyst + academy.value.level) / 4)
+  : clubInfra(clubs.value[i].strength);
 
 // the matchday five is always the best player per comp slot from your roster;
 // the rest are reserves (depth). One IGL — the starting sentinel.
@@ -311,7 +318,11 @@ function advanceSeason() {
   // snapshot (whole roster) for deltas, then develop the league + your reserves
   prevById.value = snapRosters();
   const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
-  clubs.value = developLeague(clubs.value, rng);                              // AI clubs: full annual step (off-season only)
+  // AI clubs develop with their INFRASTRUCTURE boost — bigger orgs grow + retain
+  // talent better, so dynasties form (your club is handled separately below, so it
+  // gets NO_BOOST here and is overwritten by syncLineup from the developed myRoster)
+  clubs.value = developLeague(clubs.value, rng, i => i === myClub.value ? NO_BOOST : infraBoost(clubInfra(clubs.value[i].strength)));
+  reloadAiYouth(rng);   // well-run clubs graduate a homegrown youth over an aging vet
   const myBoost = facilityBoost(facilities.value);
   myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost));  // bootcamp share + HQ boost
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
@@ -403,6 +414,29 @@ function sellerRestock(clubIdx: number, playerId: string) {
   const old = team.players[idx];
   const fill = retag(backfillFor(old.role as Role), team.id, old.igl);
   clubs.value = clubs.value.map((c, i) => i === clubIdx ? withPlayer(c, idx, fill) : c);
+}
+
+// the rival side of the youth pipeline: each off-season a well-run AI club may
+// graduate a homegrown teenager over its oldest aging player — the academy advantage
+// made visible across the league (your own veterans you manage yourself; you're
+// skipped here). The youngster is raw but infra-scaled, and develops up under that
+// same infrastructure, so a strong academy churns vets → prospects → stars.
+function reloadAiYouth(rng: Rng) {
+  const used = new Set<string>(allHandles());
+  clubs.value = clubs.value.map((c, i) => {
+    if (i === myClub.value) return c;
+    const infra = clubInfra(c.strength);
+    if (infra < 2) return c;                                    // a weak academy graduates no one
+    const old = [...c.team.players].sort((a, b) => b.age - a.age)[0];
+    if (old.age < 28 || !rng.chance(0.1 + infra * 0.05)) return c;   // only an aging vet, infra-scaled odds
+    const handle = HANDLES.find(h => !used.has(h)) ?? `Yth${i}-${moveSeq++}`;
+    used.add(handle);
+    const str = Math.max(0.35, Math.min(0.7, 0.32 + infra * 0.06));  // a better academy fields a better prospect
+    const youth = { ...makePlayer(rng, old.role as Role, handle, c.team.id, str, rng.int(17, 19)), igl: old.igl };
+    const players = c.team.players.map(p => (p.id === old.id ? youth : p));
+    const team = { ...c.team, players };
+    return { ...c, team, strength: clampStr(squadRating(team) / 100) };
+  });
 }
 
 /** Buy a market player — they JOIN your roster (no forced drop) at the full
@@ -559,6 +593,7 @@ export function useWorld() {
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
+    infraLevel, INFRA_MAX,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

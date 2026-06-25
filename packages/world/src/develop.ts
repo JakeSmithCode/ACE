@@ -152,10 +152,14 @@ export const developSquad = (team: Team, rng: Rng): Team =>
 
 /** Run the off-season across the whole league. Fixed club/player order keeps it
  *  deterministic; club strength is refreshed from the developed squad rating so
- *  the table reflects who grew and who aged out. */
-export function developLeague(clubs: Club[], rng: Rng): Club[] {
-  return clubs.map(c => {
-    const team = developSquad(c.team, rng);
+ *  the table reflects who grew and who aged out. `boostOf` supplies a per-club
+ *  development boost (an AI club's infrastructure); omitted → `NO_BOOST` for every
+ *  club, which is byte-identical to the old behaviour (boost scales post-draw
+ *  values only, never the rng draws). */
+export function developLeague(clubs: Club[], rng: Rng, boostOf?: (i: number) => DevBoost): Club[] {
+  return clubs.map((c, i) => {
+    const boost = boostOf ? boostOf(i) : NO_BOOST;
+    const team = { ...c.team, players: c.team.players.map(p => developPlayer(p, rng, 1, boost)) };
     return { ...c, team, strength: Math.max(0.3, Math.min(0.95, squadRating(team) / 100)) };
   });
 }
