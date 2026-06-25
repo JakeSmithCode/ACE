@@ -9,6 +9,7 @@ import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
+  shouldRetire,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
@@ -97,6 +98,8 @@ const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned 
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
 const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boost YOUR roster's development)
 const academy = ref<Academy>(defaultAcademy());           // your youth pipeline (homegrown prospects)
+// last off-season's retirements (league-wide; `mine` flags your own) — for the banner
+const retirements = ref<{ handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[]>([]);
 
 const balance = computed(() => balances.value[myClub.value]);
 // value reflects the live meta — buffed-agent mains are worth more
@@ -322,7 +325,6 @@ function advanceSeason() {
   // talent better, so dynasties form (your club is handled separately below, so it
   // gets NO_BOOST here and is overwritten by syncLineup from the developed myRoster)
   clubs.value = developLeague(clubs.value, rng, i => i === myClub.value ? NO_BOOST : infraBoost(clubInfra(clubs.value[i].strength)));
-  reloadAiYouth(rng);   // well-run clubs graduate a homegrown youth over an aging vet
   const myBoost = facilityBoost(facilities.value);
   myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost));  // bootcamp share + HQ boost
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
@@ -330,6 +332,7 @@ function advanceSeason() {
     const ar = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9) ^ 0xACAD) >>> 0);
     academy.value = { ...academy.value, prospects: academy.value.prospects.map(p => developPlayer(p, ar, 1 - SEASON_SHARE, myBoost)) };
   }
+  processRetirements(rng);   // veterans hang it up (post-aging); clubs reload
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
@@ -355,7 +358,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy();
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = [];
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -374,7 +377,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities(); academy.value = defaultAcademy();
+  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = [];
   refreshMarket();
 }
 
@@ -416,27 +419,60 @@ function sellerRestock(clubIdx: number, playerId: string) {
   clubs.value = clubs.value.map((c, i) => i === clubIdx ? withPlayer(c, idx, fill) : c);
 }
 
-// the rival side of the youth pipeline: each off-season a well-run AI club may
-// graduate a homegrown teenager over its oldest aging player — the academy advantage
-// made visible across the league (your own veterans you manage yourself; you're
-// skipped here). The youngster is raw but infra-scaled, and develops up under that
-// same infrastructure, so a strong academy churns vets → prospects → stars.
-function reloadAiYouth(rng: Rng) {
+// retirement (DESIGN §4.4) — esports careers are short, so each off-season aging
+// veterans hang it up across the whole league, and clubs reload the slot. A well-run
+// AI club graduates a HOMEGROWN youth (infra-scaled, develops up under that same
+// infrastructure, so a strong academy churns vets → prospects → stars); a weak one
+// scrapes a journeyman. YOUR retirees leave your roster too (closing the age-curve
+// loop, so your academy pipeline is load-bearing) — you're notified, and if it drops
+// a role below the valid five, your best prospect is auto-graduated to cover.
+function processRetirements(rng: Rng) {
   const used = new Set<string>(allHandles());
-  clubs.value = clubs.value.map((c, i) => {
-    if (i === myClub.value) return c;
+  const freshHandle = () => { const h = HANDLES.find(x => !used.has(x)) ?? `Sub${moveSeq++}`; used.add(h); return h; };
+  const events: { handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[] = [];
+  // AI clubs: a retiree's slot is refilled — homegrown youth for a well-run org,
+  // else a journeyman scaled to the club's level
+  clubs.value = clubs.value.map((c, ci) => {
+    if (ci === myClub.value) return c;   // your club handled below
     const infra = clubInfra(c.strength);
-    if (infra < 2) return c;                                    // a weak academy graduates no one
-    const old = [...c.team.players].sort((a, b) => b.age - a.age)[0];
-    if (old.age < 28 || !rng.chance(0.1 + infra * 0.05)) return c;   // only an aging vet, infra-scaled odds
-    const handle = HANDLES.find(h => !used.has(h)) ?? `Yth${i}-${moveSeq++}`;
-    used.add(handle);
-    const str = Math.max(0.35, Math.min(0.7, 0.32 + infra * 0.06));  // a better academy fields a better prospect
-    const youth = { ...makePlayer(rng, old.role as Role, handle, c.team.id, str, rng.int(17, 19)), igl: old.igl };
-    const players = c.team.players.map(p => (p.id === old.id ? youth : p));
+    let changed = false;
+    const players = c.team.players.map(p => {
+      if (!shouldRetire(p, rng)) return p;
+      events.push({ handle: p.handle, age: p.age, role: p.role, overall: overall(p), club: ci, mine: false });
+      changed = true;
+      const homegrown = infra >= 2 && rng.chance(0.35 + infra * 0.1);
+      const age = homegrown ? rng.int(17, 19) : rng.int(20, 24);
+      const str = homegrown ? Math.max(0.35, Math.min(0.7, 0.32 + infra * 0.06)) : 0.4 + infra * 0.04;
+      return { ...makePlayer(rng, p.role as Role, freshHandle(), c.team.id, str, age), igl: p.igl };
+    });
+    if (!changed) return c;
     const team = { ...c.team, players };
     return { ...c, team, strength: clampStr(squadRating(team) / 100) };
   });
+  // your club: retirees leave the roster (academy prospects are teens — exempt)
+  const myId = clubs.value[myClub.value].team.id;
+  const stayed: Player[] = [];
+  for (const p of myRoster.value) {
+    if (shouldRetire(p, rng)) events.push({ handle: p.handle, age: p.age, role: p.role, overall: overall(p), club: myClub.value, mine: true });
+    else stayed.push(p);
+  }
+  if (stayed.length !== myRoster.value.length) {
+    let roster = stayed;
+    for (const role of Object.keys(ROLE_NEED) as Role[]) {
+      while (roster.filter(p => p.role === role).length < ROLE_NEED[role]) {
+        // prefer graduating your best academy prospect of the role (no fee), else a youth call-up
+        const prospect = academy.value.prospects.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a))[0];
+        if (prospect) {
+          academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== prospect.id) };
+          roster = [...roster, retag(prospect, myId, false)];
+        } else {
+          roster = [...roster, { ...makePlayer(rng, role, freshHandle(), myId, 0.4, rng.int(17, 19)), igl: false }];
+        }
+      }
+    }
+    myRoster.value = roster;
+  }
+  retirements.value = events;
 }
 
 /** Buy a market player — they JOIN your roster (no forced drop) at the full
@@ -547,6 +583,7 @@ function snapshot() {
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
+    retirements: retirements.value,
     prevById: [...prevById.value.entries()],
   };
 }
@@ -567,6 +604,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
+  retirements.value = o.retirements ?? [];
   prevById.value = new Map(o.prevById);
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -582,7 +620,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -593,7 +631,7 @@ export function useWorld() {
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
-    infraLevel, INFRA_MAX,
+    infraLevel, INFRA_MAX, retirements,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

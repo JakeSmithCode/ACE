@@ -541,3 +541,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-prh{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-2)}
 .hq-prmove i{font-style:normal}
 .hq-prmove.up{color:var(--win)}.hq-prmove.down{color:var(--def)}
+.hq-retbanner{display:flex;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:16px;padding:9px 14px;background:var(--bg-2);border:1px solid var(--line);border-left:2px solid var(--gold)}
+.hq-reth{font-family:var(--label);font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--gold)}
+.hq-retmine{font-family:var(--body);font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:6px}
+.hq-retmine .rs-role{font-size:8.5px;padding:1px 4px}
+.hq-retbye{color:var(--muted-2);font-style:italic}
+.hq-retleague{font-family:var(--label);font-size:10.5px;letter-spacing:.03em;color:var(--muted);margin-left:auto}

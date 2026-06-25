@@ -150,6 +150,24 @@ export function developPlayer(p: Player, rng: Rng, frac = 1, boost: DevBoost = N
 export const developSquad = (team: Team, rng: Rng): Team =>
   ({ ...team, players: team.players.map(p => developPlayer(p, rng)) });
 
+// --- retirement: esports careers are short ----------------------------------
+/** Hard cap — nobody plays past this age. */
+export const RETIRE_HARD_AGE = 38;
+/** A player's chance of retiring this off-season — zero until the late 20s, then
+ *  it climbs each year; a faded veteran (low overall) hangs it up sooner. Bounded
+ *  and *fair* (DESIGN §2/§18): the age you retire is a curve, not a cliff. */
+export function retireChance(p: Player): number {
+  if (p.age < 28) return 0;
+  const age = (p.age - 28) * 0.07;            // 0 at 28 → ~0.7 at 38
+  const faded = overall(p) < 58 ? 0.06 : 0;   // a washed vet walks sooner
+  return Math.min(0.95, age + faded);
+}
+/** Whether a player retires this off-season — one rng draw, so callers keep a
+ *  uniform draw count (the hard cap forces it without skipping the draw). */
+export function shouldRetire(p: Player, rng: Rng): boolean {
+  return rng.chance(p.age >= RETIRE_HARD_AGE ? 1 : retireChance(p));
+}
+
 /** Run the off-season across the whole league. Fixed club/player order keeps it
  *  deterministic; club strength is refreshed from the developed squad rating so
  *  the table reflects who grew and who aged out. `boostOf` supplies a per-club

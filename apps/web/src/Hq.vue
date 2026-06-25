@@ -38,6 +38,10 @@ function zoneOf(rank: number): '' | 'promo' | 'releg' {
 // on a deep ladder, only show off-season moves touching your tier (in or out) —
 // the rest of the ladder churns, but these are the clubs you'll face
 const nearMoves = computed(() => lastMoves.value.filter(m => m.from === myDivision.value || m.to === myDivision.value));
+// last off-season's retirements — your own (a roster event to act on) + the league count
+const myRetirees = computed(() => w.retirements.value.filter(r => r.mine));
+const leagueRetired = computed(() => w.retirements.value.length);
+const roleName = (r: string) => r.slice(0, 3).toUpperCase();
 
 const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy'>('season');
 
@@ -153,6 +157,16 @@ onUnmounted(() => { viewer?.destroy(); });
         </span>
         <span v-if="!nearMoves.length" class="hq-prmove">no changes to your tier</span>
       </div>
+    </div>
+    <!-- retirements — veterans who hung it up in the off-season (yours, then the league) -->
+    <div v-if="leagueRetired && !playoffs && dayIdx < total" class="hq-retbanner">
+      <template v-if="myRetirees.length">
+        <span class="hq-reth">⬡ Retired from {{ tagOf(myClub) }}</span>
+        <span v-for="r in myRetirees" :key="r.handle" class="hq-retmine">
+          <b>{{ r.handle }}</b> <i class="rs-role" :class="r.role">{{ roleName(r.role) }}</i> · age {{ r.age }} · {{ r.overall }} OVR <span class="hq-retbye">hung up the mouse</span>
+        </span>
+      </template>
+      <span class="hq-retleague">{{ leagueRetired }} veteran{{ leagueRetired > 1 ? 's' : '' }} retired league-wide{{ myRetirees.length ? ' — replacements promoted from your academy/youth' : '' }}</span>
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">
