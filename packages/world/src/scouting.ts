@@ -34,3 +34,13 @@ export function scoutedPotential(p: Player, owned = false): number {
 /** Scouted potential as a 1–5 star rating (what the UI shows instead of truth). */
 export const scoutedStars = (p: Player, owned = false): number =>
   Math.max(1, Math.min(5, Math.round((scoutedPotential(p, owned) - 44) / 9)));
+
+/** The scouted ceiling **range** — the gamble made legible. Wide for an
+ *  unresolved prospect (real plasticity `potVar` + observation error), tight for
+ *  a settled veteran you own. `[lo, hi]` overall — "this kid could be 78 or 94". */
+export function scoutedRange(p: Player, owned = false): [number, number] {
+  const center = scoutedPotential(p, owned);
+  const v = p.potVar ?? 0;
+  const band = Math.round(v * 14 + (1 - scoutConfidence(p, owned)) * 7);
+  return [clamp(center - band, overall(p), 99), clamp(center + band, overall(p), 99)];
+}

@@ -5,7 +5,7 @@
 // mains a buffed agent is dearer, a nerfed one cheaper. Filter by role.
 import { computed, ref } from 'vue';
 import type { Player, Role } from '@ace/shared';
-import { overall, scoutedStars } from '@ace/world';
+import { overall, scoutedStars, scoutedRange } from '@ace/world';
 import { useWorld, type MarketEntry } from './world';
 
 const w = useWorld();
@@ -20,6 +20,7 @@ const listed = computed(() => {
     .sort((a, b) => w.value(b.player) - w.value(a.player));
 });
 const sourceOf = (e: MarketEntry) => e.from === -1 ? 'free agent' : w.clubs.value[e.from].team.tag;
+const ceil = (p: Player) => { const [lo, hi] = scoutedRange(p, false); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 // the player's main agent and how the live patch rates it (drives the meta tag)
 const mainAgent = (p: Player) => [...p.agents].sort((a, b) => b.level - a.level)[0]?.agent ?? '';
 const metaTier = (p: Player) => w.patch.value.agentTier[mainAgent(p)] ?? 1;
@@ -57,7 +58,7 @@ const notes = computed(() => [...w.metaChanges.value].sort((a, b) => Math.abs(b.
       <span class="src" :class="{ club: e.from !== -1 }">{{ sourceOf(e) }}</span>
       <span>{{ e.player.age }}</span>
       <span class="ovr">{{ overall(e.player) }}</span>
-      <span class="rs-stars"><i v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(e.player, false) }">★</i></span>
+      <span class="mk-pot"><span class="rs-stars"><i v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(e.player, false) }">★</i></span><i class="mk-ceil">{{ ceil(e.player) }}</i></span>
       <span class="fe" :class="metaClass(e.player)">{{ money(w.value(e.player)) }}</span>
       <span class="vs">{{ w.myPlayerOf(e.player.role)?.handle }} <i>{{ overall(w.myPlayerOf(e.player.role)!) }}</i></span>
       <button class="mk-sign" :disabled="!w.canAfford(e)" @click="w.acquire(e)">

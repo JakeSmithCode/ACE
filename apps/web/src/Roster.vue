@@ -4,7 +4,7 @@
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, phaseOf, scoutedStars, scoutConfidence } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -14,6 +14,7 @@ const ATTRS: { k: keyof Attributes; label: string }[] = [
 ];
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
 const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
+const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 const rnd = (n: number) => Math.round(n);
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
@@ -40,7 +41,7 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
       <div class="rs-pot">
         <div class="rs-stars"><span v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(p, true) }">★</span></div>
-        <div class="rs-ovrl">POTENTIAL · <span class="rs-conf" :class="{ lo: conf(p) < 55 }">{{ conf(p) }}%</span></div>
+        <div class="rs-ovrl">CEIL <b class="rs-ceil">{{ ceiling(p) }}</b> · <span class="rs-conf" :class="{ lo: conf(p) < 55 }">{{ conf(p) }}%</span></div>
       </div>
       <div class="rs-attrs">
         <div v-for="a in ATTRS" :key="a.k" class="rs-attr">

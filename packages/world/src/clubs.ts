@@ -106,7 +106,10 @@ export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: strin
     { agent: main, level: clamp(70 + strength * 22 + rng.range(-4, 6), 50, 99) },
     { agent: second, level: clamp(55 + strength * 18 + rng.range(-6, 6), 40, 90) },
   ];
-  return { id: `${idPrefix}-${handle.toLowerCase()}`, handle, role, age, attr, potential, agents };
+  // ceiling plasticity: a teen is a wide cloud (boom/bust), a developed player is
+  // settled. Reps will drift the ceiling and narrow this to 0 (develop.ts).
+  const potVar = Math.max(0, Math.min(1, (23 - age) / 7)) * rng.range(0.7, 1.1);
+  return { id: `${idPrefix}-${handle.toLowerCase()}`, handle, role, age, attr, potential, potVar, agents };
 }
 
 /** Build one club. `strength` (0..1) sets the talent floor; role shape + a small

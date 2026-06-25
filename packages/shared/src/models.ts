@@ -29,6 +29,9 @@ export interface Player {
   age: number;
   attr: Attributes;     // current ability
   potential?: Attributes; // per-attribute ceilings the development tick grows toward (behind fog to the manager)
+  potVar?: number;      // ceiling plasticity 0..1 — how unresolved the potential still is (high for the young).
+                        // Each season of reps drifts the ceiling (up if played, down if benched) and narrows
+                        // this toward 0, where the ceiling locks. The "potential cloud" of DESIGN §4.
   agents: AgentMastery[];
 }
 

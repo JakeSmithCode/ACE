@@ -427,6 +427,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* scouting fog: potential confidence */
 .rs-conf{color:var(--muted);font-weight:600}
 .rs-conf.lo{color:var(--gold)}
+.rs-ceil{color:var(--text);font-weight:700;font-style:normal}
+.mk-pot{display:flex;flex-direction:column;gap:1px;line-height:1.1}
+.mk-ceil{font-style:normal;font-family:var(--label);font-size:10px;color:var(--muted);letter-spacing:.02em}
 /* manual lineup override: start / bench buttons */
 .rs-lx{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:4px 0;cursor:pointer}
 .rs-lx:hover:not(:disabled){color:var(--text);border-color:var(--brand)}
