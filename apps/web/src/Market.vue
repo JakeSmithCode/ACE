@@ -28,6 +28,32 @@ const metaTier = (p: Player) => w.patch.value.agentTier[mainAgent(p)] ?? 1;
 const metaClass = (p: Player) => { const t = metaTier(p); return t >= 1.05 ? 'buff' : t <= 0.95 ? 'nerf' : ''; };
 // the off-season patch notes, biggest swing first
 const notes = computed(() => [...w.metaChanges.value].sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from)));
+
+// --- bidding: a contested player clears above his asking price ---------------
+const tagOf = (i: number) => w.clubs.value[i].team.tag;
+const bidId = ref<string | null>(null);   // the player you're bidding on
+const bidAmtK = ref(0);                    // your current offer, in $k
+const bidMsg = ref('');
+const bidWarn = ref(false);
+const toK = (n: number) => Math.round(n / 100) / 10;   // dollars → $k (1 dp)
+function openBid(e: MarketEntry) {
+  bidId.value = e.player.id;
+  bidAmtK.value = toK(w.askingOf(e));
+  bidWarn.value = false;
+  bidMsg.value = w.isContested(e) ? 'Contested — rival clubs are in for this player.' : 'No other bidders — sign at asking.';
+}
+function submitBid(e: MarketEntry) {
+  const res = w.bidFor(e, Math.round(bidAmtK.value * 1000));
+  bidWarn.value = true;
+  if (res.won) { bidId.value = null; bidMsg.value = ''; }
+  else if (res.broke) bidMsg.value = 'Not enough in the bank for that bid.';
+  else if (res.below) bidMsg.value = `Below the asking price — bid at least ${money(res.leadBid!)}.`;
+  else if (res.leader != null) {
+    bidMsg.value = `Outbid by ${tagOf(res.leader)} at ${money(res.leadBid!)} — raise above it to win.`;
+    bidAmtK.value = Math.ceil((res.leadBid! + Math.max(500, res.leadBid! * 0.05)) / 100) / 10;
+  }
+}
+function cancelBid() { bidId.value = null; bidMsg.value = ''; }
 </script>
 
 <template>
@@ -50,23 +76,33 @@ const notes = computed(() => [...w.metaChanges.value].sort((a, b) => Math.abs(b.
     <div class="mk-row mk-head">
       <span class="c">Player</span><span class="src">From</span><span>Age</span><span>OVR</span><span>Potential</span><span class="fe">Price</span><span class="vs">Your best {{ filter === 'all' ? '' : filter }}</span><span></span>
     </div>
-    <div v-for="e in listed" :key="e.player.id" class="mk-row">
-      <span class="c">
-        <span class="rs-role" :class="e.player.role">{{ e.player.role.slice(0,3).toUpperCase() }}</span>
-        <b>{{ e.player.handle }}</b>
-        <i class="rs-rank mk-rank" :class="'rk-' + rank(e.player).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(e.player).label }}</i>
-        <i v-if="metaClass(e.player)" class="mk-meta" :class="metaClass(e.player)">{{ mainAgent(e.player) }} {{ metaClass(e.player) === 'buff' ? '▲' : '▼' }}</i>
-      </span>
-      <span class="src" :class="{ club: e.from !== -1 }">{{ sourceOf(e) }}</span>
-      <span>{{ e.player.age }}</span>
-      <span class="ovr">{{ overall(e.player) }}</span>
-      <span class="mk-pot"><span class="rs-stars"><i v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(e.player, false) }">★</i></span><i class="mk-ceil">{{ ceil(e.player) }}</i></span>
-      <span class="fe" :class="metaClass(e.player)">{{ money(w.value(e.player)) }}</span>
-      <span class="vs">{{ w.myPlayerOf(e.player.role)?.handle }} <i>{{ overall(w.myPlayerOf(e.player.role)!) }}</i></span>
-      <button class="mk-sign" :disabled="!w.canAfford(e)" @click="w.acquire(e)">
-        {{ overall(e.player) > overall(w.myPlayerOf(e.player.role)!) ? 'buy ▲' : 'buy' }}
-      </button>
-    </div>
-    <div class="hq-compnote">The market never closes — buy any match-day. Potential is a <b>scouted</b> star read (fogged, not the true ceiling) and price tracks the <b>live meta</b> (a buffed agent's mains cost more). A buy <b>adds</b> the player to your squad (no one is dropped); a club you buy from banks the fee and restocks. Trim depth in <b>Squad &amp; Comp</b>.</div>
+    <template v-for="e in listed" :key="e.player.id">
+      <div class="mk-row" :class="{ bidding: bidId === e.player.id }">
+        <span class="c">
+          <span class="rs-role" :class="e.player.role">{{ e.player.role.slice(0,3).toUpperCase() }}</span>
+          <b>{{ e.player.handle }}</b>
+          <i class="rs-rank mk-rank" :class="'rk-' + rank(e.player).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(e.player).label }}</i>
+          <i v-if="metaClass(e.player)" class="mk-meta" :class="metaClass(e.player)">{{ mainAgent(e.player) }} {{ metaClass(e.player) === 'buff' ? '▲' : '▼' }}</i>
+          <i v-if="w.isContested(e)" class="mk-fire" title="contested — rival clubs are bidding">🔥</i>
+        </span>
+        <span class="src" :class="{ club: e.from !== -1 }">{{ sourceOf(e) }}</span>
+        <span>{{ e.player.age }}</span>
+        <span class="ovr">{{ overall(e.player) }}</span>
+        <span class="mk-pot"><span class="rs-stars"><i v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(e.player, false) }">★</i></span><i class="mk-ceil">{{ ceil(e.player) }}</i></span>
+        <span class="fe" :class="metaClass(e.player)">{{ money(w.value(e.player)) }}</span>
+        <span class="vs">{{ w.myPlayerOf(e.player.role)?.handle }} <i>{{ overall(w.myPlayerOf(e.player.role)!) }}</i></span>
+        <button class="mk-sign" :disabled="w.balance.value < w.askingOf(e)" @click="openBid(e)">
+          {{ overall(e.player) > overall(w.myPlayerOf(e.player.role)!) ? 'bid ▲' : 'bid' }}
+        </button>
+      </div>
+      <div v-if="bidId === e.player.id" class="mk-bid">
+        <span class="mk-bidlbl">Your offer</span>
+        <span class="mk-bidinput">$<input type="number" v-model.number="bidAmtK" step="0.5" min="0" @keyup.enter="submitBid(e)" />k</span>
+        <button class="mk-bidgo" @click="submitBid(e)">offer</button>
+        <button class="mk-bidx" @click="cancelBid">cancel</button>
+        <span v-if="bidMsg" class="mk-bidmsg" :class="{ warn: bidWarn }">{{ bidMsg }}</span>
+      </div>
+    </template>
+    <div class="hq-compnote">The market never closes — bid any match-day. A <b class="mk-fire">🔥</b> player is <b>contested</b>: rival clubs are bidding, and you'll have to clear their offer to sign him (a hungry rising club pays a premium). Potential is a <b>scouted</b> star read (fogged); price tracks the <b>live meta</b>. A signing <b>adds</b> the player (no one is dropped); the seller banks your winning bid. Trim depth in <b>Squad &amp; Comp</b>.</div>
   </div>
 </template>

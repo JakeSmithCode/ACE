@@ -26,6 +26,26 @@ export function aiListings(clubs: Club[], myClub: number, eligible?: Set<number>
   return out.sort((a, b) => b.v - a.v).slice(0, cap).map(({ club, playerId }) => ({ club, playerId }));
 }
 
+/** The strongest rival bid for a market player — price discovery. Every AI club
+ *  that wants him (`aiWantsToBuy`: role-upgrade + phase + can-afford) values him at
+ *  `playerValue` scaled by **eagerness** (a rising/rebuilding club hungry to climb
+ *  pays a premium), capped at a prudent fraction of its bank. The top such cap is
+ *  the price you must beat. `{ club: -1, bid: 0 }` = nobody else is in, you sign at
+ *  asking. Pure/deterministic — the same resolution the Phase-2 server runs on real
+ *  bids (AI just fills the other seats here). */
+export function topRivalBid(clubs: Club[], balances: number[], exclude: Set<number>, player: Player, patch?: Parameters<typeof playerValue>[1]): { club: number; bid: number } {
+  let best = { club: -1, bid: 0 };
+  const base = playerValue(player, patch);
+  clubs.forEach((c, i) => {
+    if (exclude.has(i) || !aiWantsToBuy(clubs, balances, i, player)) return;
+    const phase = clubPhase(c.team);
+    const eager = phase === 'rising' || phase === 'rebuilding' ? 1.25 : 1.05;   // the hungry pay up
+    const cap = Math.min(Math.round(balances[i] * 0.6), Math.round(base * eager));   // a prudent ceiling
+    if (cap > best.bid) best = { club: i, bid: cap };
+  });
+  return best;
+}
+
 /** Would AI club `i` buy `player` to replace its same-role player? It must be an
  *  upgrade it can afford — but a **rising/rebuilding** club is hungrier (it'll take
  *  a marginal upgrade to climb), while a **prime** club only wants a clear one and

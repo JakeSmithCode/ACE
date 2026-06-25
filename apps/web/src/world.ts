@@ -10,7 +10,7 @@ import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
   shouldRetire, clubPhase, clubAgeChar,
-  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
+  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
@@ -517,12 +517,10 @@ function manageAiClubArcs(rng: Rng) {
   });
 }
 
-/** Buy a market player — they JOIN your roster (no forced drop) at the full
- *  price. A free agent leaves the unowned pool; a club sale pays the seller, who
- *  restocks that slot from free agency. The matchday five is re-derived. */
-function acquire(e: MarketEntry) {
-  if (!canAfford(e)) return;
-  const price = value(e.player);
+/** Sign a market player at an explicit `price` — they JOIN your roster (no forced
+ *  drop). A free agent leaves the unowned pool; a club sale pays the seller (your
+ *  winning bid, not the formula value), who restocks. The matchday five re-derives. */
+function acquireAt(e: MarketEntry, price: number) {
   myRoster.value = [...myRoster.value, retag(e.player, clubs.value[myClub.value].team.id, false)];
   balances.value = balances.value.map((b, i) => i === myClub.value ? b - price : b);
   if (e.from === -1) {
@@ -534,6 +532,29 @@ function acquire(e: MarketEntry) {
   }
   syncLineup();
 }
+
+// the asking price (seller's reserve = formula value) and the strongest rival bid
+// for a market player — the price you must beat to sign him
+const askingOf = (e: MarketEntry) => value(e.player);
+const rivalBid = (e: MarketEntry) => topRivalBid(clubs.value, balances.value, new Set([myClub.value, e.from]), e.player, patch.value);
+/** Is a player contested? (a rival is willing to pay at or above asking) */
+const isContested = (e: MarketEntry) => rivalBid(e).bid >= askingOf(e);
+
+export interface BidOutcome { won: boolean; below?: boolean; broke?: boolean; leader?: number; leadBid?: number; paid?: number }
+/** Place a bid on a market player. You win — and sign at your bid — only if it
+ *  clears the seller's asking price AND beats every rival's ceiling. Otherwise it
+ *  tells you who's leading and at what, so you can raise or walk (the bidding war). */
+function bidFor(e: MarketEntry, amount: number): BidOutcome {
+  const asking = askingOf(e);
+  if (amount < asking) return { won: false, below: true, leadBid: asking };
+  if (amount > balance.value) return { won: false, broke: true };
+  const rival = rivalBid(e);
+  if (rival.club >= 0 && rival.bid >= amount) return { won: false, leader: rival.club, leadBid: rival.bid };
+  acquireAt(e, amount);
+  return { won: true, paid: amount };
+}
+/** Buy at asking (back-compat / the uncontested path). */
+function acquire(e: MarketEntry) { bidFor(e, askingOf(e)); }
 
 /** Sell one of your players for their value (released to free agency). Blocked
  *  when it would break a valid five. */
@@ -677,6 +698,7 @@ export function useWorld() {
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
+    bidFor, isContested, askingOf,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
 }
