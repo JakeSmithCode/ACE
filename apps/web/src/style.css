@@ -353,9 +353,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-stars span.on{color:var(--gold)}
 .rs-attrs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px 16px}
 .rs-attr{min-width:0}
-.rs-abar{height:5px;background:var(--bg-3);overflow:hidden}
-.rs-abar i{display:block;height:100%;background:var(--brand);opacity:.55}
+.rs-abar{position:relative;height:5px;background:var(--bg-3);overflow:hidden}
+.rs-abar i{position:absolute;left:0;top:0;height:100%;background:var(--brand);opacity:.6}
+.rs-abar i.ghost{opacity:.2}      /* faint headroom to the scouted per-skill ceiling */
 .rs-abar i.mech{background:var(--gold)}
+.rs-tick{position:absolute;top:-1px;width:2px;height:7px;background:var(--text);opacity:.45}  /* ceiling marker */
+.rs-acl{font-size:10px;color:var(--muted-2);font-variant-numeric:tabular-nums}
 .rs-aval{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px}
 .rs-alabel{font-family:var(--label);font-size:9px;letter-spacing:.06em;color:var(--muted-2);min-width:24px}
 .rs-aval b{color:var(--text);font-variant-numeric:tabular-nums}

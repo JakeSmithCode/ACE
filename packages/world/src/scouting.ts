@@ -4,7 +4,7 @@
 // them every day). The estimate is biased by a deterministic per-player noise
 // scaled by how little you know — so the market's mispriced gems are the kids
 // whose true ceiling sits outside the consensus read. Pure, like everything here.
-import type { Player } from '@ace/shared';
+import type { Player, Attributes } from '@ace/shared';
 import { overall, potentialOverall } from './develop.js';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -34,6 +34,18 @@ export function scoutedPotential(p: Player, owned = false): number {
 /** Scouted potential as a 1–5 star rating (what the UI shows instead of truth). */
 export const scoutedStars = (p: Player, owned = false): number =>
   Math.max(1, Math.min(5, Math.round((scoutedPotential(p, owned) - 44) / 9)));
+
+/** A PER-SKILL scouted ceiling — the true per-attribute potential fogged like the
+ *  overall, but each skill carries its OWN noise, so a player's aim ceiling can read
+ *  clear while his utility ceiling stays murky. This is potential per skill, not as
+ *  a lump: the spiky prospect (one elite ceiling, one capped) becomes legible, and
+ *  role-fit is a real read. Never below the current value (you see what a skill IS). */
+export function scoutedAttr(p: Player, attr: keyof Attributes, owned = false): number {
+  const cur = p.attr[attr];
+  const truePot = p.potential?.[attr] ?? cur;
+  const band = (1 - scoutConfidence(p, owned)) * 20;
+  return clamp(Math.round(truePot + noise(`${p.id}:${attr}`) * band), cur, 99);
+}
 
 /** The scouted ceiling **range** — the gamble made legible. Wide for an
  *  unresolved prospect (real plasticity `potVar` + observation error), tight for

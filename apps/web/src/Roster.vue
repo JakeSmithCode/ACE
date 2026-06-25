@@ -4,7 +4,7 @@
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, soloRank } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -18,6 +18,8 @@ const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return 
 const rank = (p: Player) => soloRank(overall(p));
 const rnd = (n: number) => Math.round(n);
 const chem = (p: Player) => Math.round(w.chemOf(p) * 100);   // 0..100% gelled with the squad
+const isMech = (k: keyof Attributes) => k === 'aim' || k === 'movement' || k === 'entry';
+const aceil = (p: Player, k: keyof Attributes) => scoutedAttr(p, k, true);   // per-skill scouted ceiling (owned)
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
 const delta = (p: Player, k: keyof Attributes) => {
@@ -48,9 +50,14 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
       </div>
       <div class="rs-attrs">
         <div v-for="a in ATTRS" :key="a.k" class="rs-attr">
-          <div class="rs-abar"><i :style="{ width: p.attr[a.k] + '%' }" :class="{ mech: a.k === 'aim' || a.k === 'movement' || a.k === 'entry' }"></i></div>
+          <div class="rs-abar">
+            <i class="ghost" :class="{ mech: isMech(a.k) }" :style="{ width: aceil(p, a.k) + '%' }"></i>
+            <i :class="{ mech: isMech(a.k) }" :style="{ width: p.attr[a.k] + '%' }"></i>
+            <span class="rs-tick" :style="{ left: aceil(p, a.k) + '%' }"></span>
+          </div>
           <div class="rs-aval">
             <span class="rs-alabel">{{ a.label }}</span><b>{{ rnd(p.attr[a.k]) }}</b>
+            <span v-if="aceil(p, a.k) > rnd(p.attr[a.k])" class="rs-acl" :title="`scouted ceiling — this skill can grow to ~${aceil(p, a.k)} (fogged)`">↗{{ aceil(p, a.k) }}</span>
             <span v-if="delta(p, a.k)" class="rs-delta" :class="delta(p, a.k) > 0 ? 'up' : 'dn'">{{ delta(p, a.k) > 0 ? '▲' : '▼' }}{{ Math.abs(delta(p, a.k)) }}</span>
           </div>
         </div>
