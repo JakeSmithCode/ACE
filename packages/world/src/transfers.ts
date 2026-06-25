@@ -5,9 +5,19 @@
 // gaps. Pure/deterministic helpers here; the web store orchestrates the moves
 // (and the Phase-2 server worker will run the same resolution on real bids).
 import type { Club, } from './clubs.js';
-import { overall, clubPhase } from './develop.js';
+import { overall, potentialOverall, clubPhase, type ClubPhase } from './develop.js';
 import type { Player } from '@ace/shared';
 import { playerValue } from './market.js';
+
+/** How much an AI club in a given lifecycle stage values *unrealised potential* on
+ *  top of current ability — a rebuilding club bets on the future, a prime club wants
+ *  proven ability now, an aging one buys nothing (it reloads through youth). */
+export const aiUpsideWeight = (phase: ClubPhase): number =>
+  phase === 'rebuilding' ? 0.6 : phase === 'rising' ? 0.4 : phase === 'prime' ? 0.15 : 0;
+/** A club's *appetite-weighted* rating of a player: current ability plus the slice
+ *  of his upside that this club's stage cares about. The lens AI clubs trade on. */
+export const aiRating = (p: Player, phase: ClubPhase): number =>
+  overall(p) + aiUpsideWeight(phase) * Math.max(0, potentialOverall(p) - overall(p));
 
 /** Each eligible AI club lists a player, shaped by its **lifecycle stage**: an
  *  AGING club cashes out its oldest VETERAN (a proven player, age-discounted —
@@ -46,16 +56,20 @@ export function topRivalBid(clubs: Club[], balances: number[], exclude: Set<numb
   return best;
 }
 
-/** Would AI club `i` buy `player` to replace its same-role player? It must be an
- *  upgrade it can afford — but a **rising/rebuilding** club is hungrier (it'll take
- *  a marginal upgrade to climb), while a **prime** club only wants a clear one and
- *  an **aging** one (mid-rebuild) sits out. */
+/** Would AI club `i` buy `player` to replace its same-role player? It judges by its
+ *  stage-weighted rating (`aiRating`) — so a **rebuilding/rising** club will take a
+ *  high-ceiling PROSPECT even at a small current downgrade (it's betting on the
+ *  future, which is what gives your flipped gems real buyers), a **prime** club wants
+ *  a clear rating upgrade, and an **aging** one sits out (it reloads through youth).
+ *  Bounded: a club won't field someone too raw to compete (`RAW_FLOOR`). */
+const RAW_FLOOR = 8;   // most current-overall a buyer will drop a slot by for upside
 export function aiWantsToBuy(clubs: Club[], balances: number[], i: number, player: Player): boolean {
   const mine = clubs[i].team.players.find(p => p.role === player.role);
   if (!mine) return false;
   const phase = clubPhase(clubs[i].team);
   if (phase === 'aging') return false;                              // rebuilding via youth, not the market
+  if (overall(player) < overall(mine) - RAW_FLOOR) return false;    // too raw to field today
   const margin = phase === 'rising' || phase === 'rebuilding' ? 0 : 2;   // the hungry buy marginal upgrades
-  if (overall(player) <= overall(mine) + margin) return false;
+  if (aiRating(player, phase) <= aiRating(mine, phase) + margin) return false;
   return playerValue(player) <= balances[i];                       // full cash price
 }

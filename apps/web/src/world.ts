@@ -10,7 +10,7 @@ import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
   shouldRetire, clubPhase, clubAgeChar,
-  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, SCOUT_MAX,
+  startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, aiRating, SCOUT_MAX,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
@@ -646,9 +646,9 @@ function resolveListings() {
     const mine = myRoster.value.find(p => p.id === pid);
     if (!mine) { unlist(pid); continue; }
     if (!canSell(pid)) continue;
-    const buyer = clubs.value.findIndex((_, i) => i !== myClub.value && aiWantsToBuy(clubs.value, balances.value, i, mine));
+    const price = value(mine);   // your scouted (de-risked) value — the report transfers with the sale
+    const buyer = clubs.value.findIndex((_, i) => i !== myClub.value && balances.value[i] >= price && aiWantsToBuy(clubs.value, balances.value, i, mine));
     if (buyer < 0) continue;
-    const price = value(mine);
     const bteam = clubs.value[buyer].team;
     const bIdx = bteam.players.findIndex(p => p.role === mine.role);
     const bOld = bteam.players[bIdx];
@@ -698,14 +698,19 @@ function resolveAiMarket() {
   for (const buyer of buyers) {
     if (moves >= AI_SIGNINGS_PER_DAY) break;
     const bank = balances.value[buyer];
+    const phase = clubPhase(clubs.value[buyer].team);
+    // the buyer judges targets by its stage-weighted rating — so a rebuilding club
+    // will sign a high-ceiling PROSPECT, not just a current-ability upgrade
     let best: { t: MarketEntry; gain: number; price: number } | null = null;
     for (const t of targets) {
       if (t.from === buyer) continue;
       const mine = clubs.value[buyer].team.players.find(p => p.role === t.player.role);
-      if (!mine || overall(t.player) - overall(mine) <= 1) continue;   // a real upgrade only
-      const price = value(t.player);
-      if (price > bank * 0.55) continue;                               // prudent — keep a reserve
-      if (!best || overall(t.player) - overall(mine) > best.gain) best = { t, gain: overall(t.player) - overall(mine), price };
+      if (!mine || overall(t.player) < overall(mine) - 8) continue;    // not too raw to field
+      const gain = aiRating(t.player, phase) - aiRating(mine, phase);
+      if (gain <= 1) continue;                                         // a real rating upgrade
+      const price = playerValue(t.player, patch.value);               // consensus price (no private scouting)
+      if (price > bank * 0.55) continue;                              // prudent — keep a reserve
+      if (!best || gain > best.gain) best = { t, gain, price };
     }
     if (!best) continue;
     executeAiSigning(buyer, best.t, best.price);
