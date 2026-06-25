@@ -14,8 +14,9 @@ import {
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
   defaultFacilities, facilityBoost, facilityCost, FACILITY_MAX,
+  defaultAcademy, academyIntake, academyCost, academyWageBill, intakeSize, ACADEMY_MAX,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
-  type Facilities, type FacilityId,
+  type Facilities, type FacilityId, type Academy,
 } from '@ace/world';
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
@@ -94,6 +95,7 @@ const titles = ref<number[]>(clubs.value.map(() => 0));  // career championships
 const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned to the XI
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
 const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boost YOUR roster's development)
+const academy = ref<Academy>(defaultAcademy());           // your youth pipeline (homegrown prospects)
 
 const balance = computed(() => balances.value[myClub.value]);
 // value reflects the live meta — buffed-agent mains are worth more
@@ -108,6 +110,46 @@ function upgradeFacility(id: FacilityId) {
   const cost = facCost(id);
   balances.value = balances.value.map((b, i) => i === myClub.value ? b - cost : b);
   facilities.value = { ...facilities.value, [id]: facilities.value[id] + 1 };
+}
+
+// --- the academy (the youth pipeline): build the wing, take an annual intake of
+// teenage prospects, develop them on a reps path, graduate the hits into your squad
+const acadCost = () => academyCost(academy.value.level);
+const canUpgradeAcademy = () => academy.value.level < ACADEMY_MAX && balance.value >= acadCost();
+const acadIntakeSize = () => intakeSize(academy.value.level);
+// every handle already in the world — a new intake must be disjoint (unique handles)
+const allHandles = () => new Set<string>([
+  ...clubs.value.flatMap(c => c.team.players.map(p => p.handle)),
+  ...freeAgentPool.value.map(p => p.handle), ...myRoster.value.map(p => p.handle),
+  ...academy.value.prospects.map(p => p.handle),
+]);
+/** Take this season's intake once (level > 0, not already taken) — a deterministic
+ *  class of prospects appended to the academy. Auto-run each new season + on the
+ *  first upgrade, so a fresh academy delivers immediately. */
+function runIntake() {
+  if (academy.value.level === 0 || academy.value.lastIntake >= season.value) return;
+  const fresh = academyIntake(seasonSeed.value, season.value, academy.value.level, allHandles());
+  academy.value = { ...academy.value, prospects: [...academy.value.prospects, ...fresh], lastIntake: season.value };
+}
+function upgradeAcademy() {
+  if (!canUpgradeAcademy()) return;
+  const cost = acadCost();
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b - cost : b);
+  academy.value = { ...academy.value, level: academy.value.level + 1 };
+  runIntake();   // a fresh wing delivers its first class right away
+}
+/** Graduate a prospect into your senior roster — no fee, retagged to your club.
+ *  The matchday five re-derives (he competes for a slot like any signing). */
+function promoteProspect(id: string) {
+  const p = academy.value.prospects.find(x => x.id === id);
+  if (!p) return;
+  academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== id) };
+  myRoster.value = [...myRoster.value, retag(p, clubs.value[myClub.value].team.id, false)];
+  syncLineup();
+}
+/** Cut a prospect from the academy (a youth you've given up on). */
+function releaseProspect(id: string) {
+  academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== id) };
 }
 
 // the matchday five is always the best player per comp slot from your roster;
@@ -222,6 +264,12 @@ function resolveDay() {
   const dr = new Rng((seasonSeed.value ^ (season.value * 0x2545f491) ^ (dayIdx.value * 0x9e3779b9)) >>> 0);
   const boost = facilityBoost(facilities.value);   // your HQ accelerates your squad's development
   myRoster.value = myRoster.value.map(p => developInSeason(p, fiveIds.has(p.id), total.value, dr, boost));
+  // your academy prospects develop on the reps path (academy circuit: grow, no rust)
+  // — a separate rng so it never perturbs the senior-roster stream
+  if (academy.value.prospects.length) {
+    const ar = new Rng((seasonSeed.value ^ (season.value * 0x85ebca6b) ^ (dayIdx.value * 0x27d4eb2f) ^ 0xACAD) >>> 0);
+    academy.value = { ...academy.value, prospects: academy.value.prospects.map(p => developInSeason(p, 'academy', total.value, ar, boost)) };
+  }
   dayIdx.value++;
   syncLineup();        // re-derive your five + strength from the developed roster
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -252,7 +300,8 @@ function advanceSeason() {
   // settle every club by its division rank (shared `settleClub`); YOUR wage bill
   // is over the whole roster (depth), an AI club's over its five
   const settle = (i: number, wages: number) => settleClub({ rank: rankIn(i), divSize: DIV_SIZE, tier: division.value[i], wages, playoff: poPrize(i) });
-  ledger.value = { season: season.value, ...settle(myClub.value, squadWageBill(myRoster.value)) };
+  // your wage bill spans the senior roster + the (cheap) academy prospects
+  ledger.value = { season: season.value, ...settle(myClub.value, squadWageBill(myRoster.value) + academyWageBill(academy.value.prospects)) };
   balances.value = balances.value.map((b, i) =>
     i === myClub.value ? b + ledger.value!.net : b + settle(i, squadWageBill(clubs.value[i].team.players)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
@@ -263,12 +312,19 @@ function advanceSeason() {
   prevById.value = snapRosters();
   const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
   clubs.value = developLeague(clubs.value, rng);                              // AI clubs: full annual step (off-season only)
-  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, facilityBoost(facilities.value)));  // bootcamp share + HQ boost
+  const myBoost = facilityBoost(facilities.value);
+  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost));  // bootcamp share + HQ boost
+  // prospects age + get the bootcamp slice too (separate rng, order-independent)
+  if (academy.value.prospects.length) {
+    const ar = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9) ^ 0xACAD) >>> 0);
+    academy.value = { ...academy.value, prospects: academy.value.prospects.map(p => developPlayer(p, ar, 1 - SEASON_SHARE, myBoost)) };
+  }
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
   syncLineup();
   season.value++;
+  runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
   refreshMarket();
@@ -288,7 +344,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities();
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy();
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -307,7 +363,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities();
+  facilities.value = defaultFacilities(); academy.value = defaultAcademy();
   refreshMarket();
 }
 
@@ -456,7 +512,7 @@ function snapshot() {
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
-    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value,
+    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
     prevById: [...prevById.value.entries()],
   };
 }
@@ -476,6 +532,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs;
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
+  academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
   prevById.value = new Map(o.prevById);
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -491,7 +548,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -501,6 +558,7 @@ export function useWorld() {
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
+    academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

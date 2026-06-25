@@ -10,6 +10,7 @@ import { Viewer } from './viewer';
 import Roster from './Roster.vue';
 import Market from './Market.vue';
 import Facilities from './Facilities.vue';
+import Academy from './Academy.vue';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -38,7 +39,7 @@ function zoneOf(rank: number): '' | 'promo' | 'releg' {
 // the rest of the ladder churns, but these are the clubs you'll face
 const nearMoves = computed(() => lastMoves.value.filter(m => m.from === myDivision.value || m.to === myDivision.value));
 
-const hqTab = ref<'season' | 'squad' | 'market' | 'hq'>('season');
+const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy'>('season');
 
 const club = (i: number) => clubs.value[i];
 const tagOf = (i: number) => club(i).team.tag;
@@ -98,6 +99,7 @@ onUnmounted(() => { viewer?.destroy(); });
         <button :class="{ on: hqTab === 'squad' }" @click="hqTab = 'squad'">Squad &amp; Comp</button>
         <button :class="{ on: hqTab === 'market' }" @click="hqTab = 'market'">Market</button>
         <button :class="{ on: hqTab === 'hq' }" @click="hqTab = 'hq'">Facilities</button>
+        <button :class="{ on: hqTab === 'academy' }" @click="hqTab = 'academy'">Academy</button>
       </div>
       <div class="hq-actions">
         <button v-if="!done" class="hq-go" @click="w.resolveDay()">▶ Resolve match-day</button>
@@ -112,6 +114,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <!-- MARKET -->
     <Market v-if="hqTab === 'market'" />
     <Facilities v-else-if="hqTab === 'hq'" />
+    <Academy v-else-if="hqTab === 'academy'" />
 
     <!-- SQUAD & COMP -->
     <div v-else-if="hqTab === 'squad'" class="hq-squad">

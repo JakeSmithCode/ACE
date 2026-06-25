@@ -116,15 +116,26 @@ function resolveCeiling(p: Player, played: boolean, rng: Rng, ceilBias: number):
   return { ...p, potential, potVar: v * CEIL_NARROW };
 }
 
-/** In-season micro-development for one match-day. A starter gets reps → grows
- *  toward potential and ages a touch; a benched player grows far less AND loses
- *  mechanical sharpness (bench rust) — so who you play shapes who develops. The
- *  ceiling cloud also resolves a slice (reps drift it, then narrow). Age is
- *  unchanged in-season (the curve bracket only shifts at the off-season). */
-export function developInSeason(p: Player, played: boolean, games: number, rng: Rng, boost: DevBoost = NO_BOOST): Player {
+/** How a player spent the match-day, which shapes their development:
+ *  - `starter`: full reps in real competition → grows most, ceiling drifts up.
+ *  - `academy`: reps in the academy circuit → grows well, ceiling drifts up, no
+ *    rust (they're playing), but a touch slower than top-flight minutes.
+ *  - `bench`: a senior who didn't play → little growth, ceiling drifts down, and
+ *    mechanical sharpness rusts. A `boolean` maps to starter (true) / bench (false)
+ *    so existing callers are byte-identical. */
+export type DevContext = 'starter' | 'academy' | 'bench';
+const REP_MUL: Record<DevContext, number> = { starter: 1, academy: 0.75, bench: 0.3 };
+
+/** In-season micro-development for one match-day. Who you play shapes who develops:
+ *  a starter and an academy prospect both get reps (grow, ceiling up); a benched
+ *  senior grows far less AND rusts. The ceiling cloud resolves a slice (reps drift
+ *  it, then narrow). Age is unchanged in-season (the bracket only shifts off-season). */
+export function developInSeason(p: Player, ctx: DevContext | boolean, games: number, rng: Rng, boost: DevBoost = NO_BOOST): Player {
+  const context: DevContext = ctx === true ? 'starter' : ctx === false ? 'bench' : ctx;
+  const played = context !== 'bench';   // starter & academy both get reps and a ceiling-up bias
   const g = resolveCeiling(p, played, rng, boost.ceiling);
-  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), played ? 1 : 0.3, rng, boost);
-  if (!played) for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28) * boost.rust);  // bench rust
+  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), REP_MUL[context], rng, boost);
+  if (context === 'bench') for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28) * boost.rust);  // bench rust
   return { ...g, attr };
 }
 

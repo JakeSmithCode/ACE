@@ -78,8 +78,9 @@ const clamp = (v: number, lo = 35, hi = 95) => Math.max(lo, Math.min(hi, Math.ro
 /** Generate one player — role-shaped attributes, an age, age-scaled potential,
  *  and a mastered agent pool. Used for league squads and free agents alike, so
  *  a signing is the same kind of object as a homegrown player. `idPrefix` namespaces
- *  the id (a club tag, or 'fa' for a free agent). */
-export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: string, strength: number): Player {
+ *  the id (a club tag, or 'fa' for a free agent). `ageOverride` forces the age (the
+ *  Academy uses it for teenage prospects); when set, the role's age draw is skipped. */
+export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: string, strength: number, ageOverride?: number): Player {
   const base = 42 + strength * 46;                 // ~42..88 talent center
   const shape = ROLE_SHAPE[role];
   const roll = (k: keyof Attributes) => clamp(base + (shape[k] ?? 0) + rng.range(-6, 6));
@@ -88,7 +89,7 @@ export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: strin
     utility: roll('utility'), clutch: roll('clutch'), entry: roll('entry'),
   };
   // duelists skew young, anchors skew veteran — flavour, and the hook for aging
-  const age = role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27);
+  const age = ageOverride ?? (role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27));
   // potential = current + age-scaled headroom × a per-player gift; the young
   // carry real upside, a veteran is ~already there. (Hidden — Phase-3 scouting.)
   const youth = Math.max(0, (24 - age) / 8);       // 1 at ≤16 .. 0 at ≥24

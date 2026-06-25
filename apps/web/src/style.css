@@ -503,6 +503,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .fc-up i{font-style:normal;font-family:var(--display);font-size:13px}
 .fc-up:hover:not(:disabled){filter:brightness(1.08)}
 .fc-up:disabled{background:transparent;color:var(--muted-2);border-color:var(--line);cursor:default}
+/* academy: prospect board (reuses rs-* badges) */
+.ac-board{margin-top:6px}
+.ac-row{display:flex;align-items:center;gap:16px;padding:11px 4px;border-bottom:1px solid var(--line)}
+.ac-row .rs-id{flex:1;min-width:0}
+.ac-age{font-style:normal;font-family:var(--label);font-size:9.5px;letter-spacing:.04em;color:var(--muted-2);margin-left:6px}
+.ac-actions{flex:none;display:flex;gap:7px}
+.ac-empty{padding:18px 4px;color:var(--muted-2);font-size:12.5px;font-family:var(--body)}
 .po-champ{margin-top:4px;padding:9px 12px;background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--display);font-weight:700;font-size:14px}
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
 .hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}
