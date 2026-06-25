@@ -41,6 +41,24 @@ export const potentialOverall = (p: Player): number =>
 export const squadRating = (team: Team): number =>
   Math.round(team.players.reduce((s, p) => s + overall(p), 0) / team.players.length);
 
+// A player's SOLO-QUEUE rank — their raw individual skill on the VALORANT ladder,
+// a different axis from their club's division (a Radiant player can be stuck on a
+// Gold club: the gem to scout). Derived from current `overall`, 8-point bands.
+const RANK_BANDS: { min: number; tier: string }[] = [
+  { min: 96, tier: 'Radiant' }, { min: 88, tier: 'Immortal' }, { min: 80, tier: 'Ascendant' },
+  { min: 72, tier: 'Diamond' }, { min: 64, tier: 'Platinum' }, { min: 56, tier: 'Gold' },
+  { min: 48, tier: 'Silver' }, { min: 40, tier: 'Bronze' }, { min: 0, tier: 'Iron' },
+];
+/** A solo-queue rank from an overall rating: `{ tier, sub, label }` — Radiant has
+ *  no sub-division, the rest split their 8-point band into 3 (e.g. "Immortal 2"). */
+export function soloRank(ovr: number): { tier: string; sub: number; label: string } {
+  const band = RANK_BANDS.find(b => ovr >= b.min)!;
+  if (band.tier === 'Radiant') return { tier: 'Radiant', sub: 0, label: 'Radiant' };
+  const sub = Math.max(1, Math.min(3, Math.floor((ovr - band.min) / 8 * 3) + 1));
+  return { tier: band.tier, sub, label: `${band.tier} ${sub}` };
+}
+export const rankOfPlayer = (p: { attr: Attributes }) => soloRank(overall(p));
+
 /** A player's career phase, from the aging curve — for legible UI, not mechanics. */
 export function phaseOf(p: Player): 'rising' | 'peak' | 'declining' {
   if (p.age <= 21 && potentialOverall(p) - overall(p) >= 2) return 'rising';

@@ -427,6 +427,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* scouting fog: potential confidence */
 .rs-conf{color:var(--muted);font-weight:600}
 .rs-conf.lo{color:var(--gold)}
+/* solo-queue rank badge (a player's individual skill on the VALORANT ladder) */
+.rs-rank{display:inline-flex;align-items:center;gap:4px;font-family:var(--label);font-size:9px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-style:normal;margin-top:2px}
+.rs-rankdot{width:6px;height:6px;transform:rotate(45deg);flex:none;background:currentColor}
+.mk-rank{margin-left:8px;font-size:8px}
+.rk-radiant{color:#FFF6D5}.rk-immortal{color:#D43763}.rk-ascendant{color:#3BD17F}
+.rk-diamond{color:#C490E0}.rk-platinum{color:#3FB7C4}.rk-gold{color:#E5B567}
+.rk-silver{color:#AEB7BE}.rk-bronze{color:#9C7A4D}.rk-iron{color:#6b7680}
 .rs-ceil{color:var(--text);font-weight:700;font-style:normal}
 .mk-pot{display:flex;flex-direction:column;gap:1px;line-height:1.1}
 .mk-ceil{font-style:normal;font-family:var(--label);font-size:10px;color:var(--muted);letter-spacing:.02em}

@@ -4,7 +4,7 @@
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, soloRank } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -15,6 +15,7 @@ const ATTRS: { k: keyof Attributes; label: string }[] = [
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
 const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
 const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
+const rank = (p: Player) => soloRank(overall(p));
 const rnd = (n: number) => Math.round(n);
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
@@ -37,6 +38,7 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
           <i v-if="w.isStarter(p.id)" class="rs-start">XI</i><i v-else class="rs-res">RES</i>
         </div>
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span></div>
+        <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
       <div class="rs-pot">

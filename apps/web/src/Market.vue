@@ -5,7 +5,7 @@
 // mains a buffed agent is dearer, a nerfed one cheaper. Filter by role.
 import { computed, ref } from 'vue';
 import type { Player, Role } from '@ace/shared';
-import { overall, scoutedStars, scoutedRange } from '@ace/world';
+import { overall, scoutedStars, scoutedRange, soloRank } from '@ace/world';
 import { useWorld, type MarketEntry } from './world';
 
 const w = useWorld();
@@ -21,6 +21,7 @@ const listed = computed(() => {
 });
 const sourceOf = (e: MarketEntry) => e.from === -1 ? 'free agent' : w.clubs.value[e.from].team.tag;
 const ceil = (p: Player) => { const [lo, hi] = scoutedRange(p, false); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
+const rank = (p: Player) => soloRank(overall(p));
 // the player's main agent and how the live patch rates it (drives the meta tag)
 const mainAgent = (p: Player) => [...p.agents].sort((a, b) => b.level - a.level)[0]?.agent ?? '';
 const metaTier = (p: Player) => w.patch.value.agentTier[mainAgent(p)] ?? 1;
@@ -53,6 +54,7 @@ const notes = computed(() => [...w.metaChanges.value].sort((a, b) => Math.abs(b.
       <span class="c">
         <span class="rs-role" :class="e.player.role">{{ e.player.role.slice(0,3).toUpperCase() }}</span>
         <b>{{ e.player.handle }}</b>
+        <i class="rs-rank mk-rank" :class="'rk-' + rank(e.player).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(e.player).label }}</i>
         <i v-if="metaClass(e.player)" class="mk-meta" :class="metaClass(e.player)">{{ mainAgent(e.player) }} {{ metaClass(e.player) === 'buff' ? '▲' : '▼' }}</i>
       </span>
       <span class="src" :class="{ club: e.from !== -1 }">{{ sourceOf(e) }}</span>
