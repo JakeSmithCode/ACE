@@ -5,7 +5,7 @@
 import { computed, onMounted, onUnmounted, ref, watch as vueWatch } from 'vue';
 import type { Player } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { ROLE_AGENTS } from '@ace/world';
+import { ROLE_AGENTS, clubPhase } from '@ace/world';
 import { Viewer } from './viewer';
 import Roster from './Roster.vue';
 import Market from './Market.vue';
@@ -56,6 +56,10 @@ const fmt = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
 // out-develops and reloads talent, a long-term threat to watch
 const infra = (i: number) => w.infraLevel(i);
 const INFRA_MAX = w.INFRA_MAX;
+// a club's emergent lifecycle stage — read the league: which dynasties are aging
+// (vulnerable), which young teams are rising (coming for you)
+const phase = (i: number) => clubPhase(club(i).team);
+const PHASE_LABEL: Record<string, string> = { rebuilding: 'REBUILD', rising: 'RISING', prime: 'PRIME', aging: 'AGING' };
 const mapOf = (seed: number) => w.fixtureMap(seed);   // each fixture's map (rotation over the pool)
 
 // --- comp builder ---------------------------------------------------------
@@ -222,7 +226,7 @@ onUnmounted(() => { viewer?.destroy(); });
         </div>
         <div v-for="(s, rank) in shownTable" :key="s.club" class="hq-trow" :class="[zoneOf(rank + 1), { me: s.club === myClub }]" @click="selectClub(s.club)">
           <span class="r">{{ rank + 1 }}</span>
-          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i>{{ cname(s.club) }}</span>
+          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="hq-cname">{{ cname(s.club) }}</span><i class="hq-phase" :class="phase(s.club)">{{ PHASE_LABEL[phase(s.club)] }}</i></span>
           <span class="hq-inf" :title="`infrastructure ${infra(s.club)}/${INFRA_MAX}`"><i v-for="n in INFRA_MAX" :key="n" :class="{ on: n <= infra(s.club) }"></i></span>
           <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
           <span>{{ s.rf }}</span><span>{{ s.ra }}</span>

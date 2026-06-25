@@ -274,6 +274,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-table .hq-trow .hq-inf{display:inline-flex;gap:2px;justify-content:center}
 .hq-table .hq-trow .hq-inf i{width:5px;height:11px;background:var(--bg-3);border:1px solid var(--line-2)}
 .hq-table .hq-trow .hq-inf i.on{background:var(--brand);border-color:var(--brand)}
+.hq-table .hq-trow .c .hq-cname{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.hq-phase{flex:none;font-style:normal;font-family:var(--label);font-size:8px;letter-spacing:.05em;padding:1px 5px;border:1px solid transparent;border-radius:2px}
+.hq-phase.rising{color:var(--win);background:rgba(59,209,127,.12);border-color:rgba(59,209,127,.3)}
+.hq-phase.prime{color:var(--gold);background:rgba(229,181,103,.12);border-color:rgba(229,181,103,.3)}
+.hq-phase.aging{color:#e0975a;background:rgba(224,151,90,.12);border-color:rgba(224,151,90,.3)}
+.hq-phase.rebuilding{color:var(--muted);background:var(--bg-3);border-color:var(--line-2)}
 .hq-table .hq-trow span{text-align:center;color:var(--muted)}
 .hq-table .hq-trow .r{color:var(--muted-2);font-family:var(--display);font-weight:700}
 .hq-table .hq-trow .c{text-align:left;color:var(--text);display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}

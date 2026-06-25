@@ -75,12 +75,23 @@ const AGENTS = ROLE_AGENTS;
 
 const clamp = (v: number, lo = 35, hi = 95) => Math.max(lo, Math.min(hi, Math.round(v)));
 
+/** A club's persistent age CHARACTER (−3..+3) — a deterministic hash of its id, so
+ *  some orgs always run a veteran core (cycling prime → aging → rebuild) and some a
+ *  young one (perpetually rising). It biases roster ages at generation AND the ages
+ *  of players the club reloads, so the league's age mix stays spread season over
+ *  season — keeping a healthy diversity of lifecycle stages (no synchronized wave). */
+export function clubAgeChar(id: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619) >>> 0;
+  return (h % 7) - 3;
+}
+
 /** Generate one player — role-shaped attributes, an age, age-scaled potential,
  *  and a mastered agent pool. Used for league squads and free agents alike, so
  *  a signing is the same kind of object as a homegrown player. `idPrefix` namespaces
  *  the id (a club tag, or 'fa' for a free agent). `ageOverride` forces the age (the
  *  Academy uses it for teenage prospects); when set, the role's age draw is skipped. */
-export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: string, strength: number, ageOverride?: number): Player {
+export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: string, strength: number, ageOverride?: number, ageShift = 0): Player {
   const base = 42 + strength * 46;                 // ~42..88 talent center
   const shape = ROLE_SHAPE[role];
   const roll = (k: keyof Attributes) => clamp(base + (shape[k] ?? 0) + rng.range(-6, 6));
@@ -88,8 +99,9 @@ export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: strin
     aim: roll('aim'), movement: roll('movement'), gameSense: roll('gameSense'),
     utility: roll('utility'), clutch: roll('clutch'), entry: roll('entry'),
   };
-  // duelists skew young, anchors skew veteran — flavour, and the hook for aging
-  const age = ageOverride ?? (role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27));
+  // duelists skew young, anchors skew veteran — flavour, and the hook for aging.
+  // `ageShift` is the club's age character (veteran vs young core); 0 is unchanged.
+  const age = ageOverride ?? Math.max(17, Math.min(33, (role === 'duelist' ? rng.int(18, 24) : role === 'sentinel' ? rng.int(22, 30) : rng.int(20, 27)) + ageShift));
   // potential = current + age-scaled headroom × a per-player gift; the young
   // carry real upside, a veteran is ~already there. (Hidden — Phase-3 scouting.)
   const youth = Math.max(0, (24 - age) / 8);       // 1 at ≤16 .. 0 at ≥24
@@ -118,9 +130,13 @@ export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: strin
  *  are pulled from `pool` (consumed, so a league never repeats a handle). */
 export function makeClub(rng: Rng, identity: { name: string; tag: string }, strength: number, pool: string[]): Team {
   const iglIdx = 4;                                // the sentinel calls (like the sample veterans)
+  // a club's age CHARACTER — some orgs field a veteran core (an aging dynasty), some
+  // a young project (rising/rebuilding). Derived from the id (not drawn), so the same
+  // character governs this club's reloads forever, sustaining lifecycle diversity.
+  const ageBias = clubAgeChar(identity.tag.toLowerCase());
   const players: Player[] = COMP.map((role, i) => {
     const handle = pool.pop()!;                    // (non-rng; draw order is identical to inline)
-    const p = makePlayer(rng, role, handle, identity.tag.toLowerCase(), strength);
+    const p = makePlayer(rng, role, handle, identity.tag.toLowerCase(), strength, undefined, ageBias);
     if (i === iglIdx) p.igl = true;
     return p;
   });

@@ -9,7 +9,7 @@ import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
-  shouldRetire,
+  shouldRetire, clubPhase, clubAgeChar,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
@@ -333,6 +333,7 @@ function advanceSeason() {
     academy.value = { ...academy.value, prospects: academy.value.prospects.map(p => developPlayer(p, ar, 1 - SEASON_SHARE, myBoost)) };
   }
   processRetirements(rng);   // veterans hang it up (post-aging); clubs reload
+  manageAiClubArcs(rng);     // aging AI clubs proactively rebuild — shed a vet for youth
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
@@ -435,13 +436,16 @@ function processRetirements(rng: Rng) {
   clubs.value = clubs.value.map((c, ci) => {
     if (ci === myClub.value) return c;   // your club handled below
     const infra = clubInfra(c.strength);
+    const char = clubAgeChar(c.team.id);   // the club's age philosophy biases who it reloads
     let changed = false;
     const players = c.team.players.map(p => {
       if (!shouldRetire(p, rng)) return p;
       events.push({ handle: p.handle, age: p.age, role: p.role, overall: overall(p), club: ci, mine: false });
       changed = true;
       const homegrown = infra >= 2 && rng.chance(0.35 + infra * 0.1);
-      const age = homegrown ? rng.int(17, 19) : rng.int(20, 24);
+      // a veteran-character club reloads older, a youth one younger — so the league's
+      // age mix stays spread and retirements don't synchronize into a wave
+      const age = Math.max(16, (homegrown ? rng.int(17, 19) : rng.int(21, 26)) + char);
       const str = homegrown ? Math.max(0.35, Math.min(0.7, 0.32 + infra * 0.06)) : 0.4 + infra * 0.04;
       return { ...makePlayer(rng, p.role as Role, freshHandle(), c.team.id, str, age), igl: p.igl };
     });
@@ -473,6 +477,32 @@ function processRetirements(rng: Rng) {
     myRoster.value = roster;
   }
   retirements.value = events;
+}
+
+// proactive rebuilds (DESIGN §17) — an AI club's lifecycle stage (clubPhase) is
+// emergent from its roster. An AGING club doesn't wait for the retirement cliff: a
+// well-run one sheds its oldest for a homegrown youth a year early (a managed
+// transition — a dynasty that RELOADS), so the collapse-all-at-once is smoothed and
+// the league keeps a spread of teams at different stages. A neglected aging club
+// (low infra) does this rarely, so it ages out and rebuilds the hard way. Your club
+// is skipped — you read your rivals' stages and manage your own arc.
+function manageAiClubArcs(rng: Rng) {
+  const used = new Set<string>(allHandles());
+  const freshHandle = () => { const h = HANDLES.find(x => !used.has(x)) ?? `Sub${moveSeq++}`; used.add(h); return h; };
+  clubs.value = clubs.value.map((c, ci) => {
+    if (ci === myClub.value || clubPhase(c.team) !== 'aging') return c;
+    const infra = clubInfra(c.strength);
+    if (!rng.chance(0.2 + infra * 0.1)) return c;            // better orgs rebuild more reliably
+    const old = [...c.team.players].sort((a, b) => b.age - a.age)[0];
+    if (old.age < 29) return c;                              // only shed a genuine veteran
+    const homegrown = infra >= 3;                            // a strong academy reloads with its own youth
+    const age = Math.max(16, (homegrown ? rng.int(17, 19) : rng.int(19, 22)) + clubAgeChar(c.team.id));
+    const str = homegrown ? Math.max(0.4, Math.min(0.72, 0.34 + infra * 0.06)) : 0.42 + infra * 0.04;
+    const youth = { ...makePlayer(rng, old.role as Role, freshHandle(), c.team.id, str, age), igl: old.igl };
+    const players = c.team.players.map(p => (p.id === old.id ? youth : p));
+    const team = { ...c.team, players };
+    return { ...c, team, strength: clampStr(squadRating(team) / 100) };
+  });
 }
 
 /** Buy a market player — they JOIN your roster (no forced drop) at the full

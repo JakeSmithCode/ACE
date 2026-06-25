@@ -66,6 +66,32 @@ export function phaseOf(p: Player): 'rising' | 'peak' | 'declining' {
   return 'peak';
 }
 
+// A club's lifecycle stage — emergent, NOT assigned. It falls out of the roster
+// (mean age + how much growth is left in it), so a club moves through the stages as
+// its core develops and ages: a young project rises to its prime, peaks, ages, and
+// either reloads or collapses into a rebuild. The store reads this to give aging AI
+// clubs a proactive rebuild, and the standings show it so you can read the league.
+export type ClubPhase = 'rebuilding' | 'rising' | 'prime' | 'aging';
+export const clubMeanAge = (team: Team): number =>
+  team.players.reduce((s, p) => s + p.age, 0) / team.players.length;
+/** A squad's remaining growth — mean(potential − current) over the roster. */
+export const clubRoomToGrow = (team: Team): number =>
+  Math.round(team.players.reduce((s, p) => s + (potentialOverall(p) - overall(p)), 0) / team.players.length);
+export function clubPhase(team: Team): ClubPhase {
+  const age = clubMeanAge(team);
+  const room = clubRoomToGrow(team);
+  // age is the clearest lifecycle signal (it spreads naturally across the league);
+  // strength/room split the young teams (climbing vs already-good) and the mid teams
+  // (still developing vs settled at their peak).
+  // age is the smooth, stable lifecycle signal — three age bands give the core
+  // stages; a young squad with a long way to its ceiling is carved out as a rebuild.
+  // (Persistent per-club `clubAgeChar` keeps the league's ages spread, so these
+  // bands hold a healthy mix season over season instead of pulsing as one.)
+  if (age >= 26) return 'aging';                            // old core — decline/retirement looming
+  if (age <= 24.5) return room >= 9 ? 'rebuilding' : 'rising';  // young: deep project vs ascending
+  return 'prime';                                           // the mature middle — peak years
+}
+
 // development is now CONTINUOUS: this fraction of the annual curve is realized
 // DURING the season (reps, match by match); the rest is the off-season bootcamp.
 // A full-time starter still realizes ~one annual step a year (pace preserved) —
