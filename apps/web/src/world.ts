@@ -13,7 +13,9 @@ import {
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
+  defaultFacilities, facilityBoost, facilityCost, FACILITY_MAX,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
+  type Facilities, type FacilityId,
 } from '@ace/world';
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
@@ -91,10 +93,22 @@ const playoffs = shallowRef<Bracket | null>(null);    // this season's bracket (
 const titles = ref<number[]>(clubs.value.map(() => 0));  // career championships per club
 const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned to the XI
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
+const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boost YOUR roster's development)
 
 const balance = computed(() => balances.value[myClub.value]);
 // value reflects the live meta — buffed-agent mains are worth more
 const value = (p: Player) => playerValue(p, patch.value);
+
+// --- facilities (the HQ): upgrade rooms to compound your squad's development ---
+const facBoost = computed(() => facilityBoost(facilities.value));
+const facCost = (id: FacilityId) => facilityCost(facilities.value[id]);
+const canUpgradeFacility = (id: FacilityId) => facilities.value[id] < FACILITY_MAX && balance.value >= facCost(id);
+function upgradeFacility(id: FacilityId) {
+  if (!canUpgradeFacility(id)) return;
+  const cost = facCost(id);
+  balances.value = balances.value.map((b, i) => i === myClub.value ? b - cost : b);
+  facilities.value = { ...facilities.value, [id]: facilities.value[id] + 1 };
+}
 
 // the matchday five is always the best player per comp slot from your roster;
 // the rest are reserves (depth). One IGL — the starting sentinel.
@@ -206,7 +220,8 @@ function resolveDay() {
   // reserves grow less and rust — so playing a prospect develops him
   const fiveIds = new Set(clubs.value[myClub.value].team.players.map(p => p.id));
   const dr = new Rng((seasonSeed.value ^ (season.value * 0x2545f491) ^ (dayIdx.value * 0x9e3779b9)) >>> 0);
-  myRoster.value = myRoster.value.map(p => developInSeason(p, fiveIds.has(p.id), total.value, dr));
+  const boost = facilityBoost(facilities.value);   // your HQ accelerates your squad's development
+  myRoster.value = myRoster.value.map(p => developInSeason(p, fiveIds.has(p.id), total.value, dr, boost));
   dayIdx.value++;
   syncLineup();        // re-derive your five + strength from the developed roster
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -248,7 +263,7 @@ function advanceSeason() {
   prevById.value = snapRosters();
   const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
   clubs.value = developLeague(clubs.value, rng);                              // AI clubs: full annual step (off-season only)
-  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE));  // yours already grew in-season — bootcamp share
+  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, facilityBoost(facilities.value)));  // bootcamp share + HQ boost
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
@@ -273,7 +288,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null;
+  playoffs.value = null; facilities.value = defaultFacilities();
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -292,6 +307,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
+  facilities.value = defaultFacilities();
   refreshMarket();
 }
 
@@ -440,7 +456,7 @@ function snapshot() {
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
-    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value],
+    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value,
     prevById: [...prevById.value.entries()],
   };
 }
@@ -459,6 +475,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
   patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs;
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
+  facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   prevById.value = new Map(o.prevById);
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -474,7 +491,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -483,6 +500,7 @@ export function useWorld() {
     N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, MAP_POOL, fixtureMap, navOf, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
+    facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

@@ -72,16 +72,23 @@ export function phaseOf(p: Player): 'rising' | 'peak' | 'declining' {
 // but a benched player gets far less (and rusts), so playing time is a real lever.
 export const SEASON_SHARE = 0.6;
 
+/** Facility-derived development multipliers (the HQ's edge). Default is a no-op,
+ *  so AI clubs / the CLI develop exactly as before — only your boosted roster
+ *  differs. `growth` speeds growth-to-potential, `decline` slows the fade,
+ *  `ceiling` biases the potential cloud up, `rust` cuts bench rust. */
+export interface DevBoost { growth: number; decline: number; ceiling: number; rust: number }
+export const NO_BOOST: DevBoost = { growth: 1, decline: 1, ceiling: 0, rust: 1 };
+
 /** One development step: grow toward potential + decline past peak, for `frac` of
- *  the annual curve, scaled by reps (`repMul`). Shared by the in-season and
- *  off-season ticks so they can never drift. */
-function curveStep(p: Player, frac: number, repMul: number, rng: Rng): Attributes {
+ *  the annual curve, scaled by reps (`repMul`) and facility boosts. Shared by the
+ *  in-season and off-season ticks so they can never drift. */
+function curveStep(p: Player, frac: number, repMul: number, rng: Rng, boost: DevBoost): Attributes {
   const lr = learnRate(p.age);
   const attr = { ...p.attr };
   for (const k of ATTRS) {
     const ceil = p.potential?.[k] ?? attr[k];
-    const grow = Math.max(0, ceil - attr[k]) * lr * frac * repMul * rng.range(0.55, 1.25);
-    const dec = declineRate(p.age, MECH.has(k)) * frac * rng.range(0.6, 1.25);
+    const grow = Math.max(0, ceil - attr[k]) * lr * frac * repMul * boost.growth * rng.range(0.55, 1.25);
+    const dec = declineRate(p.age, MECH.has(k)) * frac * boost.decline * rng.range(0.6, 1.25);
     attr[k] = clamp(attr[k] + grow - dec);
   }
   return attr;
@@ -96,10 +103,10 @@ const CEIL_NARROW = 0.985;   // plasticity shrink per development slice (~×0.76
  *  0 — where the ceiling locks. Bounded (plasticity shrinks geometrically, so the
  *  cumulative drift converges): a bust is a bet you took, never a mugging (§2/§18).
  *  Old players (`potVar ≈ 0`) are untouched — the gamble lives in youth. */
-function resolveCeiling(p: Player, played: boolean, rng: Rng): Player {
+function resolveCeiling(p: Player, played: boolean, rng: Rng, ceilBias: number): Player {
   const v = p.potVar ?? 0;
   if (v < 0.02 || !p.potential) return p.potVar ? { ...p, potVar: 0 } : p;
-  const bias = played ? 0.5 : -0.7;                 // playing realizes upside; idling busts
+  const bias = (played ? 0.5 : -0.7) + ceilBias;    // playing realizes upside; idling busts; analyst room helps
   const luck = rng.range(-0.6, 0.6);                // this slice's overall fortune (shared across attrs)
   const potential = { ...p.potential };
   for (const k of ATTRS) {
@@ -114,19 +121,19 @@ function resolveCeiling(p: Player, played: boolean, rng: Rng): Player {
  *  mechanical sharpness (bench rust) — so who you play shapes who develops. The
  *  ceiling cloud also resolves a slice (reps drift it, then narrow). Age is
  *  unchanged in-season (the curve bracket only shifts at the off-season). */
-export function developInSeason(p: Player, played: boolean, games: number, rng: Rng): Player {
-  const g = resolveCeiling(p, played, rng);
-  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), played ? 1 : 0.3, rng);
-  if (!played) for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28));  // bench rust
+export function developInSeason(p: Player, played: boolean, games: number, rng: Rng, boost: DevBoost = NO_BOOST): Player {
+  const g = resolveCeiling(p, played, rng, boost.ceiling);
+  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), played ? 1 : 0.3, rng, boost);
+  if (!played) for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28) * boost.rust);  // bench rust
   return { ...g, attr };
 }
 
 /** Off-season step: age +1 and the bootcamp share of the annual curve (full reps,
  *  rest + camp), plus a bootcamp slice of ceiling resolution. `frac` defaults to
  *  the WHOLE annual step. */
-export function developPlayer(p: Player, rng: Rng, frac = 1): Player {
-  const g = resolveCeiling(p, true, rng);   // bootcamp reps resolve a ceiling slice
-  return { ...g, age: g.age + 1, attr: curveStep(g, frac, 1, rng) };
+export function developPlayer(p: Player, rng: Rng, frac = 1, boost: DevBoost = NO_BOOST): Player {
+  const g = resolveCeiling(p, true, rng, boost.ceiling);   // bootcamp reps resolve a ceiling slice
+  return { ...g, age: g.age + 1, attr: curveStep(g, frac, 1, rng, boost) };
 }
 
 export const developSquad = (team: Team, rng: Rng): Team =>

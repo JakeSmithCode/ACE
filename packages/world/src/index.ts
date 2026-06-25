@@ -12,6 +12,7 @@ export * from './affinity.js';
 export * from './resolve.js';
 export * from './state.js';
 export * from './develop.js';
+export * from './facilities.js';
 export * from './finance.js';
 export * from './market.js';
 export * from './scouting.js';

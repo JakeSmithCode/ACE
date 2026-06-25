@@ -487,6 +487,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .po-vstep.ban{color:var(--def);opacity:.7;text-decoration:line-through}
 .po-vstep.pick{color:var(--text)}
 .po-vstep.decider{color:var(--gold)}
+/* HQ facilities */
+.fc{max-width:760px}
+.fc-room{display:flex;align-items:center;gap:18px;padding:16px 4px;border-bottom:1px solid var(--line)}
+.fc-info{flex:1}
+.fc-name{font-family:var(--display);font-weight:700;font-size:17px;color:var(--text);display:flex;align-items:center;gap:10px}
+.fc-tier{font-family:var(--label);font-size:10px;letter-spacing:.05em;color:var(--brand);background:var(--bg-3);padding:1px 7px;font-weight:600}
+.fc-blurb{color:var(--muted);font-size:12.5px;margin:3px 0 8px}
+.fc-pips{display:flex;align-items:center;gap:5px}
+.fc-pip{width:26px;height:7px;background:var(--bg-3);border:1px solid var(--line-2)}
+.fc-pip.on{background:var(--brand);border-color:var(--brand)}
+.fc-eff{margin-left:10px;font-family:var(--label);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--win)}
+.fc-eff.none{color:var(--muted-2)}
+.fc-up{flex:none;min-width:148px;background:var(--brand);border:1px solid var(--brand);color:var(--bg);font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:10px 14px;cursor:pointer;display:flex;justify-content:center;gap:8px}
+.fc-up i{font-style:normal;font-family:var(--display);font-size:13px}
+.fc-up:hover:not(:disabled){filter:brightness(1.08)}
+.fc-up:disabled{background:transparent;color:var(--muted-2);border-color:var(--line);cursor:default}
 .po-champ{margin-top:4px;padding:9px 12px;background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--display);font-weight:700;font-size:14px}
 .po-champ.me{background:rgba(59,209,127,.14);border-color:rgba(59,209,127,.5);color:var(--win)}
 .hq-saved{font-style:normal;margin-left:9px;color:var(--win);font-size:10px;letter-spacing:.04em}
