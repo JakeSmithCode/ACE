@@ -45,6 +45,9 @@ const leagueRetired = computed(() => w.retirements.value.length);
 const roleName = (r: string) => r.slice(0, 3).toUpperCase();
 // players whose contracts expired and walked free (you didn't renew)
 const walkedFree = computed(() => w.contractDepartures.value);
+// the AI free-agency wave — players released onto the board this off-season
+const wave = computed(() => w.marketWave.value);
+const headliner = computed(() => wave.value[0]);
 
 const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'rankings'>('season');
 
@@ -184,6 +187,14 @@ onUnmounted(() => { viewer?.destroy(); });
         <b>{{ r.handle }}</b> <i class="rs-role" :class="r.role">{{ roleName(r.role) }}</i> · {{ r.overall }} OVR <span class="hq-retbye">contract expired — walked free</span>
       </span>
       <span class="hq-retleague">renew expiring deals in the Squad before season's end to keep them</span>
+    </div>
+    <!-- AI free-agency wave — proven players (and the odd star) hit the board -->
+    <div v-if="wave.length && !playoffs && dayIdx < total" class="hq-retbanner wave">
+      <span class="hq-reth">⬡ Free agency</span>
+      <span class="hq-retmine"><b>{{ wave.length }}</b> player{{ wave.length > 1 ? 's' : '' }} released to free agency
+        <template v-if="headliner"> — headlined by <b>{{ headliner.handle }}</b> <i class="rs-role" :class="headliner.role">{{ roleName(headliner.role) }}</i> {{ headliner.overall }} OVR</template>
+      </span>
+      <span class="hq-retleague">a strained club can't keep its earners — grab them in the Market</span>
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">

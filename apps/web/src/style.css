@@ -599,3 +599,5 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-retleague{font-family:var(--label);font-size:10.5px;letter-spacing:.03em;color:var(--muted);margin-left:auto}
 .hq-retbanner.walkfree{border-left-color:var(--def)}
 .hq-retbanner.walkfree .hq-reth{color:var(--def)}
+.hq-retbanner.wave{border-left-color:var(--brand)}
+.hq-retbanner.wave .hq-reth{color:var(--brand)}

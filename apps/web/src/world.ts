@@ -108,6 +108,8 @@ const academy = ref<Academy>(defaultAcademy());           // your youth pipeline
 const retirements = ref<{ handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[]>([]);
 // your players who walked free last off-season (contract expired, not renewed)
 const contractDepartures = ref<{ handle: string; role: string; overall: number }[]>([]);
+// AI players released to free agency last off-season (the wave hitting your board)
+const marketWave = ref<{ handle: string; overall: number; role: string }[]>([]);
 
 // scouting reports you've commissioned (player id → level 0..SCOUT_MAX). A paid
 // investment that clears the fog on a player's potential — and lifts a revealed
@@ -412,12 +414,37 @@ function advanceSeason() {
   runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
-  refreshMarket();
+  const freed = resolveAiFreeAgency(rng);   // AI free-agency wave — strained clubs leak talent
+  refreshMarket(freed);            // regenerate the board, folding the wave in
 }
-function refreshMarket() {
-  freeAgentPool.value = freeAgents(marketSeed(), leagueHandles());
+function refreshMarket(extra: Player[] = []) {
+  const exclude = new Set([...leagueHandles(), ...extra.map(p => p.handle)]);
+  freeAgentPool.value = [...extra, ...freeAgents(marketSeed(), exclude)];
   listings.value = aiListings(clubs.value, myClub.value, marketEligible());
   myListed.value = new Set();
+}
+// AI contracts expire too: each off-season a financially STRAINED club can't meet
+// its earners' demands and its priciest player (a real star) walks to free agency;
+// a healthy club occasionally lets a fringe player's deal run out. Both land on the
+// board — the wave. The club backfills, so it stays at five. Deterministic, bounded
+// (≤1 per club). This is what puts proven players (and the odd star) on your market.
+function resolveAiFreeAgency(rng: Rng): Player[] {
+  const freed: Player[] = [];
+  clubs.value = clubs.value.map((c, ci) => {
+    if (ci === myClub.value) return c;
+    const strained = balances.value[ci] < 5000;            // bleeding — can't keep its earners
+    if (!rng.chance(strained ? 0.5 : 0.07)) return c;
+    const players = c.team.players;
+    const leaving = strained
+      ? [...players].sort((a, b) => playerValue(b, patch.value) - playerValue(a, patch.value))[0]   // the star walks
+      : [...players].sort((a, b) => playerValue(a, patch.value) - playerValue(b, patch.value))[0];  // a fringe deal lapses
+    freed.push(release(leaving));
+    const fill = retag(backfillFor(leaving.role as Role), c.team.id, leaving.igl);
+    const team = { ...c.team, players: players.map(p => p.id === leaving.id ? fill : p) };
+    return { ...c, team, strength: clampStr(squadRating(team) / 100) };
+  });
+  marketWave.value = [...freed].sort((a, b) => overall(b) - overall(a)).map(p => ({ handle: p.handle, overall: overall(p), role: p.role }));
+  return freed;
 }
 function selectClub(i: number) {
   myClub.value = i;
@@ -429,7 +456,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; scouted.value = new Map();
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -448,7 +475,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; scouted.value = new Map();
+  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   refreshMarket();
 }
 
@@ -789,7 +816,7 @@ function snapshot() {
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
-    retirements: retirements.value, contractDepartures: contractDepartures.value, scouted: [...scouted.value.entries()],
+    retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()],
   };
 }
@@ -811,7 +838,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
   retirements.value = o.retirements ?? [];
-  contractDepartures.value = o.contractDepartures ?? [];
+  contractDepartures.value = o.contractDepartures ?? []; marketWave.value = o.marketWave ?? [];
   scouted.value = new Map(o.scouted ?? []);
   prevById.value = new Map(o.prevById);
 }
@@ -828,7 +855,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, scouted],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -845,7 +872,7 @@ export function useWorld() {
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
     scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX,
-    wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures,
+    wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
 }
