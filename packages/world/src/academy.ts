@@ -1,7 +1,7 @@
 // The Academy (DESIGN §8) — your homegrown youth pipeline, and the system only
 // ACE can do well: it manufactures the foggiest gambles in the game. An upgradeable
 // HQ wing that each season delivers an intake of teenage prospects into your
-// reserves — age 16–18, raw (low current ability) but a WIDE ceiling cloud (high
+// reserves — age 14–18, raw (low current ability) but a WIDE ceiling cloud (high
 // potVar): you're drafting blind, and the only way to resolve the cloud is to give
 // the kid reps. They develop on the academy reps path (developInSeason 'academy':
 // real growth, no rust, no senior minutes) and graduate into your roster when ready
@@ -39,7 +39,8 @@ const prospectStrength = (level: number, rng: Rng): number =>
 /** The season's intake — `intakeSize(level)` teenage prospects generated
  *  deterministically from (seed, season, level), handles disjoint from `exclude`
  *  (the engine assumes unique handles in a match). Each is age 16–18, raw but a
- *  wide ceiling cloud — your gamble to develop. Drawn on its own Rng, so it never
+ *  wide ceiling cloud — your gamble to develop (a 14-year-old is the foggiest read
+ *  in the game: max plasticity, near-zero scouting confidence). Drawn on its own Rng, so it never
  *  perturbs the world stream (an unused academy leaves everything byte-identical). */
 export function academyIntake(seed: number, season: number, level: number, exclude: Set<string>): Player[] {
   const n = intakeSize(level);
@@ -47,7 +48,7 @@ export function academyIntake(seed: number, season: number, level: number, exclu
   const rng = new Rng((seed ^ (season * 0x6d2b79f5) ^ 0xACAD) >>> 0);
   return genHandles(rng, n, exclude).map(handle => {
     const role = ROLES[rng.int(0, ROLES.length - 1)];
-    const age = rng.int(16, 18);
+    const age = rng.int(14, 18);
     return makePlayer(rng, role, handle, 'acad', prospectStrength(level, rng), age);
   });
 }
