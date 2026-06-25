@@ -46,6 +46,8 @@ const SMOKE_T0 = 0.15, SMOKE_JITTER = 0.10;  // when a smoke blooms (normalized 
 const SMOKE_DUR = 0.20, SMOKE_DUR_UTIL = 0.18;
 const PULSE_R = 84, PULSE_R_UTIL = 70;       // recon/flash reach: 84..154
 const PULSE_DUR = 0.07, PULSE_DUR_UTIL = 0.10;
+const TRAP_R = 60, TRAP_R_UTIL = 48;         // sentinel trap watch-zone reach: 60..108
+const TRAP_T0 = 0.05, TRAP_DUR = 0.80;       // armed early, holds most of the round
 
 const WEAPONS: Record<Buy, string[]> = {
   full: ['Vandal', 'Phantom', 'Operator', 'Vandal', 'Phantom'],
@@ -599,6 +601,16 @@ function simulateRound(
       const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
       pulses.push({ side: ag.side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash' });
+    } else if (ag.agentRole === 'sentinel') {
+      // a sentinel LOCKS THE FLANK: a trap on the off-site lane that catches an enemy
+      // crossing it — granting the sentinel's side the first shot there for the whole
+      // round (a persistent armed watch, not a thrown window). The other roles fight
+      // the main site; the sentinel watches the back door, so a lurk/flank is punished
+      // by geometry. Reuses the pulse first-shot machinery, side = the sentinel's.
+      const c = jitter(rng, lerp(A.mid, otherPt, 0.5), 24);
+      const t0 = TRAP_T0 + rng.range(0, 0.04);
+      pulses.push({ side: ag.side, c, r: TRAP_R + TRAP_R_UTIL * u, t0, t1: t0 + TRAP_DUR });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap' });
     }
   }
   // authored lineups: deterministic (no rng), reach/duration still express the
