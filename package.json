@@ -12,6 +12,7 @@
     "sim": "tsx packages/engine/src/cli.ts",
     "balance": "tsx packages/engine/src/balance.ts",
     "season": "tsx packages/world/src/cli.ts",
+    "world": "tsx packages/world/src/cli-world.ts",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {

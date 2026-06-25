@@ -323,9 +323,16 @@ not a sim rewrite.
 ## 14. Build order within Phase 2
 
 1. **Extract orchestration into `@ace/world`** (§2) — store + server share one
-   pure core. (Valuable even before the server.)
-2. **Postgres schema + migrations**; a `seedWorld(region, seed)` that writes the
-   generated world to rows.
+   pure core. ✅ *Done — `@ace/world/resolve.ts` (`buildMatchInput`,
+   `quickResult`, `resolveWorldDay`, `settleClub`).*
+   - ✅ *Also done — `@ace/world/state.ts`: `WorldState` + `createWorld` /
+     `simulateSeason` / `advanceWorld`, the headless world engine the tick worker
+     runs. `pnpm world` proves it churns the full ladder deterministically with
+     no Vue/DB/navmesh. (The store consolidating onto `WorldState` is the
+     remaining half of this step.)*
+2. **Postgres schema + migrations**; a `seedWorld(region, seed)` that writes a
+   `createWorld(...)` `WorldState` to rows (the mapping is now mechanical — §5
+   tables mirror `WorldClub`/`fixture`).
 3. **Self-owned auth** (register/verify/login/refresh).
 4. **The tick worker** resolving one world end-to-end (matchday → season rollover),
    idempotent.
