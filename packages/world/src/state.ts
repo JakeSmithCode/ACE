@@ -11,7 +11,7 @@ import { membersOf, divisionSchedule, promoteRelegate, type DivMove } from './di
 import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, finishOf } from './playoffs.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
-import { developPlayer, overall, squadRating } from './develop.js';
+import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
 import { fullPatch, patchMeta, type MetaChange } from './meta.js';
 
@@ -79,12 +79,21 @@ export function simulateSeason(w: WorldState): WorldState {
   const div = divisionOf(w);
   const schedules = Array.from({ length: w.tiers }, (_, t) => divisionSchedule(membersOf(div, t)));
   const seasonSeed = (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
+  const devRng = new Rng((w.seed ^ (w.season * 0x2545f491)) >>> 0);
   const results: MatchResult[] = [];
   const total = schedules[0].length;
-  for (let day = 0; day < total; day++)
+  let clubs = w.clubs;
+  for (let day = 0; day < total; day++) {
     schedules.forEach((sched, t) => sched[day].forEach((fx, slot) =>
-      results.push(quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, fixtureSeed(seasonSeed, day, slot + t * 1000)))));
-  return { ...w, results, day: total };
+      results.push(quickResult(fx.home, fx.away, clubs[fx.home].strength, clubs[fx.away].strength, fixtureSeed(seasonSeed, day, slot + t * 1000)))));
+    // in-season development: the five who played grow (reps), reserves rust
+    clubs = clubs.map(c => {
+      const five = new Set(startingFive(c.roster).map(p => p.id));
+      const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng));
+      return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
+    });
+  }
+  return { ...w, clubs, results, day: total };
 }
 
 export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[] }
@@ -103,7 +112,7 @@ export function advanceWorld(w: WorldState): Rollover {
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);
   let clubs = w.clubs.map((c, i): WorldClub => {
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster), playoff: poPrize(i) });
-    const roster = c.roster.map(p => developPlayer(p, devRng));
+    const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE));  // bootcamp share — the rest grew in-season
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0) };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));

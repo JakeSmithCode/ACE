@@ -13,7 +13,9 @@ import type { Club } from './clubs.js';
 
 const ATTRS: (keyof Attributes)[] = ['aim', 'movement', 'gameSense', 'utility', 'clutch', 'entry'];
 const MECH = new Set<keyof Attributes>(['aim', 'movement', 'entry']);
-const clamp = (v: number) => Math.max(25, Math.min(99, Math.round(v)));
+// ability is continuous (fractional) so a season of small daily steps accumulates
+// instead of rounding to nothing each match-day; the UI rounds for display.
+const clamp = (v: number) => Math.max(25, Math.min(99, v));
 
 /** Fraction of the gap-to-potential a player closes in one season — steep when
  *  young, near-flat once developed. */
@@ -46,18 +48,43 @@ export function phaseOf(p: Player): 'rising' | 'peak' | 'declining' {
   return 'peak';
 }
 
-/** Develop one player by a season: age +1, grow toward potential, decline past
- *  peak. Returns a new Player (current ability only changes; potential is fixed). */
-export function developPlayer(p: Player, rng: Rng): Player {
+// development is now CONTINUOUS: this fraction of the annual curve is realized
+// DURING the season (reps, match by match); the rest is the off-season bootcamp.
+// A full-time starter still realizes ~one annual step a year (pace preserved) —
+// but a benched player gets far less (and rusts), so playing time is a real lever.
+export const SEASON_SHARE = 0.6;
+
+/** One development step: grow toward potential + decline past peak, for `frac` of
+ *  the annual curve, scaled by reps (`repMul`). Shared by the in-season and
+ *  off-season ticks so they can never drift. */
+function curveStep(p: Player, frac: number, repMul: number, rng: Rng): Attributes {
   const lr = learnRate(p.age);
   const attr = { ...p.attr };
   for (const k of ATTRS) {
     const ceil = p.potential?.[k] ?? attr[k];
-    const grow = Math.max(0, ceil - attr[k]) * lr * rng.range(0.55, 1.25);
-    const dec = declineRate(p.age, MECH.has(k)) * rng.range(0.6, 1.25);
+    const grow = Math.max(0, ceil - attr[k]) * lr * frac * repMul * rng.range(0.55, 1.25);
+    const dec = declineRate(p.age, MECH.has(k)) * frac * rng.range(0.6, 1.25);
     attr[k] = clamp(attr[k] + grow - dec);
   }
-  return { ...p, age: p.age + 1, attr };
+  return attr;
+}
+
+/** In-season micro-development for one match-day. A starter gets reps → grows
+ *  toward potential and ages a touch; a benched player grows far less AND loses
+ *  mechanical sharpness (bench rust) — so who you play shapes who develops. Age
+ *  is unchanged in-season (the curve bracket only shifts at the off-season). */
+export function developInSeason(p: Player, played: boolean, games: number, rng: Rng): Player {
+  const attr = curveStep(p, SEASON_SHARE / Math.max(1, games), played ? 1 : 0.3, rng);
+  if (!played) for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28));  // bench rust
+  return { ...p, attr };
+}
+
+/** Off-season step: age +1 and the bootcamp share of the annual curve (full reps,
+ *  rest + camp). `frac` defaults to the WHOLE annual step — AI clubs developed
+ *  only here are byte-identical to before; a club also developed in-season passes
+ *  the remaining `1 − SEASON_SHARE`, so its annual total is conserved. */
+export function developPlayer(p: Player, rng: Rng, frac = 1): Player {
+  return { ...p, age: p.age + 1, attr: curveStep(p, frac, 1, rng) };
 }
 
 export const developSquad = (team: Team, rng: Rng): Team =>

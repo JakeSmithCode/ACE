@@ -8,7 +8,7 @@ import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tac
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
-  makeLeague, standings, developLeague, developPlayer, makePlayer, HANDLES,
+  makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
@@ -55,10 +55,19 @@ const results = ref<MatchResult[]>([]);
 const dayIdx = ref(0);
 const myClub = ref(START_TIER * DIV_SIZE + 5);   // start mid-table in Gold — a club to climb
 const season = ref(1);
-const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // pre-tick snapshot, for roster deltas
+const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // season-start snapshot, for roster deltas (set below)
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
 const myTactics = ref<Tactics>(clone(clubs.value[myClub.value].tactics));  // your authored tactics (overlay)
 const myRoster = ref<Player[]>([...clubs.value[myClub.value].team.players]);  // your FULL squad (≥5; the matchday five is derived)
+// a development baseline — deltas on the roster screen show change since the
+// start of the season (in-season progress) + the off-season jump
+function snapRosters() {
+  return new Map<string, { age: number; attr: Attributes }>([
+    ...clubs.value.flatMap(c => c.team.players.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const)),
+    ...myRoster.value.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const),
+  ]);
+}
+prevById.value = snapRosters();   // season-1 baseline (hydrate overrides if a save loads)
 const balances = ref<number[]>(clubs.value.map(c => startingBalance(c.strength)));  // every club's bank
 const ledger = ref<SeasonLedger | null>(null);
 const leagueHandles = () => new Set(clubs.value.flatMap(c => c.team.players.map(p => p.handle)));
@@ -168,7 +177,13 @@ function resolveDay() {
     full: d => d === myDivision.value, sim: simFixture, quick: quickFixture,
   });
   results.value = [...results.value, ...fresh];
+  // in-season development of YOUR squad: the five who played grow (reps), the
+  // reserves grow less and rust — so playing a prospect develops him
+  const fiveIds = new Set(clubs.value[myClub.value].team.players.map(p => p.id));
+  const dr = new Rng((seasonSeed.value ^ (season.value * 0x2545f491) ^ (dayIdx.value * 0x9e3779b9)) >>> 0);
+  myRoster.value = myRoster.value.map(p => developInSeason(p, fiveIds.has(p.id), total.value, dr));
   dayIdx.value++;
+  syncLineup();        // re-derive your five + strength from the developed roster
   resolveListings();   // the market is always live — your listed players may sell each match-day
 }
 function simSeason() { while (!done.value) resolveDay(); }
@@ -204,13 +219,10 @@ function advanceSeason() {
   division.value = pr.division; lastMoves.value = pr.moves;
   schedules.value = divSchedules(division.value);
   // snapshot (whole roster) for deltas, then develop the league + your reserves
-  prevById.value = new Map([
-    ...clubs.value.flatMap(c => c.team.players.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const)),
-    ...myRoster.value.map(p => [p.id, { age: p.age, attr: { ...p.attr } }] as const),
-  ]);
+  prevById.value = snapRosters();
   const rng = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9)) >>> 0);
-  clubs.value = developLeague(clubs.value, rng);
-  myRoster.value = myRoster.value.map(p => developPlayer(p, rng));
+  clubs.value = developLeague(clubs.value, rng);                              // AI clubs: full annual step (off-season only)
+  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE));  // yours already grew in-season — bootcamp share
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
@@ -230,6 +242,7 @@ function selectClub(i: number) {
   myComp.value = {};
   myTactics.value = clone(clubs.value[i].tactics);
   myRoster.value = [...clubs.value[i].team.players];
+  prevById.value = snapRosters();   // new club → new baseline
   ledger.value = null;
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
@@ -244,10 +257,10 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   schedules.value = divSchedules(division.value);
   lastMoves.value = [];
   results.value = []; dayIdx.value = 0; season.value = 1;
-  prevById.value = new Map();
   myComp.value = {};
   myTactics.value = clone(clubs.value[myClub.value].tactics);
   myRoster.value = [...clubs.value[myClub.value].team.players];
+  prevById.value = snapRosters();   // fresh season-1 baseline
   balances.value = clubs.value.map(c => startingBalance(c.strength));
   ledger.value = null;
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];

@@ -14,9 +14,12 @@ const ATTRS: { k: keyof Attributes; label: string }[] = [
 ];
 const money = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
 const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
+const rnd = (n: number) => Math.round(n);
+// ability is fractional in-season; round both sides so a delta only shows once a
+// rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
 const delta = (p: Player, k: keyof Attributes) => {
   const prev = w.prevById.value.get(p.id);
-  return prev ? p.attr[k] - prev.attr[k] : 0;
+  return prev ? Math.round(p.attr[k]) - Math.round(prev.attr[k]) : 0;
 };
 const order = (p: Player) => (w.isStarter(p.id) ? 0 : 1);
 const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) || overall(b) - overall(a));
@@ -43,7 +46,7 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         <div v-for="a in ATTRS" :key="a.k" class="rs-attr">
           <div class="rs-abar"><i :style="{ width: p.attr[a.k] + '%' }" :class="{ mech: a.k === 'aim' || a.k === 'movement' || a.k === 'entry' }"></i></div>
           <div class="rs-aval">
-            <span class="rs-alabel">{{ a.label }}</span><b>{{ p.attr[a.k] }}</b>
+            <span class="rs-alabel">{{ a.label }}</span><b>{{ rnd(p.attr[a.k]) }}</b>
             <span v-if="delta(p, a.k)" class="rs-delta" :class="delta(p, a.k) > 0 ? 'up' : 'dn'">{{ delta(p, a.k) > 0 ? '▲' : '▼' }}{{ Math.abs(delta(p, a.k)) }}</span>
           </div>
         </div>
