@@ -68,5 +68,7 @@ export function settleClub(opts: { rank: number; divSize: number; tier: number; 
 }
 
 /** A squad's total wage bill (the store bills your whole roster; the server each
- *  club's squad). */
-export const squadWageBill = (players: Player[]): number => players.reduce((s, p) => s + playerWage(p), 0);
+ *  club's squad). With a `patch`, wages are market-linked (buffed-agent mains cost
+ *  more); omit it for the meta-neutral bill. */
+export const squadWageBill = (players: Player[], patch?: Parameters<typeof playerWage>[1]): number =>
+  players.reduce((s, p) => s + playerWage(p, patch), 0);

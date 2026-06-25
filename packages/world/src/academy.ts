@@ -25,6 +25,10 @@ export const defaultAcademy = (): Academy => ({ level: 0, prospects: [], lastInt
  *  room: the academy is the deepest investment (it manufactures talent). */
 export const academyCost = (level: number): number => 9000 + level * 9000;
 
+/** Recurring per-season upkeep of the academy wing — coaches, the youth circuit.
+ *  ~$4k/season at max, on top of the cheap prospect wages. */
+export const academyUpkeep = (level: number): number => level * 800;
+
 // prospects per off-season by academy level (0 = locked). A bigger academy fields
 // a larger class, so more shots at a gem.
 const INTAKE = [0, 1, 1, 2, 2, 3];

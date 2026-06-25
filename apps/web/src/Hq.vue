@@ -269,6 +269,7 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-led"><span>Prize money</span><b class="pos">+{{ fmt(ledger.prize) }}</b></div>
             <div v-if="ledger.playoff" class="hq-led"><span>Playoff bonus 🏆</span><b class="pos">+{{ fmt(ledger.playoff) }}</b></div>
             <div class="hq-led"><span>Squad wages</span><b class="neg">−{{ fmt(ledger.wages) }}</b></div>
+            <div v-if="ledger.upkeep" class="hq-led"><span>HQ upkeep</span><b class="neg">−{{ fmt(ledger.upkeep) }}</b></div>
             <div class="hq-led net"><span>Net last season</span><b :class="ledger.net >= 0 ? 'pos' : 'neg'">{{ ledger.net >= 0 ? '+' : '−' }}{{ fmt(Math.abs(ledger.net)) }}</b></div>
           </div>
           <div v-else class="hq-compnote">Finish the season to settle the books — better finishes pay more; the wage bill is owed regardless.</div>

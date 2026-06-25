@@ -2,13 +2,22 @@
 // wages scale steeply with ability (a superstar squad is expensive to keep), and
 // income rewards results, so a good season funds the next and a bad one bleeds
 // you toward selling. Numbers are in $ (thousands read naturally in the UI).
-import type { Player, Team } from '@ace/shared';
+import type { Player, Team, PatchState } from '@ace/shared';
 import { overall } from './develop.js';
 
 /** A player's seasonal wage — convex in ability, so the last few overall points
- *  cost the most (stars are dear). Veterans on a decline still cost their level. */
-export const playerWage = (p: Player): number => Math.round(Math.pow(overall(p), 2.2) * 0.2);
-export const squadWages = (team: Team): number => team.players.reduce((s, p) => s + playerWage(p), 0);
+ *  cost the most (stars are dear). Veterans on a decline still cost their level.
+ *  **Market-linked**: with a `patch`, a player who mains a buffed agent commands a
+ *  higher wage (the meta moves wages, not just transfer fees — a demand the sharp
+ *  owner anticipates). Omit `patch` → the meta-neutral base (CLIs byte-identical). */
+export function playerWage(p: Player, patch?: PatchState): number {
+  const base = Math.pow(overall(p), 2.2) * 0.2;
+  if (!patch) return Math.round(base);
+  const main = [...p.agents].sort((a, b) => b.level - a.level)[0]?.agent;
+  const tier = main ? (patch.agentTier[main] ?? 1) : 1;
+  return Math.round(base * (0.7 + tier * 0.3));        // tier ~0.85..1.15 → ~0.96..1.05×
+}
+export const squadWages = (team: Team, patch?: PatchState): number => team.players.reduce((s, p) => s + playerWage(p, patch), 0);
 
 /** Income for finishing the season at `rank` (1 = champion) in an `n`-club league:
  *  a base sponsor cheque plus placement prize money. */
@@ -26,7 +35,7 @@ export function playoffPrize(finish: 'champion' | 'runner-up' | 'semifinal' | 'n
   return finish === 'champion' ? 14000 : finish === 'runner-up' ? 7000 : finish === 'semifinal' ? 3500 : 0;
 }
 
-export interface SeasonLedger { season: number; sponsor: number; prize: number; playoff?: number; wages: number; net: number }
+export interface SeasonLedger { season: number; sponsor: number; prize: number; playoff?: number; wages: number; upkeep?: number; net: number }
 
 /** Settle a club's books for a finished season: income (by final rank) minus the
  *  squad wage bill. Returns the ledger; the caller adds `net` to the balance. */

@@ -23,6 +23,11 @@ export const defaultFacilities = (): Facilities => ({ bootcamp: 0, recovery: 0, 
  *  (~$100k) is a real multi-season investment competing with the transfer market. */
 export const facilityCost = (level: number): number => 6000 + level * 7000;   // 6/13/20/27/34k
 
+/** Recurring per-season upkeep of a built HQ — staff, rent, kit. So facilities
+ *  aren't a one-time buy but an ongoing commitment: over-build past what your
+ *  income supports and the upkeep bleeds you. ~$9k/season at a fully-maxed HQ. */
+export const facilityUpkeep = (f: Facilities): number => (f.bootcamp + f.recovery + f.analyst) * 600;
+
 /** The combined development boost from a club's facilities (a no-op at all-zero). */
 export function facilityBoost(f: Facilities): DevBoost {
   return {

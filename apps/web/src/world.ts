@@ -14,9 +14,9 @@ import {
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
-  defaultFacilities, facilityBoost, facilityCost, FACILITY_MAX,
+  defaultFacilities, facilityBoost, facilityCost, facilityUpkeep, FACILITY_MAX,
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
-  defaultAcademy, academyIntake, academyCost, academyWageBill, intakeSize, ACADEMY_MAX,
+  defaultAcademy, academyIntake, academyCost, academyUpkeep, academyWageBill, intakeSize, ACADEMY_MAX,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy,
 } from '@ace/world';
@@ -322,10 +322,13 @@ function advanceSeason() {
   // settle every club by its division rank (shared `settleClub`); YOUR wage bill
   // is over the whole roster (depth), an AI club's over its five
   const settle = (i: number, wages: number) => settleClub({ rank: rankIn(i), divSize: DIV_SIZE, tier: division.value[i], wages, playoff: poPrize(i) });
-  // your wage bill spans the senior roster + the (cheap) academy prospects
-  ledger.value = { season: season.value, ...settle(myClub.value, squadWageBill(myRoster.value) + academyWageBill(academy.value.prospects)) };
+  // wages are market-linked (meta) for every club; YOUR bill also carries the cheap
+  // academy prospects + the recurring HQ/academy UPKEEP (a built HQ costs to run)
+  const myWages = squadWageBill(myRoster.value, patch.value) + academyWageBill(academy.value.prospects);
+  const myUpkeep = facilityUpkeep(facilities.value) + academyUpkeep(academy.value.level);
+  ledger.value = { season: season.value, ...settle(myClub.value, myWages + myUpkeep), wages: myWages, upkeep: myUpkeep };
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net : b + settle(i, squadWageBill(clubs.value[i].team.players)).net);
+    i === myClub.value ? b + ledger.value!.net : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
   const pr = promoteRelegate(division.value, tables, PROMO);
   division.value = pr.division; lastMoves.value = pr.moves;
