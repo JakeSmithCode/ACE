@@ -28,7 +28,11 @@ export const DIVS = DIV_NAMES.length;   // 11
 export const PROMO = 2;                 // clubs promoted/relegated between tiers each season
 export const N = DIV_SIZE * DIVS;       // total clubs in the world (110)
 export const START_TIER = 7;            // you begin mid-table in Gold — a long climb to the Premier
-export const MAP: MapId = 'ascent';
+export const MAP: MapId = 'ascent';                 // the editor's map (your authored plays live here)
+// the competitive pool — the maps that play balanced today (`pnpm balance`).
+// Fixtures rotate over these; the other 6 are out of rotation until tuned.
+export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'split'];
+export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];
 const RESOLVE_FORKS = 0;            // standings only need the final score (fork-independent)
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));
@@ -119,7 +123,9 @@ function syncLineup() {
 }
 const isStarter = (id: string) => clubs.value[myClub.value].team.players.some(p => p.id === id);
 
-let nav: Navmesh | null = null;
+const navs: Partial<Record<MapId, Navmesh>> = {};   // one navmesh per pool map (lazy-loaded)
+let navReady = false;
+const navOf = (m: MapId): Navmesh | null => navs[m] ?? null;
 
 const myDivision = computed(() => division.value[myClub.value]);
 const mySchedule = computed(() => schedules.value[myDivision.value]);
@@ -149,19 +155,26 @@ const market = computed<MarketEntry[]>(() => [
     .filter((e): e is MarketEntry => !!e.player),
 ]);
 
-// build a fixture's MatchInput (shared `buildMatchInput`), overlaying YOUR comp +
-// tactics when you play; AI clubs use their stored plan (as the server will)
+// build a fixture's MatchInput on its (seed-derived) map, overlaying YOUR comp +
+// tactics when you play. Your authored PLAYS are Ascent-coordinates, so on any
+// other pool map they're dropped — your dials (map-agnostic) still apply.
 function buildInput(fx: { home: number; away: number }, seed: number): MatchInput {
-  const tac = (i: number): Tactics => i === myClub.value ? clone(myTactics.value) : clubs.value[i].tactics;
+  const m = fixtureMap(seed);
+  const tac = (i: number): Tactics => {
+    if (i !== myClub.value) return clubs.value[i].tactics;
+    const t = clone(myTactics.value);
+    if (m !== MAP) { t.attack.play = undefined; t.defense.play = undefined; }
+    return t;
+  };
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
   return buildMatchInput({
-    seed, map: MAP, patch: patch.value,
+    seed, map: m, patch: patch.value,
     home: clubs.value[fx.home].team, away: clubs.value[fx.away].team,
     tactics: [tac(fx.home), tac(fx.away)], comp: [cmp(fx.home), cmp(fx.away)],
   });
 }
 function simFixture(fx: { home: number; away: number }, seed: number): MatchResult {
-  const [hs, as] = simulateMatch(buildInput(fx, seed), nav!, RESOLVE_FORKS).finalScore;
+  const [hs, as] = simulateMatch(buildInput(fx, seed), navOf(fixtureMap(seed))!, RESOLVE_FORKS).finalScore;
   return { home: fx.home, away: fx.away, score: [hs, as], winner: hs > as ? fx.home : fx.away, seed };
 }
 // distant tiers are quick-resolved from club strength (shared `quickResult`) —
@@ -169,7 +182,7 @@ function simFixture(fx: { home: number; away: number }, seed: number): MatchResu
 const quickFixture = (fx: { home: number; away: number }, seed: number): MatchResult =>
   quickResultPure(fx.home, fx.away, clubs.value[fx.home].strength, clubs.value[fx.away].strength, seed);
 function resolveDay() {
-  if (done.value || !nav) return;
+  if (done.value || !navReady) return;
   // the whole world advances each match-day (shared `resolveWorldDay`): your tier
   // full-sims (watchable), every other tier is quick-resolved by strength
   const fresh = resolveWorldDay({
@@ -193,7 +206,7 @@ function simSeason() { while (!done.value) resolveDay(); }
 // sim as fixtures (buildInput overlays your comp/tactics for your ties), so each
 // game is re-simmable to watch. The champion banks a title.
 function enterPlayoffs() {
-  if (!done.value || playoffs.value || !nav) return;
+  if (!done.value || playoffs.value || !navReady) return;
   const bracket = runPlayoffs(table.value, seasonSeed.value, season.value, (home, away, seed) => simFixture({ home, away }, seed));
   if (bracket.champion != null) titles.value = titles.value.map((t, i) => i === bracket.champion ? t + 1 : t);
   playoffs.value = bracket;
@@ -390,8 +403,11 @@ function resolveListings() {
     syncLineup();
   }
 }
-async function ensureNav() { if (!nav) nav = await fetch(`/${MAP}.navmesh.json`).then(r => r.json()); }
-const getNav = () => nav;
+async function ensureNav() {
+  await Promise.all(MAP_POOL.map(async m => { if (!navs[m]) navs[m] = await fetch(`/${m}.navmesh.json`).then(r => r.json()); }));
+  navReady = true;
+}
+const getNav = () => navs[MAP] ?? null;   // the editor's map (Ascent)
 
 // --- career persistence (localStorage) ---------------------------------------
 // A whole career lives in the refs above; here we snapshot the mutated state to
@@ -451,7 +467,7 @@ watch(
 
 export function useWorld() {
   return {
-    N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
+    N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, MAP_POOL, fixtureMap, navOf, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
     playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,

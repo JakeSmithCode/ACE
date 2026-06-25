@@ -9,7 +9,7 @@ import { ROLE_AGENTS } from '@ace/world';
 import { Viewer } from './viewer';
 import Roster from './Roster.vue';
 import Market from './Market.vue';
-import { useWorld, MAP } from './world';
+import { useWorld } from './world';
 
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
@@ -46,6 +46,7 @@ const cname = (i: number) => `${tagOf(i)} · ${nameOf(i)}`;
 const hue = (i: number) => (tagOf(i).charCodeAt(0) * 47 + tagOf(i).charCodeAt(1) * 13) % 360;
 const oppOf = (r: { home: number; away: number }) => (r.home === myClub.value ? r.away : r.home);
 const fmt = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
+const mapOf = (seed: number) => w.fixtureMap(seed);   // each fixture's map (rotation over the pool)
 
 // --- comp builder ---------------------------------------------------------
 const topAgent = (p: Player) => [...p.agents].sort((a, b) => b.level - a.level)[0].agent;
@@ -62,12 +63,12 @@ const watchHost = ref<HTMLElement | null>(null);
 const watching = ref<typeof w.myResults.value[number] | null>(null);
 let viewer: Viewer | null = null;
 function watch(r: NonNullable<typeof watching.value>) {
-  const nav = w.getNav(); if (!nav) return;
+  const map = w.fixtureMap(r.seed), nav = w.navOf(map); if (!nav) return;   // the fixture's own map
   watching.value = r;
   // re-sim from the fixture seed at higher fork count for True Odds; buildInput
   // overlays YOUR comp + tactics, so watching your own fixture shows your plan.
   const out = simulateMatch(w.buildInput(r, r.seed), nav, 50);
-  requestAnimationFrame(() => { viewer?.destroy(); if (watchHost.value) viewer = new Viewer(watchHost.value, out, `/${MAP}.png`, nav as any); });
+  requestAnimationFrame(() => { viewer?.destroy(); if (watchHost.value) viewer = new Viewer(watchHost.value, out, `/${map}.png`, nav as any); });
 }
 
 function kickoff() { for (let i = 0; i < 3 && !done.value; i++) w.resolveDay(); }
@@ -247,6 +248,7 @@ onUnmounted(() => { viewer?.destroy(); });
             <span class="hq-rw">{{ r.winner === myClub ? 'W' : 'L' }}</span>
             <span class="hq-rscore">{{ r.home === myClub ? r.score[0] : r.score[1] }}–{{ r.home === myClub ? r.score[1] : r.score[0] }}</span>
             <span class="hq-ropp">{{ r.home === myClub ? 'vs' : '@' }} {{ tagOf(oppOf(r)) }}</span>
+            <span class="hq-rmap">{{ mapOf(r.seed) }}</span>
             <button class="hq-watch" @click="watch(r)">▷ watch</button>
           </div>
           <div v-if="!myResults.length && !nextFixture" class="hq-empty">season complete</div>
@@ -259,7 +261,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <div v-if="watching" class="hq-watchwrap">
       <div class="hq-watchhead">
         <b>{{ tagOf(watching.home) }}</b> {{ watching.score[0] }} – {{ watching.score[1] }} <b>{{ tagOf(watching.away) }}</b>
-        · re-simmed from fixture seed {{ watching.seed }}
+        · <span class="hq-rmap">{{ mapOf(watching.seed) }}</span> · re-simmed from seed {{ watching.seed }}
         <button class="ed-close" @click="watching = null; viewer?.destroy(); viewer = null">close</button>
       </div>
       <div ref="watchHost" class="ace-host"></div>

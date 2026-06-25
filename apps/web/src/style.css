@@ -434,6 +434,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rk-radiant{color:#FFF6D5}.rk-immortal{color:#D43763}.rk-ascendant{color:#3BD17F}
 .rk-diamond{color:#C490E0}.rk-platinum{color:#3FB7C4}.rk-gold{color:#E5B567}
 .rk-silver{color:#AEB7BE}.rk-bronze{color:#9C7A4D}.rk-iron{color:#6b7680}
+/* fixture map chip (rotation over the pool) */
+.hq-rmap{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2);background:var(--bg-3);padding:2px 6px}
 .rs-ceil{color:var(--text);font-weight:700;font-style:normal}
 .mk-pot{display:flex;flex-direction:column;gap:1px;line-height:1.1}
 .mk-ceil{font-style:normal;font-family:var(--label);font-size:10px;color:var(--muted);letter-spacing:.02em}
