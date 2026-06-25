@@ -19,6 +19,20 @@ const SPEED = 4200;        // path units traversed per unit round time (sets arr
 const FOV = 1.05;          // half-angle of an agent's awareness cone (~60°, so 120° total)
 const FIRST_SHOT = 11;     // duel edge for spotting an unaware enemy first
 const FORM_SWING = 6;      // match-night form: per-player edge drawn once per match (±)
+const CHEM_EDGE = 1.0;     // team chemistry: a fully-gelled team's per-duel edge over a brand-new one
+                           // (small — a constant per-duel edge compounds hard over a match)
+const CHEM_CAP = 1.5;      // seasons of shared play (mean tenure) to fully gel
+// A team's chemistry edge from how long its five have played together. A new
+// signing (tenure 0) drags the mean down until it gels; a settled core gets the
+// full edge. NO tenure data (undefined — the engine sample) → 0, so seed 42 is
+// byte-identical. Bounded (DESIGN §2/§18): synergy is a real factor, never the
+// whole story.
+function teamChem(players: { tenure?: number }[]): number {
+  const ten = players.map(p => p.tenure).filter((t): t is number => t !== undefined);
+  if (ten.length === 0) return 0;
+  const mean = ten.reduce((s, t) => s + t, 0) / ten.length;
+  return CHEM_EDGE * Math.min(1, Math.max(0, mean) / CHEM_CAP);
+}
 const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
@@ -117,6 +131,7 @@ interface Ag {
   anchor: boolean;       // holding an angle vs moving
   holdDir: Vec2;         // unit heading an agent looks down once stationary
   form: number;          // match-night form: a duel edge constant for the whole match
+  chem: number;          // team chemistry: a duel edge from the five's shared tenure (whole match)
   holdBonus: number;     // this agent's held-angle edge (0 unless anchoring; scaled by aggression)
   agentRole: Role;       // role of the fielded agent — decides the kit
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
@@ -230,8 +245,8 @@ function readIndex(read: number, n: number): number {
 function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number): boolean {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery)
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge;
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge + atk.chem;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge + def.chem;
   // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
@@ -414,6 +429,7 @@ function simulateRound(
 
   const atkTeam = input.teams[attacker];
   const defTeam = input.teams[defender];
+  const chemEdge: [number, number] = [teamChem(input.teams[0].players), teamChem(input.teams[1].players)];
   const agents: Ag[] = [];
 
   // per-player attack roles (the manager's plan, beyond the team dials): the
@@ -450,7 +466,7 @@ function simulateRound(
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
         exposedUntil: -1,
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
-        form: form.get(p.handle) ?? 0, holdBonus: 0,
+        form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
     });
@@ -471,7 +487,7 @@ function simulateRound(
         // the lurker holds toward the fight (catches unaware rotators); others push to site
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
         exposedUntil: -1, rotatePlan: null,
-        form: form.get(p.handle) ?? 0, holdBonus: 0,
+        form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
     });
@@ -500,7 +516,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor: true,
         // watch the authored angle if given, else default to facing the attacker spawn
         holdDir: plan?.face ? unit(pos, plan.face) : unit(pos, A.atkSpawn),
-        form: form.get(p.handle) ?? 0,
+        form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1,
@@ -537,7 +553,7 @@ function simulateRound(
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(defender) as '0' | '1'], p.role), anchor,
         holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
-        form: form.get(p.handle) ?? 0,
+        form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1, rotatePlan: null,

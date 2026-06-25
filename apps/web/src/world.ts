@@ -105,6 +105,16 @@ const balance = computed(() => balances.value[myClub.value]);
 // value reflects the live meta — buffed-agent mains are worth more
 const value = (p: Player) => playerValue(p, patch.value);
 
+// team chemistry (mirrors the engine's CHEM_CAP): a player gels with shared play;
+// a fresh signing (tenure 0) is 0%, fully gelled at CHEM_CAP seasons. Team cohesion
+// is the mean over the fielded five — a small duel edge a settled core has earned.
+const CHEM_CAP_UI = 1.5;
+const chemOf = (p: Player) => Math.min(1, Math.max(0, (p.tenure ?? 0) / CHEM_CAP_UI));
+const teamCohesion = () => {
+  const five = clubs.value[myClub.value].team.players;
+  return five.reduce((s, p) => s + chemOf(p), 0) / five.length;
+};
+
 // --- facilities (the HQ): upgrade rooms to compound your squad's development ---
 const facBoost = computed(() => facilityBoost(facilities.value));
 const facCost = (id: FacilityId) => facilityCost(facilities.value[id]);
@@ -285,7 +295,12 @@ function resolveDay() {
   const fiveIds = new Set(clubs.value[myClub.value].team.players.map(p => p.id));
   const dr = new Rng((seasonSeed.value ^ (season.value * 0x2545f491) ^ (dayIdx.value * 0x9e3779b9)) >>> 0);
   const boost = facilityBoost(facilities.value);   // your HQ accelerates your squad's development
-  myRoster.value = myRoster.value.map(p => developInSeason(p, fiveIds.has(p.id), total.value, dr, boost));
+  // develop + gel: a player on the roster builds chemistry (~+1 tenure/season,
+  // spread across match-days) so a new signing gels into the five over time
+  myRoster.value = myRoster.value.map(p => {
+    const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, boost);
+    return { ...d, tenure: (d.tenure ?? 0) + 1 / total.value };
+  });
   // your academy prospects develop on the reps path (academy circuit: grow, no rust)
   // — a separate rng so it never perturbs the senior-roster stream
   if (academy.value.prospects.length) {
@@ -341,6 +356,10 @@ function advanceSeason() {
   // talent better, so dynasties form (your club is handled separately below, so it
   // gets NO_BOOST here and is overwritten by syncLineup from the developed myRoster)
   clubs.value = developLeague(clubs.value, rng, i => i === myClub.value ? NO_BOOST : infraBoost(clubInfra(clubs.value[i].strength)));
+  // AI squads gel +1 tenure a season (your five gelled in-season; their slot is
+  // overwritten by syncLineup from myRoster anyway). Reloads reset to 0 below.
+  clubs.value = clubs.value.map((c, i) => i === myClub.value ? c
+    : { ...c, team: { ...c.team, players: c.team.players.map(p => ({ ...p, tenure: (p.tenure ?? 0) + 1 })) } });
   const myBoost = facilityBoost(facilities.value);
   myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost));  // bootcamp share + HQ boost
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
@@ -413,7 +432,7 @@ const withPlayer = (c: Club, idx: number, p: Player): Club => {
   const team = { ...c.team, players: c.team.players.map((q, i) => i === idx ? p : q) };
   return { ...c, team, strength: clampStr(squadRating(team) / 100) };
 };
-const retag = (p: Player, clubId: string, igl?: boolean): Player => ({ ...p, id: `${clubId}-${p.handle.toLowerCase()}`, igl });
+const retag = (p: Player, clubId: string, igl?: boolean): Player => ({ ...p, id: `${clubId}-${p.handle.toLowerCase()}`, igl, tenure: 0 });   // a signing hasn't gelled yet
 const release = (p: Player): Player => ({ ...p, id: `fa-${p.handle.toLowerCase()}`, igl: false });
 const unlist = (id: string) => { if (myListed.value.has(id)) { const s = new Set(myListed.value); s.delete(id); myListed.value = s; } };
 
@@ -755,7 +774,7 @@ export function useWorld() {
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
-    bidFor, isContested, askingOf,
+    bidFor, isContested, askingOf, chemOf, teamCohesion,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
 }

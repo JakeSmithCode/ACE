@@ -122,7 +122,9 @@ export function makePlayer(rng: Rng, role: Role, handle: string, idPrefix: strin
   // ceiling plasticity: a teen is a wide cloud (boom/bust), a developed player is
   // settled. Reps will drift the ceiling and narrow this to 0 (develop.ts).
   const potVar = Math.max(0, Math.min(1, (23 - age) / 7)) * rng.range(0.7, 1.1);
-  return { id: `${idPrefix}-${handle.toLowerCase()}`, handle, role, age, attr, potential, potVar, agents };
+  // tenure 0 = a brand-new player (a free agent / a fresh signing hasn't gelled);
+  // makeClub raises an established league roster to a gelled baseline.
+  return { id: `${idPrefix}-${handle.toLowerCase()}`, handle, role, age, attr, potential, potVar, agents, tenure: 0 };
 }
 
 /** Build one club. `strength` (0..1) sets the talent floor; role shape + a small
@@ -138,6 +140,7 @@ export function makeClub(rng: Rng, identity: { name: string; tag: string }, stre
     const handle = pool.pop()!;                    // (non-rng; draw order is identical to inline)
     const p = makePlayer(rng, role, handle, identity.tag.toLowerCase(), strength, undefined, ageBias);
     if (i === iglIdx) p.igl = true;
+    p.tenure = 2;                                  // an established roster starts gelled (> the engine's CHEM_CAP)
     return p;
   });
   return { id: identity.tag.toLowerCase(), tag: identity.tag, name: identity.name, players };

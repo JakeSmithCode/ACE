@@ -17,6 +17,7 @@ const conf = (p: Player) => Math.round(scoutConfidence(p, true) * 100);
 const ceiling = (p: Player) => { const [lo, hi] = scoutedRange(p, true); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
 const rank = (p: Player) => soloRank(overall(p));
 const rnd = (n: number) => Math.round(n);
+const chem = (p: Player) => Math.round(w.chemOf(p) * 100);   // 0..100% gelled with the squad
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
 const delta = (p: Player, k: keyof Attributes) => {
@@ -30,14 +31,14 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
 <template>
   <div class="hq-panel rs">
     <h3><span class="b"></span>{{ w.myTeam.value.tag }} · Squad
-      <span class="rs-sub">{{ w.myRoster.value.length }} players · best five start · potential is scouted (fogged)</span></h3>
+      <span class="rs-sub">{{ w.myRoster.value.length }} players · best five start · cohesion <b :class="{ lo: w.teamCohesion() < 0.6 }">{{ Math.round(w.teamCohesion() * 100) }}%</b></span></h3>
     <div v-for="p in sorted()" :key="p.id" class="rs-row" :class="[phaseOf(p), { reserve: !w.isStarter(p.id), listed: w.isListed(p.id) }]">
       <div class="rs-id">
         <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
         <div class="rs-name">{{ p.handle }}
           <i v-if="w.isStarter(p.id)" class="rs-start">XI</i><i v-else class="rs-res">RES</i>
         </div>
-        <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span></div>
+        <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
         <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>

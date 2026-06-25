@@ -33,6 +33,10 @@ export interface Player {
                         // Each season of reps drifts the ceiling (up if played, down if benched) and narrows
                         // this toward 0, where the ceiling locks. The "potential cloud" of DESIGN §4.
   agents: AgentMastery[];
+  tenure?: number;      // seasons of shared play with the CURRENT club — team chemistry.
+                        // Resets to 0 on a transfer (a new signing hasn't gelled), grows with
+                        // time on the roster. Undefined = no chemistry data (the engine sample
+                        // reads it as a neutral 0 edge, so seed 42 is byte-identical).
 }
 
 export interface Team {
