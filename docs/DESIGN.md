@@ -291,6 +291,7 @@ Sequenced **build-order, not calendar** — size each phase to your own pace. Th
 **Goal:** a real persistent world with real owners.
 **Build:** accounts (**self-owned auth — no vendor lock-in**); persistent clubs; the league/pyramid structure; **scheduled tick resolution at scale**; **AI-run orgs to fill the leagues**; the **public club page** (social-spine MVP); shareable replays.
 **Gate:** dozens of humans + AI orgs run a full season; the world feels alive and persistent.
+**Concrete architecture:** see [`PHASE2.md`](./PHASE2.md) — DB schema, the BullMQ tick worker, the account↔club model, the `(tier, group)` fan-out + regional shards, and how `@ace/world`/`@ace/engine` run server-side unchanged.
 
 ### Phase 3 — Depth Systems *(the simulation matures)*
 **Goal:** the systems that create long-term mastery and stories.
