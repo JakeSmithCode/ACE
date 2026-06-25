@@ -4,7 +4,7 @@
 // the caller, so this is exactly the boundary both runtimes share.
 import type { MatchInput, MapId, PatchState, Team, Tactics, Comp, Player } from '@ace/shared';
 import { Rng } from '@ace/engine';
-import { seasonIncome, playerWage } from './finance.js';
+import { seasonIncome, playerWage, contractWage } from './finance.js';
 import { fixtureSeed, type MatchResult } from './season.js';
 import type { Fixture, Matchday } from './schedule.js';
 
@@ -71,4 +71,4 @@ export function settleClub(opts: { rank: number; divSize: number; tier: number; 
  *  club's squad). With a `patch`, wages are market-linked (buffed-agent mains cost
  *  more); omit it for the meta-neutral bill. */
 export const squadWageBill = (players: Player[], patch?: Parameters<typeof playerWage>[1]): number =>
-  players.reduce((s, p) => s + playerWage(p, patch), 0);
+  players.reduce((s, p) => s + contractWage(p, patch), 0);   // contracted wage (locked) if any, else market

@@ -34,7 +34,7 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
 <template>
   <div class="hq-panel rs">
     <h3><span class="b"></span>{{ w.myTeam.value.tag }} · Squad
-      <span class="rs-sub">{{ w.myRoster.value.length }} players · best five start · cohesion <b :class="{ lo: w.teamCohesion() < 0.6 }">{{ Math.round(w.teamCohesion() * 100) }}%</b></span></h3>
+      <span class="rs-sub">{{ w.myRoster.value.length }} players · cohesion <b :class="{ lo: w.teamCohesion() < 0.6 }">{{ Math.round(w.teamCohesion() * 100) }}%</b> · wages <b>{{ money(w.myWageBill.value) }}</b>/yr</span></h3>
     <div v-for="p in sorted()" :key="p.id" class="rs-row" :class="[phaseOf(p), { reserve: !w.isStarter(p.id), listed: w.isListed(p.id) }]">
       <div class="rs-id">
         <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
@@ -70,13 +70,16 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         </div>
       </div>
       <div class="rs-actions">
-        <div class="rs-val">{{ money(w.value(p)) }}</div>
+        <div class="rs-val">{{ money(w.value(p)) }}
+          <i class="rs-deal" :class="{ expiring: w.isExpiring(p) }" :title="`under contract for ${w.yearsLeft(p)} more season(s) at ${money(w.wageOf(p))}/yr — wage locked until it expires`">{{ w.yearsLeft(p) }}y · {{ money(w.wageOf(p)) }}/y</i>
+        </div>
+        <button v-if="w.isExpiring(p)" class="rs-renew" @click="w.renewPlayer(p.id)" :title="`re-sign to a new deal at his current market wage`">renew · {{ money(w.renewCost(p)) }}/y</button>
         <button v-if="w.isStarter(p.id)" class="rs-lx" :disabled="!w.canBench(p.id)" @click="w.benchStarter(p.id)" title="move to the reserves">bench</button>
         <button v-else class="rs-lx start" @click="w.startReserve(p.id)" title="start in the XI">start ▲</button>
         <button class="hq-list" :class="{ on: w.isListed(p.id) }" @click="w.toggleList(p.id)">{{ w.isListed(p.id) ? '● listed' : 'list' }}</button>
         <button class="rs-sell" :disabled="!w.canSell(p.id)" @click="w.sellPlayer(p.id)">sell</button>
       </div>
     </div>
-    <div class="hq-compnote">Potential is a <b>scouted</b> read — confidence rises as a player ages and stays in your squad, so a young signing is a bet. Buy in the <b>Market</b> to add depth (best five start automatically); <b>start</b>/<b>bench</b> to override; sell or list to trim (never below a valid five).</div>
+    <div class="hq-compnote">Every player is on a <b>contract</b> — a wage <b>locked</b> for its term (you pay it even as he ages), counting down each season. A player in his <b>final year</b> shows <b class="rs-deal expiring">renew</b>: re-sign him at his current market wage, or he walks <b>free</b> at season's end. Potential is a <b>scouted</b> read; <b>start</b>/<b>bench</b> to override; sell to offload a deal (the buyer takes the wage).</div>
   </div>
 </template>

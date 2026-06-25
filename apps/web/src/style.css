@@ -366,6 +366,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-abar i.mech{background:var(--gold)}
 .rs-tick{position:absolute;top:-1px;width:2px;height:7px;background:var(--text);opacity:.45}  /* ceiling marker */
 .rs-acl{font-size:10px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+.rs-deal{font-style:normal;font-size:9.5px;color:var(--muted-2);letter-spacing:.02em;display:block;margin-top:1px}
+.rs-deal.expiring{color:var(--gold)}
+.rs-renew{background:rgba(229,181,103,.14);border:1px solid rgba(229,181,103,.45);color:var(--gold);font-family:var(--label);font-size:9.5px;letter-spacing:.03em;text-transform:uppercase;padding:3px 6px;cursor:pointer}
+.rs-renew:hover{background:rgba(229,181,103,.24)}
 .rs-aval{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px}
 .rs-alabel{font-family:var(--label);font-size:9px;letter-spacing:.06em;color:var(--muted-2);min-width:24px}
 .rs-aval b{color:var(--text);font-variant-numeric:tabular-nums}
@@ -593,3 +597,5 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-retmine .rs-role{font-size:8.5px;padding:1px 4px}
 .hq-retbye{color:var(--muted-2);font-style:italic}
 .hq-retleague{font-family:var(--label);font-size:10.5px;letter-spacing:.03em;color:var(--muted);margin-left:auto}
+.hq-retbanner.walkfree{border-left-color:var(--def)}
+.hq-retbanner.walkfree .hq-reth{color:var(--def)}

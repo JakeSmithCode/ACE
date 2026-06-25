@@ -37,6 +37,10 @@ export interface Player {
                         // Resets to 0 on a transfer (a new signing hasn't gelled), grows with
                         // time on the roster. Undefined = no chemistry data (the engine sample
                         // reads it as a neutral 0 edge, so seed 42 is byte-identical).
+  contract?: { wage: number; years: number };  // the agreed deal: a wage LOCKED for `years`
+                        // seasons (the lasting cost of a signing — you pay it even if he declines),
+                        // counting down each off-season; at 0 he walks free unless renewed.
+                        // Undefined = no contract (wage falls back to the market rate).
 }
 
 export interface Team {

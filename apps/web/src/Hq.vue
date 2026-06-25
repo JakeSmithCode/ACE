@@ -43,6 +43,8 @@ const nearMoves = computed(() => lastMoves.value.filter(m => m.from === myDivisi
 const myRetirees = computed(() => w.retirements.value.filter(r => r.mine));
 const leagueRetired = computed(() => w.retirements.value.length);
 const roleName = (r: string) => r.slice(0, 3).toUpperCase();
+// players whose contracts expired and walked free (you didn't renew)
+const walkedFree = computed(() => w.contractDepartures.value);
 
 const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'rankings'>('season');
 
@@ -174,6 +176,14 @@ onUnmounted(() => { viewer?.destroy(); });
         </span>
       </template>
       <span class="hq-retleague">{{ leagueRetired }} veteran{{ leagueRetired > 1 ? 's' : '' }} retired league-wide{{ myRetirees.length ? ' — replacements promoted from your academy/youth' : '' }}</span>
+    </div>
+    <!-- contract expiries — your players who walked free (you didn't renew in time) -->
+    <div v-if="walkedFree.length && !playoffs && dayIdx < total" class="hq-retbanner walkfree">
+      <span class="hq-reth">⬡ Left on a free</span>
+      <span v-for="r in walkedFree" :key="r.handle" class="hq-retmine">
+        <b>{{ r.handle }}</b> <i class="rs-role" :class="r.role">{{ roleName(r.role) }}</i> · {{ r.overall }} OVR <span class="hq-retbye">contract expired — walked free</span>
+      </span>
+      <span class="hq-retleague">renew expiring deals in the Squad before season's end to keep them</span>
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">

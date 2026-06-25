@@ -19,6 +19,22 @@ export function playerWage(p: Player, patch?: PatchState): number {
 }
 export const squadWages = (team: Team, patch?: PatchState): number => team.players.reduce((s, p) => s + playerWage(p, patch), 0);
 
+// --- contracts: a wage locked for a term (the lasting cost of a signing) --------
+export const CONTRACT_YEARS = 3;   // default length of a fresh deal
+
+/** What you actually PAY a player this season — his contracted wage if he's under
+ *  one (locked at signing, even as he ages and his market rate drifts), else the
+ *  live market rate. This is the bill the season settle uses. */
+export const contractWage = (p: Player, patch?: PatchState): number => p.contract?.wage ?? playerWage(p, patch);
+
+/** The wage a player DEMANDS to (re-)sign — the current market rate. So renewing an
+ *  improved youngster costs a raise, and a declined veteran re-signs cheaper. */
+export const demandWage = (p: Player, patch?: PatchState): number => playerWage(p, patch);
+
+/** A fresh deal at the current market wage for `years` seasons. */
+export const newContract = (p: Player, patch?: PatchState, years = CONTRACT_YEARS): { wage: number; years: number } =>
+  ({ wage: playerWage(p, patch), years });
+
 /** Income for finishing the season at `rank` (1 = champion) in an `n`-club league:
  *  a base sponsor cheque plus placement prize money. */
 export function seasonIncome(rank: number, n: number): { sponsor: number; prize: number } {

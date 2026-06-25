@@ -14,6 +14,7 @@ import {
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
+  contractWage, demandWage, newContract, CONTRACT_YEARS,
   defaultFacilities, facilityBoost, facilityCost, facilityUpkeep, FACILITY_MAX,
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
   defaultAcademy, academyIntake, academyCost, academyUpkeep, academyWageBill, intakeSize, ACADEMY_MAX,
@@ -67,7 +68,12 @@ const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // season-start snapshot, for roster deltas (set below)
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
 const myTactics = ref<Tactics>(clone(clubs.value[myClub.value].tactics));  // your authored tactics (overlay)
-const myRoster = ref<Player[]>([...clubs.value[myClub.value].team.players]);  // your FULL squad (≥5; the matchday five is derived)
+// every player on YOUR roster is under a contract (a wage locked for a term). Seed
+// the starting squad with staggered terms so renewals don't all land in one season.
+function seedContracts(roster: Player[]): Player[] {
+  return roster.map((p, i) => ({ ...p, contract: p.contract ?? newContract(p, undefined, 2 + (i % 3)) }));
+}
+const myRoster = ref<Player[]>(seedContracts([...clubs.value[myClub.value].team.players]));  // your FULL squad (≥5; the matchday five is derived)
 // a development baseline — deltas on the roster screen show change since the
 // start of the season (in-season progress) + the off-season jump
 function snapRosters() {
@@ -100,12 +106,22 @@ const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boos
 const academy = ref<Academy>(defaultAcademy());           // your youth pipeline (homegrown prospects)
 // last off-season's retirements (league-wide; `mine` flags your own) — for the banner
 const retirements = ref<{ handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[]>([]);
+// your players who walked free last off-season (contract expired, not renewed)
+const contractDepartures = ref<{ handle: string; role: string; overall: number }[]>([]);
 
 // scouting reports you've commissioned (player id → level 0..SCOUT_MAX). A paid
 // investment that clears the fog on a player's potential — and lifts a revealed
 // gem's value, so you can flip a prospect you don't need.
 const scouted = ref<Map<string, number>>(new Map());
 const scoutLevelOf = (id: string) => scouted.value.get(id) ?? 0;
+
+// contract helpers for the UI: what you PAY a player (locked wage), what he'd
+// DEMAND to re-sign (current market), and his deal's years left
+const wageOf = (p: Player) => contractWage(p, patch.value);
+const renewCost = (p: Player) => demandWage(p, patch.value);
+const yearsLeft = (p: Player) => p.contract?.years ?? 0;
+const isExpiring = (p: Player) => yearsLeft(p) <= 1;   // final year — renew or lose him free
+const myWageBill = computed(() => squadWageBill(myRoster.value, patch.value));
 
 const balance = computed(() => balances.value[myClub.value]);
 // value reflects the live meta AND your scouting — a gem you've scouted is worth
@@ -174,7 +190,9 @@ function promoteProspect(id: string) {
   const p = academy.value.prospects.find(x => x.id === id);
   if (!p) return;
   academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== id) };
-  myRoster.value = [...myRoster.value, retag(p, clubs.value[myClub.value].team.id, false)];
+  // a graduate signs his first senior deal (cheap — his wage tracks his current ability)
+  const grad = { ...retag(p, clubs.value[myClub.value].team.id, false), contract: newContract(p, patch.value, CONTRACT_YEARS) };
+  myRoster.value = [...myRoster.value, grad];
   syncLineup();
 }
 /** Cut a prospect from the academy (a youth you've given up on). */
@@ -385,6 +403,7 @@ function advanceSeason() {
   }
   processRetirements(rng);   // veterans hang it up (post-aging); clubs reload
   manageAiClubArcs(rng);     // aging AI clubs proactively rebuild — shed a vet for youth
+  processContracts(rng);     // your expiring-and-unrenewed players walk free
   // the meta shifts each off-season — a new patch buffs/nerfs agents, moving values
   const m = patchMeta(patch.value, new Rng((seasonSeed.value ^ (season.value * 0x27d4eb2f)) >>> 0));
   patch.value = m.patch; metaChanges.value = m.changes;
@@ -404,13 +423,13 @@ function selectClub(i: number) {
   myClub.value = i;
   myComp.value = {};
   myTactics.value = clone(clubs.value[i].tactics);
-  myRoster.value = [...clubs.value[i].team.players];
+  myRoster.value = seedContracts([...clubs.value[i].team.players]);
   prevById.value = snapRosters();   // new club → new baseline
   ledger.value = null;
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; scouted.value = new Map();
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; scouted.value = new Map();
   syncLineup();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
@@ -422,14 +441,14 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   results.value = []; dayIdx.value = 0; season.value = 1;
   myComp.value = {};
   myTactics.value = clone(clubs.value[myClub.value].tactics);
-  myRoster.value = [...clubs.value[myClub.value].team.players];
+  myRoster.value = seedContracts([...clubs.value[myClub.value].team.players]);
   prevById.value = snapRosters();   // fresh season-1 baseline
   balances.value = clubs.value.map(c => startingBalance(c.strength));
   ledger.value = null;
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; scouted.value = new Map();
+  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; scouted.value = new Map();
   refreshMarket();
 }
 
@@ -449,7 +468,7 @@ const withPlayer = (c: Club, idx: number, p: Player): Club => {
   return { ...c, team, strength: clampStr(squadRating(team) / 100) };
 };
 const retag = (p: Player, clubId: string, igl?: boolean): Player => ({ ...p, id: `${clubId}-${p.handle.toLowerCase()}`, igl, tenure: 0 });   // a signing hasn't gelled yet
-const release = (p: Player): Player => ({ ...p, id: `fa-${p.handle.toLowerCase()}`, igl: false });
+const release = (p: Player): Player => ({ ...p, id: `fa-${p.handle.toLowerCase()}`, igl: false, contract: undefined });   // a free agent carries no deal
 const unlist = (id: string) => { if (myListed.value.has(id)) { const s = new Set(myListed.value); s.delete(id); myListed.value = s; } };
 
 // a (non-you) club that lost a player restocks the slot from free agency — the
@@ -505,29 +524,53 @@ function processRetirements(rng: Rng) {
     return { ...c, team, strength: clampStr(squadRating(team) / 100) };
   });
   // your club: retirees leave the roster (academy prospects are teens — exempt)
-  const myId = clubs.value[myClub.value].team.id;
   const stayed: Player[] = [];
   for (const p of myRoster.value) {
     if (shouldRetire(p, rng)) events.push({ handle: p.handle, age: p.age, role: p.role, overall: overall(p), club: myClub.value, mine: true });
     else stayed.push(p);
   }
-  if (stayed.length !== myRoster.value.length) {
-    let roster = stayed;
-    for (const role of Object.keys(ROLE_NEED) as Role[]) {
-      while (roster.filter(p => p.role === role).length < ROLE_NEED[role]) {
-        // prefer graduating your best academy prospect of the role (no fee), else a youth call-up
-        const prospect = academy.value.prospects.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a))[0];
-        if (prospect) {
-          academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== prospect.id) };
-          roster = [...roster, retag(prospect, myId, false)];
-        } else {
-          roster = [...roster, { ...makePlayer(rng, role, freshHandle(), myId, 0.4, rng.int(17, 19)), igl: false }];
-        }
+  if (stayed.length !== myRoster.value.length) myRoster.value = fillRoles(stayed, rng);
+  retirements.value = events;
+}
+
+// ensure your roster covers every comp role (after departures — retirement / contract
+// expiry): graduate your best academy prospect of the short role (no fee), else call
+// up a generated youth. Anyone promoted in signs a fresh first contract.
+function fillRoles(roster: Player[], rng: Rng): Player[] {
+  const myId = clubs.value[myClub.value].team.id;
+  const used = new Set<string>([...allHandles(), ...roster.map(p => p.handle)]);
+  const freshHandle = () => { const h = HANDLES.find(x => !used.has(x)) ?? `Sub${moveSeq++}`; used.add(h); return h; };
+  let out = roster;
+  for (const role of Object.keys(ROLE_NEED) as Role[]) {
+    while (out.filter(p => p.role === role).length < ROLE_NEED[role]) {
+      const prospect = academy.value.prospects.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a))[0];
+      if (prospect) {
+        academy.value = { ...academy.value, prospects: academy.value.prospects.filter(x => x.id !== prospect.id) };
+        out = [...out, { ...retag(prospect, myId, false), contract: newContract(prospect, patch.value) }];
+      } else {
+        const youth = makePlayer(rng, role, freshHandle(), myId, 0.4, rng.int(17, 19));
+        out = [...out, { ...youth, igl: false, contract: newContract(youth, patch.value) }];
       }
     }
-    myRoster.value = roster;
   }
-  retirements.value = events;
+  return out;
+}
+
+// contracts tick down each off-season; a player whose deal hits 0 and wasn't renewed
+// walks to free agency for nothing (the "use it or lose it" pressure). Roster holes
+// are covered by `fillRoles`, and the departures surface in a banner.
+function processContracts(rng: Rng) {
+  const ticked = myRoster.value.map(p => p.contract ? { ...p, contract: { ...p.contract, years: p.contract.years - 1 } } : p);
+  const expired = ticked.filter(p => p.contract && p.contract.years <= 0);
+  if (!expired.length) { myRoster.value = ticked; contractDepartures.value = []; return; }
+  freeAgentPool.value = [...expired.map(p => release(p)), ...freeAgentPool.value];
+  myRoster.value = fillRoles(ticked.filter(p => !(p.contract && p.contract.years <= 0)), rng);
+  contractDepartures.value = expired.map(p => ({ handle: p.handle, role: p.role, overall: overall(p) }));
+}
+/** Re-sign one of your players to a fresh deal at his CURRENT market wage — a raise
+ *  for an improved youngster, a cut for a faded vet; either way you keep him. */
+function renewPlayer(id: string) {
+  myRoster.value = myRoster.value.map(p => p.id === id ? { ...p, contract: newContract(p, patch.value, CONTRACT_YEARS) } : p);
 }
 
 // proactive rebuilds (DESIGN §17) — an AI club's lifecycle stage (clubPhase) is
@@ -560,7 +603,10 @@ function manageAiClubArcs(rng: Rng) {
  *  drop). A free agent leaves the unowned pool; a club sale pays the seller (your
  *  winning bid, not the formula value), who restocks. The matchday five re-derives. */
 function acquireAt(e: MarketEntry, price: number) {
-  myRoster.value = [...myRoster.value, retag(e.player, clubs.value[myClub.value].team.id, false)];
+  // a signing comes on a fresh deal — his wage is now LOCKED for the term (the
+  // lasting cost: you pay it even if he declines, until it expires or you sell him)
+  const signed = { ...retag(e.player, clubs.value[myClub.value].team.id, false), contract: newContract(e.player, patch.value, CONTRACT_YEARS) };
+  myRoster.value = [...myRoster.value, signed];
   balances.value = balances.value.map((b, i) => i === myClub.value ? b - price : b);
   if (e.from === -1) {
     freeAgentPool.value = freeAgentPool.value.filter(p => p.id !== e.player.id);
@@ -743,7 +789,7 @@ function snapshot() {
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
-    retirements: retirements.value, scouted: [...scouted.value.entries()],
+    retirements: retirements.value, contractDepartures: contractDepartures.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()],
   };
 }
@@ -765,6 +811,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
   retirements.value = o.retirements ?? [];
+  contractDepartures.value = o.contractDepartures ?? [];
   scouted.value = new Map(o.scouted ?? []);
   prevById.value = new Map(o.prevById);
 }
@@ -781,7 +828,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, scouted],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, scouted],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -798,6 +845,7 @@ export function useWorld() {
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
     scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX,
+    wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
 }
