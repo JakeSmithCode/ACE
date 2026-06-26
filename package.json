@@ -13,6 +13,7 @@
     "balance": "tsx packages/engine/src/balance.ts",
     "season": "tsx packages/world/src/cli.ts",
     "world": "tsx packages/world/src/cli-world.ts",
+    "server": "tsx apps/server/src/cli.ts",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {

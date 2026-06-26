@@ -8,6 +8,7 @@ import type { Player, Tactics, Comp, Team, PatchState } from '@ace/shared';
 import { Rng, PATCH } from '@ace/engine';
 import { makeLeague, ROLE_AGENTS } from './clubs.js';
 import { membersOf, divisionSchedule, promoteRelegate, type DivMove } from './divisions.js';
+import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, finishOf } from './playoffs.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
@@ -73,27 +74,51 @@ const tablesOf = (w: WorldState) => {
   return Array.from({ length: w.tiers }, (_, t) => standings(w.clubs.length, w.results.filter(r => div[r.home] === t)).filter(s => div[s.club] === t));
 };
 
+/** Resolve ONE match-day across every division + apply that day's in-season
+ *  development (the five who played grow on reps; reserves rust). This is the
+ *  shared per-day step — the single seam the two runtimes share: `simulateSeason`
+ *  loops it with a single season-long `devRng` (headless), and the day-granular
+ *  runtimes (the single-player store, the Phase-2 server tick) call it once per
+ *  tick with their own rng, persisting between. How each fixture is scored is
+ *  injectable (`resolve`) — quick-resolve by default, the server full-sims the
+ *  watched divisions. Pure (docs/PHASE2.md §2/§6). */
+export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: {
+  schedules?: Matchday[][];
+  resolve?: (fx: Fixture, seed: number, division: number) => MatchResult;
+} = {}): { results: MatchResult[]; clubs: WorldClub[] } {
+  const div = divisionOf(w);
+  const schedules = opts.schedules ?? Array.from({ length: w.tiers }, (_, t) => divisionSchedule(membersOf(div, t)));
+  const seasonSeed = (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
+  const total = schedules[0].length;
+  const results: MatchResult[] = [];
+  schedules.forEach((sched, t) => sched[day].forEach((fx, slot) => {
+    const seed = fixtureSeed(seasonSeed, day, slot + t * 1000);
+    results.push(opts.resolve ? opts.resolve(fx, seed, t) : quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, seed));
+  }));
+  const clubs = w.clubs.map(c => {
+    const five = new Set(startingFive(c.roster).map(p => p.id));
+    const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng));
+    return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
+  });
+  return { results, clubs };
+}
+
 /** Resolve the whole season headless: every division quick-resolved by strength
- *  (the server full-sims watched tiers instead; the math is the same). */
+ *  (the server full-sims watched tiers instead; the math is the same). Loops the
+ *  shared `resolveSeasonDay` with one season-long rng, so its stream is unchanged. */
 export function simulateSeason(w: WorldState): WorldState {
   const div = divisionOf(w);
   const schedules = Array.from({ length: w.tiers }, (_, t) => divisionSchedule(membersOf(div, t)));
-  const seasonSeed = (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
   const devRng = new Rng((w.seed ^ (w.season * 0x2545f491)) >>> 0);
-  const results: MatchResult[] = [];
   const total = schedules[0].length;
-  let clubs = w.clubs;
+  const results: MatchResult[] = [];
+  let cur: WorldState = w;
   for (let day = 0; day < total; day++) {
-    schedules.forEach((sched, t) => sched[day].forEach((fx, slot) =>
-      results.push(quickResult(fx.home, fx.away, clubs[fx.home].strength, clubs[fx.away].strength, fixtureSeed(seasonSeed, day, slot + t * 1000)))));
-    // in-season development: the five who played grow (reps), reserves rust
-    clubs = clubs.map(c => {
-      const five = new Set(startingFive(c.roster).map(p => p.id));
-      const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng));
-      return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
-    });
+    const r = resolveSeasonDay(cur, day, devRng, { schedules });
+    results.push(...r.results);
+    cur = { ...cur, clubs: r.clubs };
   }
-  return { ...w, clubs, results, day: total };
+  return { ...cur, results, day: total };
 }
 
 export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[] }

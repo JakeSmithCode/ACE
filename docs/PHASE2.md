@@ -332,10 +332,19 @@ not a sim rewrite.
      remaining half of this step.)*
 2. **Postgres schema + migrations**; a `seedWorld(region, seed)` that writes a
    `createWorld(...)` `WorldState` to rows (the mapping is now mechanical — §5
-   tables mirror `WorldClub`/`fixture`).
+   tables mirror `WorldClub`/`fixture`). 🟡 *Partial — `apps/server` defines the
+   persistence boundary (`WorldStore`: world snapshot + `fixture` rows + the
+   idempotency `tick_log`) and `seedWorld(store, …)`, with a `MemoryStore` impl.
+   The `PgStore` (same interface) + migrations are the remaining half.*
 3. **Self-owned auth** (register/verify/login/refresh).
 4. **The tick worker** resolving one world end-to-end (matchday → season rollover),
-   idempotent.
+   idempotent. ✅ *Done — `apps/server/src/tick.ts` `runTick` resolves the current
+   match-day (via the shared pure `resolveSeasonDay`) or rolls the season over
+   (`advanceWorld`), guarded idempotent by `tick_log`. `pnpm run server` proves it
+   headless: a 110-club world ticks day-by-day across seasons, **deterministic**
+   (two runs byte-identical) and **idempotent** (a retried tick never
+   double-resolves). The BullMQ job is a thin async wrapper over this; the
+   `forks:0` full-sim of watched divisions is the one piece still to wire in.*
 5. **Claim + AI takeover/revert + `club.plan`** (the always-has-a-plan rule).
 6. **Fan-out `(tier, grp)` + the funnel.**
 7. **Re-sim-to-watch endpoint** + wire the existing viewer to it.
