@@ -434,6 +434,20 @@ export class Viewer {
   }
   private hideEndCard() { if (this.endCard) { this.endCard.className = 'ace-endcard'; this.endCard.innerHTML = ''; } }
 
+  /** Match-final card on the last round: winner, final score, and top fragger. */
+  private showMatchCard() {
+    const [a, b] = this.tl.finalScore;
+    const win = a >= b ? 0 : 1, winCls = win === 0 ? 'att' : 'def';
+    const kills = new Map<string, number>();
+    for (const r of this.tl.rounds) for (const e of r.events) if (e.kind === 'kill') kills.set(e.killer, (kills.get(e.killer) ?? 0) + 1);
+    let topH = '', topK = -1;
+    for (const [h, k] of kills) if (k > topK) { topK = k; topH = h; }
+    this.endCard.className = 'ace-endcard show matchend ' + winCls;
+    this.endCard.innerHTML = `<div class="ec-label">Match Final</div><div class="ec-tag">${this.tl.teams[win].tag}</div>`
+      + `<div class="ec-score"><span class="att">${a}</span><span class="ec-dash">—</span><span class="def">${b}</span></div>`
+      + `<div class="ec-method">${this.tl.teams[win].name} win${topH ? ` · top frag ${topH} ${topK}` : ''}</div>`;
+  }
+
   private scrubTo(frac: number) {
     const r = this.tl.rounds[this.roundIdx];
     this.clearAdvance();
@@ -689,9 +703,10 @@ export class Viewer {
       this.fired = this.T;
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
       if (this.T >= 1) {
-        this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; this.showEndCard();
-        // play on like a broadcast: hold the result card, then roll the next round
-        if (this.roundIdx < this.tl.rounds.length - 1) this.advanceTimer = setTimeout(() => this.loadRound(this.roundIdx + 1), 2400);
+        this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶';
+        // last round → the match-final card; otherwise the round card + auto-advance
+        if (this.roundIdx < this.tl.rounds.length - 1) { this.showEndCard(); this.advanceTimer = setTimeout(() => this.loadRound(this.roundIdx + 1), 2400); }
+        else this.showMatchCard();
       }
       this.render();
     }

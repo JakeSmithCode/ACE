@@ -59,6 +59,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-endcard.def .ec-tag{color:var(--def);text-shadow:0 0 34px rgba(255,92,110,.45)}
 .ace-endcard .ec-win{font-family:var(--label);font-weight:600;font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:var(--text);margin-top:8px}
 .ace-endcard .ec-method{font-family:var(--label);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:5px}
+/* match-final variant */
+.ace-endcard .ec-label{font-family:var(--label);font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
+.ace-endcard.matchend::before{background:radial-gradient(circle at 50% 44%,rgba(8,13,19,.62),rgba(8,13,19,.92))}
+.ace-endcard .ec-score{font-family:var(--display);font-weight:700;font-size:clamp(30px,5vw,54px);line-height:1;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:18px;margin-top:12px}
+.ace-endcard .ec-score .att{color:var(--att)}.ace-endcard .ec-score .def{color:var(--def)}.ace-endcard .ec-score .ec-dash{color:var(--muted-2);font-size:.6em}
 .ace-trail{fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
 .ace-trail.att{stroke:var(--att)}.ace-trail.def{stroke:var(--def)}
 /* vision cones: wall-clipped facing arcs; overlaps brighten via screen blend */
