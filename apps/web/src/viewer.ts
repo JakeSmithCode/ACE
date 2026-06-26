@@ -417,6 +417,36 @@ export class Viewer {
     }
     return last;
   }
+  /** The nearest walkable point to `c` (a small outward spiral) — so an ability
+   *  whose nominal centre sits in a wall still anchors in the space it covers. */
+  private nearestWalkable(c: Vec2): Vec2 | null {
+    if (this.walkAt(c[0], c[1])) return c;
+    const step = this.nav!.cell;
+    for (let ring = 1; ring <= 7; ring++)
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2, x = c[0] + Math.cos(ang) * ring * step, y = c[1] + Math.sin(ang) * ring * step;
+        if (this.walkAt(x, y)) return [x, y];
+      }
+    return null;
+  }
+  /** SVG path for an ability clipped to the WALLS — cast rays 360° from the centre,
+   *  each stopping at the first wall up to `radius`, so a smoke fills the room it's
+   *  in (like Valorant) instead of bleeding a perfect circle through walls. */
+  private blobPath(c: Vec2, radius: number): string {
+    const probe = this.nav!.cell * 0.6, RAYS = 40, n = Math.ceil(radius / probe);
+    let d = '';
+    for (let i = 0; i < RAYS; i++) {
+      const a = (i / RAYS) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+      let last = probe;   // a small floor so a ray into a wall doesn't spike to centre
+      for (let k = 1; k <= n; k++) {
+        const dist = Math.min(radius, k * probe);
+        if (!this.walkAt(c[0] + dx * dist, c[1] + dy * dist)) break;
+        last = dist;
+      }
+      d += (i === 0 ? 'M' : 'L') + (c[0] + dx * last).toFixed(1) + ' ' + (c[1] + dy * last).toFixed(1) + ' ';
+    }
+    return d + 'Z';
+  }
   /** SVG path for the wall-clipped vision cone at p facing unit f. */
   private conePath(p: Vec2, f: Vec2): string {
     const base = Math.atan2(f[1], f[0]);
@@ -444,8 +474,14 @@ export class Viewer {
         // a flash/recon burst fades over its short window; smokes/traps hold steady
         const burst = a.ability === 'flash' || a.ability === 'recon';
         const op = burst ? ` style="opacity:${((1 - (this.T - a.t) / Math.max(0.02, until - a.t)) * 0.6 + 0.12).toFixed(2)}"` : '';
-        this.abLayer.insertAdjacentHTML('beforeend',
-          `<circle class="ace-abil ab-${a.ability} ${side}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${a.r.toFixed(1)}"${op}></circle>`);
+        const cls = `ace-abil ab-${a.ability} ${side}`;
+        // clip to the walls (fills the room, like Valorant) — anchor at the nearest
+        // walkable point; fall back to a plain circle only with no navmesh
+        const anchor = this.nav ? this.nearestWalkable(a.at) : null;
+        const shape = anchor
+          ? `<path class="${cls}" d="${this.blobPath(anchor, a.r)}"${op}></path>`
+          : `<circle class="${cls}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${a.r.toFixed(1)}"${op}></circle>`;
+        this.abLayer.insertAdjacentHTML('beforeend', shape);
       }
     }
     const cones = this.showCones && !!this.nav;
