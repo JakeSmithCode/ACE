@@ -48,6 +48,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-scrim{fill:rgba(11,17,24,.20)}
 .ace-overlay{position:absolute;top:13px;left:13px;z-index:3}
 .ace-overlay .ovl{font-family:var(--label);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);background:rgba(8,14,20,.8);border:1px solid var(--line);padding:5px 9px}
+/* round-result card — revealed when playback reaches a round's end */
+.ace-endcard{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:5;pointer-events:none;text-align:center}
+.ace-endcard.show{display:flex;animation:ec-in .42s cubic-bezier(.16,1,.3,1) both}
+.ace-endcard::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 46%,rgba(8,13,19,.5),rgba(8,13,19,.85));z-index:-1}
+.ace-endcard .ec-tag{font-family:var(--display);font-weight:700;font-size:clamp(44px,8vw,84px);line-height:.88;letter-spacing:.02em}
+.ace-endcard.att .ec-tag{color:var(--att);text-shadow:0 0 34px rgba(34,211,238,.45)}
+.ace-endcard.def .ec-tag{color:var(--def);text-shadow:0 0 34px rgba(255,92,110,.45)}
+.ace-endcard .ec-win{font-family:var(--label);font-weight:600;font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:var(--text);margin-top:8px}
+.ace-endcard .ec-method{font-family:var(--label);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:5px}
 .ace-trail{fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
 .ace-trail.att{stroke:var(--att)}.ace-trail.def{stroke:var(--def)}
 /* vision cones: wall-clipped facing arcs; overlaps brighten via screen blend */

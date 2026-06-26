@@ -133,6 +133,7 @@ export class Viewer {
   private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement; private coneBtn!: HTMLElement;
   private scoreA!: HTMLElement; private scoreB!: HTMLElement;        // running score (no spoiler)
   private clock!: HTMLElement; private clockWrap!: HTMLElement;      // broadcast round clock (centerpiece)
+  private endCard!: HTMLElement;                                     // round-result card shown when playback ends
   private sideTags: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team ATK/DEF this round
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; // true-odds chart
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
@@ -178,7 +179,7 @@ export class Viewer {
     // left: map + controls
     const left = el('div', 'ace-left');
     const wrap = el('div', 'ace-mapwrap');
-    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div>`;
+    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-endcard" id="ace-endcard"></div>`;
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox());
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
@@ -193,6 +194,7 @@ export class Viewer {
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
+    this.endCard = wrap.querySelector('#ace-endcard') as HTMLElement;
 
     const ctl = el('div', 'ace-controls');
     ctl.innerHTML = `
@@ -306,7 +308,7 @@ export class Viewer {
     this.roundIdx = i;
     const r = this.tl.rounds[i];
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
-    this.playBtn.textContent = '❚❚';
+    this.playBtn.textContent = '❚❚'; this.hideEndCard();
     this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = ''; this.abLayer.innerHTML = '';
     // utility with map geometry (older timelines without `at` are simply skipped)
     this.abilities = r.events.filter((e): e is Extract<typeof e, { kind: 'ability' }> => e.kind === 'ability' && (e as { at?: Vec2 }).at != null);
@@ -413,9 +415,20 @@ export class Viewer {
     this.oddsBars.forEach((c, idx) => c.classList.toggle('cur', idx === i));
   }
 
+  /** Broadcast round-result card, revealed when playback reaches the end of a round
+   *  (not a spoiler — the round is over). Winner tricode + how it was won. */
+  private showEndCard() {
+    const r = this.tl.rounds[this.roundIdx];
+    const winCls = r.winner === 0 ? 'att' : 'def';
+    const method: Record<string, string> = { detonation: 'Spike detonated', defuse: 'Spike defused', elimination: 'Team eliminated', time: 'Time expired' };
+    this.endCard.className = 'ace-endcard show ' + winCls;
+    this.endCard.innerHTML = `<div class="ec-tag">${this.tl.teams[r.winner].tag}</div><div class="ec-win">Round won</div><div class="ec-method">${method[r.method] ?? r.method} · ${r.winner === r.attacker ? 'attack' : 'defense'}</div>`;
+  }
+  private hideEndCard() { if (this.endCard) { this.endCard.className = 'ace-endcard'; this.endCard.innerHTML = ''; } }
+
   private scrubTo(frac: number) {
     const r = this.tl.rounds[this.roundIdx];
-    this.T = frac; this.fired = -1; this.ended = false;
+    this.T = frac; this.fired = -1; this.ended = false; this.hideEndCard();
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
     r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e); });
@@ -653,7 +666,7 @@ export class Viewer {
       r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t > this.fired && this.T >= e.t) this.fire(e); });
       this.fired = this.T;
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
-      if (this.T >= 1) { this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; }
+      if (this.T >= 1) { this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; this.showEndCard(); }
       this.render();
     }
     this.raf = requestAnimationFrame(this.loop);
