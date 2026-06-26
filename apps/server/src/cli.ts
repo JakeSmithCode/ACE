@@ -5,9 +5,11 @@
 // DB, no HTTP — the exact resolution code the server runs, against an in-memory
 // store.
 import { RANK_TIERS, type WorldState } from '@ace/world';
+import { simulateMatch } from '@ace/engine';
 import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, runSeason } from './tick.js';
+import { navOf } from './nav.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: string) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -65,5 +67,21 @@ const retry = runTick(store, id);
 const ok = retry.skipped && store.fixtures(id).length === fxAfter;
 console.log(`  idempotency : retry day 0 → ${retry.skipped ? 'SKIPPED' : 'RE-RESOLVED'}; fixtures ${store.fixtures(id).length === fxAfter ? 'unchanged' : 'DUPLICATED'} → ${ok ? 'safe ✓' : 'LEAK ✗'}`);
 void first;
+
+// ── 4. full-sim the WATCHABLE division (the engine path) + re-sim to watch ───
+const fs = new MemoryStore();
+const fid = seedWorld(fs, { seed, region: 'AMER' });
+// mark the Premier (division 0) watchable → full-sim it, quick-resolve the rest
+const fr = runTick(fs, fid, { full: (d) => d === 0, navOf });
+const watched = fs.fixtures(fid, 1).filter(f => f.inputSnapshot);
+console.log(`\n  full-sim    : day ${fr.day} → ${fr.fullSimmed} fixtures engine-simmed (Premier), ${fr.fixtures - (fr.fullSimmed ?? 0)} quick; snapshots stored: ${watched.length}`);
+if (watched.length) {
+  const f = watched[0];
+  console.log(`              top match: ${f.homeScore}–${f.awayScore} on ${f.inputSnapshot!.map} (seed ${f.seed})`);
+  // re-sim from the stored snapshot — must reproduce the persisted score byte-for-byte
+  const replay = simulateMatch(f.inputSnapshot!, navOf(f.inputSnapshot!.map), 0).finalScore;
+  const matches = replay[0] === f.homeScore && replay[1] === f.awayScore;
+  console.log(`  re-sim watch: replay from snapshot → ${replay[0]}–${replay[1]} ${matches ? 'reproduces stored score ✓' : 'MISMATCH ✗'}`);
+}
 
 console.log(`\n  persisted (run A): ${A.store.fixtures(A.id).length} fixtures · ${A.store.ticks(A.id).length} ticks logged\n`);

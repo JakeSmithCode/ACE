@@ -343,11 +343,20 @@ not a sim rewrite.
    (`advanceWorld`), guarded idempotent by `tick_log`. `pnpm run server` proves it
    headless: a 110-club world ticks day-by-day across seasons, **deterministic**
    (two runs byte-identical) and **idempotent** (a retried tick never
-   double-resolves). The BullMQ job is a thin async wrapper over this; the
-   `forks:0` full-sim of watched divisions is the one piece still to wire in.*
+   double-resolves). Relevance-scoping is wired: `runTick(store, id, {full, navOf})`
+   **full-sims** the watchable divisions with the real engine (`forks:0`) and
+   quick-resolves the rest, persisting the `input_snapshot` per watchable fixture
+   (§7). `pnpm run server` proves the watch loop: the Premier is engine-simmed
+   (a real Valorant scoreline), and re-simming a stored snapshot reproduces the
+   persisted score **byte-for-byte**. The BullMQ job is a thin async wrapper over
+   this.*
 5. **Claim + AI takeover/revert + `club.plan`** (the always-has-a-plan rule).
 6. **Fan-out `(tier, grp)` + the funnel.**
-7. **Re-sim-to-watch endpoint** + wire the existing viewer to it.
+7. **Re-sim-to-watch endpoint** + wire the existing viewer to it. 🟡 *The core is
+   proven — full-sim persists the `input_snapshot` and a re-sim reproduces the
+   score byte-for-byte (server CLI). What remains is the HTTP `GET
+   /fixtures/:id/replay` returning the snapshot + the client loading it into the
+   viewer.*
 8. **Regional shards.**
 9. **Tick-night realtime** (match center MVP) + **public club page**.
 10. **Stripe VIP.**

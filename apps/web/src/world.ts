@@ -13,7 +13,7 @@ import {
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, aiRating, SCOUT_MAX,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
-  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity,
+  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity, MAP_POOL, fixtureMap,
   contractWage, demandWage, newContract, CONTRACT_YEARS,
   defaultFacilities, facilityBoost, facilityCost, facilityUpkeep, FACILITY_MAX,
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
@@ -35,10 +35,9 @@ export const PROMO = 2;                 // clubs promoted/relegated between tier
 export const N = DIV_SIZE * DIVS;       // total clubs in the world (110)
 export const START_TIER = 7;            // you begin mid-table in Gold — a long climb to the Premier
 export const MAP: MapId = 'ascent';                 // the editor's map (your authored plays live here)
-// the competitive pool — the maps that play balanced today (`pnpm balance`).
-// Fixtures rotate over these; the other 6 are out of rotation until tuned.
-export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'split'];
-export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];
+// the competitive pool + per-fixture map picker now live in @ace/world (one source
+// of truth for the store and the server tick); re-exported here for the web app.
+export { MAP_POOL, fixtureMap };
 const RESOLVE_FORKS = 0;            // standings only need the final score (fork-independent)
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));

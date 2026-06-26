@@ -8,6 +8,14 @@ import { seasonIncome, playerWage, contractWage } from './finance.js';
 import { fixtureSeed, type MatchResult } from './season.js';
 import type { Fixture, Matchday } from './schedule.js';
 
+/** The curated, side-balanced map pool a fixture is played on (the 6 unbalanced
+ *  maps stay out of rotation until tuned). Canonical here so the single-player
+ *  store and the server tick assign the same map to the same fixture. */
+export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'split'];
+/** Deterministic per-fixture map from its seed — a result is reproducible (re-sim
+ *  to watch) because the map is a pure function of the same seed. */
+export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];
+
 /** Build a fixture's engine input from two clubs' teams, tactics, and comps. The
  *  store overlays YOUR comp/tactics before calling; the server passes each club's
  *  stored plan. */

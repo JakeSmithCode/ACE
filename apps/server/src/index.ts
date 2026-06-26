@@ -5,3 +5,5 @@
 export * from './store.js';
 export * from './seed.js';
 export * from './tick.js';
+export * from './sim.js';
+export * from './nav.js';

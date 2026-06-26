@@ -3,17 +3,20 @@
 // resolved fixtures, and a tick-log that makes resolution idempotent. The tick
 // logic (tick.ts) is written against this interface, so swapping `MemoryStore`
 // for a `PgStore` later is mechanical and changes no resolution code.
-import type { WorldState } from '@ace/world';
-import type { MatchResult } from '@ace/world';
+import type { WorldState, MatchResult } from '@ace/world';
+import type { MatchInput } from '@ace/shared';
 
 export type TickKind = 'matchday' | 'rollover';
 
 /** A persisted fixture row (mirrors the `fixture` table — score is canonical
- *  truth; the full timeline is a re-sim derivation, not stored here). */
+ *  truth; the full timeline is a re-sim derivation, not stored). `inputSnapshot`
+ *  is present only for WATCHABLE fixtures (§7) so the client can re-sim to watch;
+ *  dormant all-AI fixtures store just the score. */
 export interface FixtureRow {
   worldId: string; season: number; day: number; slot: number;
   home: number; away: number; seed: number;
   homeScore: number; awayScore: number; winner: number;
+  inputSnapshot?: MatchInput;
 }
 
 /** A tick-log row (the idempotency key — `unique(worldId, season, day, kind)`). */
