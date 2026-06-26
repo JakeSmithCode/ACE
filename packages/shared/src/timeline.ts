@@ -23,7 +23,11 @@ export type MatchEvent =
   | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string }
   | { t: number; kind: 'plant'; agent: string; site: SiteId }
   | { t: number; kind: 'defuse'; agent: string }
-  | { t: number; kind: 'ability'; agent: string; ability: string };
+  // `at`/`r`/`until` give the ability its geometry on the map (a circle at `at` of
+  // radius `r`, active from `t` to `until` in round-normalized time) so the viewer
+  // can draw the smoke/flash/trap. Optional + additive: a consumer that ignores
+  // them sees the old behaviour, so `version` stays 1. `side` (0|1) tints it.
+  | { t: number; kind: 'ability'; agent: string; ability: string; side?: 0 | 1; at?: Vec2; r?: number; until?: number };
 
 export interface RoundEconomy {
   buy: Record<'0' | '1', 'full' | 'force' | 'eco' | 'pistol'>;

@@ -85,6 +85,8 @@ export class Viewer {
   // dom refs
   private root: HTMLElement;
   private agLayer!: SVGGElement; private trLayer!: SVGGElement; private coneLayer!: SVGGElement; private spike!: SVGGElement;
+  private abLayer!: SVGGElement; private utilBtn!: HTMLElement; private showUtil = true;
+  private abilities: Extract<Round['events'][number], { kind: 'ability' }>[] = [];   // utility with geometry, for the map
   private feed!: HTMLElement; private feedItems: HTMLElement[] = [];
   private lastKill = new Map<string, number>();   // killer handle -> t, for tagging trades
   private playBtn!: HTMLElement; private timer!: HTMLElement; private seekFill!: HTMLElement; private seekHead!: HTMLElement; private seek!: HTMLElement;
@@ -129,13 +131,14 @@ export class Viewer {
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', '0 0 1000 1000');
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
+    this.abLayer = svg('g') as SVGGElement; this.abLayer.setAttribute('class', 'ace-abils');
     this.coneLayer = svg('g') as SVGGElement; this.coneLayer.setAttribute('class', 'ace-cones');
     this.trLayer = svg('g') as SVGGElement;
     this.spike = svg('g') as SVGGElement; this.spike.setAttribute('class', 'ace-spike');
     this.spike.innerHTML = `<circle class="sp-ring" r="13"></circle><rect class="sp-core" x="-6" y="-6" width="12" height="12" transform="rotate(45)"></rect>`;
     this.agLayer = svg('g') as SVGGElement;
-    // cones sit just above the map, beneath trails/agents/spike
-    s.append(img, scrim, this.coneLayer, this.trLayer, this.spike, this.agLayer);
+    // utility (smokes/flashes/traps) sits on the map surface, cones above it, then trails/agents
+    s.append(img, scrim, this.abLayer, this.coneLayer, this.trLayer, this.spike, this.agLayer);
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
@@ -150,6 +153,7 @@ export class Viewer {
         <button class="nav" id="ace-next">›</button>
         <button class="speed" id="ace-speed">1×</button>
         <button class="speed vis on" id="ace-vis" title="Toggle vision cones">◔ Vision</button>
+        <button class="speed vis on" id="ace-util" title="Toggle utility (smokes / flashes / traps)">✦ Utility</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -228,6 +232,8 @@ export class Viewer {
     this.coneBtn = ctl.querySelector('#ace-vis') as HTMLElement;
     this.coneBtn.onclick = () => { this.showCones = !this.showCones; this.coneBtn.classList.toggle('on', this.showCones); this.render(); };
     if (!this.nav) { this.showCones = false; this.coneBtn.classList.remove('on'); this.coneBtn.style.display = 'none'; }
+    this.utilBtn = ctl.querySelector('#ace-util') as HTMLElement;
+    this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.render(); };
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
     (ctl.querySelector('#ace-next') as HTMLElement).onclick = () => this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
     const seekTo = (clientX: number) => { const r = this.seek.getBoundingClientRect(); this.scrubTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width))); };
@@ -250,7 +256,9 @@ export class Viewer {
     const r = this.tl.rounds[i];
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
     this.playBtn.textContent = '❚❚';
-    this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = '';
+    this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = ''; this.abLayer.innerHTML = '';
+    // utility with map geometry (older timelines without `at` are simply skipped)
+    this.abilities = r.events.filter((e): e is Extract<typeof e, { kind: 'ability' }> => e.kind === 'ability' && (e as { at?: Vec2 }).at != null);
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
 
@@ -423,6 +431,23 @@ export class Viewer {
   }
 
   private render() {
+    // utility on the map: each smoke/flash/trap is a circle active from t..until.
+    // smokes read as solid vision-blockers; flashes/recon as a bright burst; traps as
+    // a side-tinted dashed watch-ring (an armed sensor). Redrawn each frame.
+    this.abLayer.innerHTML = '';
+    if (this.showUtil) {
+      const att = this.tl.rounds[this.roundIdx].attacker;
+      for (const a of this.abilities) {
+        const until = a.until ?? a.t;
+        if (this.T < a.t || this.T > until || !a.at || !a.r) continue;
+        const side = a.side === att ? 'att' : 'def';
+        // a flash/recon burst fades over its short window; smokes/traps hold steady
+        const burst = a.ability === 'flash' || a.ability === 'recon';
+        const op = burst ? ` style="opacity:${((1 - (this.T - a.t) / Math.max(0.02, until - a.t)) * 0.6 + 0.12).toFixed(2)}"` : '';
+        this.abLayer.insertAdjacentHTML('beforeend',
+          `<circle class="ace-abil ab-${a.ability} ${side}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${a.r.toFixed(1)}"${op}></circle>`);
+      }
+    }
     const cones = this.showCones && !!this.nav;
     for (const a of this.agents) {
       const dead = a.deathT != null && this.T >= a.deathT;

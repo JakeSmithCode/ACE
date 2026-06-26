@@ -593,14 +593,16 @@ function simulateRound(
       // attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
       const c = jitter(rng, isAtk ? sitePt : choke, 18);
       const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
-      smokes.push({ side: ag.side, c, r: SMOKE_R + SMOKE_R_UTIL * u, t0, t1: t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke' });
+      const r = SMOKE_R + SMOKE_R_UTIL * u, t1 = t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u;
+      smokes.push({ side: ag.side, c, r, t0, t1 });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, r, until: t1 });
     } else if (ag.agentRole === 'initiator' || (isAtk && ag.agentRole === 'duelist')) {
       const c = jitter(rng, sitePt, 22);
       // attackers time the execute to their tempo (fast hits flash earlier)
       const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
-      pulses.push({ side: ag.side, c, r: PULSE_R + PULSE_R_UTIL * u, t0, t1: t0 + PULSE_DUR + PULSE_DUR_UTIL * u });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash' });
+      const r = PULSE_R + PULSE_R_UTIL * u, t1 = t0 + PULSE_DUR + PULSE_DUR_UTIL * u;
+      pulses.push({ side: ag.side, c, r, t0, t1 });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash', side: ag.side, at: c, r, until: t1 });
     } else if (ag.agentRole === 'sentinel') {
       // a sentinel LOCKS THE FLANK: a trap on the off-site lane that catches an enemy
       // crossing it — granting the sentinel's side the first shot there for the whole
@@ -608,9 +610,9 @@ function simulateRound(
       // the main site; the sentinel watches the back door, so a lurk/flank is punished
       // by geometry. Reuses the pulse first-shot machinery, side = the sentinel's.
       const c = jitter(rng, lerp(A.mid, otherPt, 0.5), 24);
-      const t0 = TRAP_T0 + rng.range(0, 0.04);
-      pulses.push({ side: ag.side, c, r: TRAP_R + TRAP_R_UTIL * u, t0, t1: t0 + TRAP_DUR });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap' });
+      const t0 = TRAP_T0 + rng.range(0, 0.04), r = TRAP_R + TRAP_R_UTIL * u, t1 = t0 + TRAP_DUR;
+      pulses.push({ side: ag.side, c, r, t0, t1 });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: c, r, until: t1 });
     }
   }
   // authored lineups: deterministic (no rng), reach/duration still express the
@@ -619,12 +621,11 @@ function simulateRound(
   for (const ln of lineups) {
     const caster = agents.find(a => a.handle === ln.handle);
     const u = caster ? (caster.p.attr.utility / 100) * caster.utilFactor : 0.5;
-    if (ln.kind === 'smoke') {
-      smokes.push({ side: ln.side, c: ln.at, r: SMOKE_R + SMOKE_R_UTIL * u, t0: ln.t, t1: ln.t + SMOKE_DUR + SMOKE_DUR_UTIL * u });
-    } else {
-      pulses.push({ side: ln.side, c: ln.at, r: PULSE_R + PULSE_R_UTIL * u, t0: ln.t, t1: ln.t + PULSE_DUR + PULSE_DUR_UTIL * u });
-    }
-    if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind });
+    const r = ln.kind === 'smoke' ? SMOKE_R + SMOKE_R_UTIL * u : PULSE_R + PULSE_R_UTIL * u;
+    const t1 = ln.t + (ln.kind === 'smoke' ? SMOKE_DUR + SMOKE_DUR_UTIL * u : PULSE_DUR + PULSE_DUR_UTIL * u);
+    if (ln.kind === 'smoke') smokes.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
+    else pulses.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
+    if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind, side: ln.side, at: ln.at, r, until: t1 });
   }
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
