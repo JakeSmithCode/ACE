@@ -96,10 +96,12 @@ const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clippe
 
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
-  hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch;
+  hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch; spawnFan?: Vec2;
 }
 
-const HITCH_DUR = 0.05;   // round-t the viewer pauses a trap-tripped agent (the visible stutter)
+const HITCH_DUR = 0.05;     // round-t the viewer pauses a trap-tripped agent (the visible stutter)
+const SPAWN_FAN = 34;       // lateral spacing of attackers across the spawn barrier (px, viewer-only)
+const SPAWN_CONVERGE = 0.12; // round-t over which the spread spawn collapses onto the engine path
 
 export class Viewer {
   private tl: MatchTimeline;
@@ -335,6 +337,22 @@ export class Viewer {
       }
     }
 
+    // SPAWN FAN (viewer-only): real teams spawn spread across the barrier, then group
+    // up to execute. The engine starts attackers near one point (balance is tuned
+    // around that exact geometry — separating them in the sim re-tunes the whole pool),
+    // so we render the separation as a cosmetic flourish: fan the attackers across a
+    // shared perpendicular at spawn, collapsing onto the engine path by SPAWN_CONVERGE.
+    // Pure render — no contract/engine change, determinism + map balance untouched.
+    const atkAgs = this.agents.filter(a => a.side === 'att' && a.path.length >= 2);
+    if (atkAgs.length > 1) {
+      let hx = 0, hy = 0;                               // mean spawn→destination heading
+      for (const a of atkAgs) { const s = a.path[0], e = a.path[a.path.length - 1]; hx += e[0] - s[0]; hy += e[1] - s[1]; }
+      const hl = Math.hypot(hx, hy) || 1;
+      const perp: Vec2 = [-hy / hl, hx / hl];           // the barrier line is perpendicular to the push
+      const n = atkAgs.length;
+      atkAgs.forEach((a, i) => { const lane = (i - (n - 1) / 2) * SPAWN_FAN; a.spawnFan = [perp[0] * lane, perp[1] * lane]; });
+    }
+
     // spike location = planter position at plant time
     const plant = r.events.find(e => e.kind === 'plant') as Extract<Round['events'][number], { kind: 'plant' }> | undefined;
     if (plant) {
@@ -543,7 +561,14 @@ export class Viewer {
     for (const a of this.agents) {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      const p = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
+      let p = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
+      // spawn fan: hold the attackers spread across the barrier, collapsing onto the
+      // engine path over the first SPAWN_CONVERGE of the round (cosmetic, see loadRound).
+      // Build a NEW array — posWithDepart can return the path[0] ref at prog=0.
+      if (a.spawnFan && !dead && prog < SPAWN_CONVERGE) {
+        const k = 1 - prog / SPAWN_CONVERGE;
+        p = [p[0] + a.spawnFan[0] * k, p[1] + a.spawnFan[1] * k];
+      }
       a.node.setAttribute('transform', `translate(${p[0].toFixed(1)},${p[1].toFixed(1)})`);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
