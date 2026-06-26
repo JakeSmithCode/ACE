@@ -132,6 +132,8 @@ export class Viewer {
   private playBtn!: HTMLElement; private timer!: HTMLElement; private seekFill!: HTMLElement; private seekHead!: HTMLElement; private seek!: HTMLElement;
   private phase!: HTMLElement; private roundLabel!: HTMLElement; private strip!: HTMLElement; private coneBtn!: HTMLElement;
   private scoreA!: HTMLElement; private scoreB!: HTMLElement;        // running score (no spoiler)
+  private clock!: HTMLElement; private clockWrap!: HTMLElement;      // broadcast round clock (centerpiece)
+  private sideTags: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team ATK/DEF this round
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; // true-odds chart
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
 
@@ -151,15 +153,24 @@ export class Viewer {
     // scorebar
     const sb = el('div', 'ace-scorebar');
     sb.innerHTML = `
-      <div class="ace-team att"><div class="tmark">${t.teams[0].tag}</div><div class="tg">${t.teams[0].name}</div></div>
-      <div class="ace-scoreblock">
-        <div class="sc"><span class="a">0</span><span class="d">:</span><span class="b">0</span></div>
-        <div class="ctx">${t.map.toUpperCase()} · patch ${t.patch} · seed ${t.seed}</div>
-        <div class="side" id="ace-round">Round 1</div>
+      <div class="ace-team att">
+        <div class="tmeta"><div class="tg">${t.teams[0].name}</div><div class="tside" id="ace-side0"></div></div>
+        <div class="tmark att">${t.teams[0].tag}</div>
       </div>
-      <div class="ace-team def r"><div class="tmark">${t.teams[1].tag}</div><div class="tg">${t.teams[1].name}</div></div>`;
+      <div class="ace-scoreblock">
+        <div class="sc"><span class="a">0</span><div class="clockwrap" id="ace-clockwrap"><span class="clock" id="ace-clock">1:40</span></div><span class="b">0</span></div>
+        <div class="side" id="ace-round">Round 1</div>
+        <div class="ctx">${t.map.toUpperCase()} · PATCH ${t.patch} · SEED ${t.seed}</div>
+      </div>
+      <div class="ace-team def r">
+        <div class="tmark def">${t.teams[1].tag}</div>
+        <div class="tmeta"><div class="tg">${t.teams[1].name}</div><div class="tside" id="ace-side1"></div></div>
+      </div>`;
     this.scoreA = sb.querySelector('.sc .a') as HTMLElement;
     this.scoreB = sb.querySelector('.sc .b') as HTMLElement;
+    this.clock = sb.querySelector('#ace-clock') as HTMLElement;
+    this.clockWrap = sb.querySelector('#ace-clockwrap') as HTMLElement;
+    this.sideTags = [sb.querySelector('#ace-side0') as HTMLElement, sb.querySelector('#ace-side1') as HTMLElement];
     this.root.appendChild(sb);
     this.roundLabel = sb.querySelector('#ace-round') as HTMLElement;
 
@@ -168,7 +179,7 @@ export class Viewer {
     const left = el('div', 'ace-left');
     const wrap = el('div', 'ace-mapwrap');
     wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div>`;
-    const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', '0 0 1000 1000');
+    const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox());
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
     this.abLayer = svg('g') as SVGGElement; this.abLayer.setAttribute('class', 'ace-abils');
@@ -362,7 +373,9 @@ export class Viewer {
       if (planter) { this.spikePlantT = plant.t; this.spikePos = posWithDepart(planter.path, planter.departT, planter.arrive, plant.t); }
     }
 
-    this.roundLabel.textContent = `Round ${r.n} · ${this.tl.teams[r.attacker].tag} attacking ${r.site}`;
+    this.roundLabel.innerHTML = `<b>ROUND ${r.n}</b> · <span class="${r.attacker === 0 ? 'att' : 'def'}">${this.tl.teams[r.attacker].tag}</span> attacking site ${r.site}`;
+    // per-team ATK/DEF this round (the attacker alternates; the team colours don't)
+    ([0, 1] as const).forEach(ti => { const atk = ti === r.attacker; this.sideTags[ti].textContent = atk ? 'ATTACK' : 'DEFENSE'; this.sideTags[ti].className = 'tside ' + (atk ? 'atk' : 'def'); });
     Array.from(this.strip.children).forEach((c, idx) => c.classList.toggle('cur', idx === i));
     this.roundChrome(i);
     this.updateBoard(0);
@@ -471,6 +484,26 @@ export class Viewer {
         wrap.appendChild(els.row); // reorder in place
       });
     });
+  }
+
+  /** Frame the SVG on the map's actual play area (the navmesh's walkable bounds,
+   *  squared + padded) so the minimap fills the viewport instead of floating in a
+   *  black 1000×1000 void. Everything is in image space, so agents/cones/labels
+   *  scale up with it — more readable, more broadcast. Falls back to full frame. */
+  private playViewBox(): string {
+    if (!this.nav) return '0 0 1000 1000';
+    const { cell, cols, rows, walk } = this.nav;
+    let minc = cols, minr = rows, maxc = -1, maxr = -1;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (walk[r * cols + c] === 1) {
+      if (c < minc) minc = c; if (c > maxc) maxc = c; if (r < minr) minr = r; if (r > maxr) maxr = r;
+    }
+    if (maxc < minc) return '0 0 1000 1000';
+    const pad = cell * 2.5;
+    let x0 = minc * cell - pad, y0 = minr * cell - pad;
+    let w = (maxc - minc + 1) * cell + pad * 2, h = (maxr - minr + 1) * cell + pad * 2;
+    const size = Math.max(w, h);                       // square it (container is square) and centre the play area
+    x0 -= (size - w) / 2; y0 -= (size - h) / 2; w = h = size;
+    return `${x0.toFixed(1)} ${y0.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`;
   }
 
   // --- vision: clip a facing cone against the same walls the engine sees ----
@@ -600,10 +633,14 @@ export class Viewer {
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
     this.seekFill.style.width = (this.T * 100) + '%';
     this.seekHead.style.left = (this.T * 100) + '%';
-    // timer + phase
+    // round clock + phase — driven into both the control-bar timer and the broadcast
+    // HUD clock (the centerpiece). Switches to the spike timer and goes red on plant.
     const planted = this.T >= this.spikePlantT;
-    if (!planted) { const s = Math.max(0, Math.round(100 - (this.T / 0.6) * 60)); this.timer.classList.remove('spike'); this.timer.textContent = Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
-    else { const s = Math.max(0, Math.round(45 - ((this.T - this.spikePlantT) / 0.34) * 45)); this.timer.classList.add('spike'); this.timer.textContent = '0:' + ('0' + s).slice(-2); }
+    let clk: string;
+    if (!planted) { const s = Math.max(0, Math.round(100 - (this.T / 0.6) * 60)); clk = Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+    else { const s = Math.max(0, Math.round(45 - ((this.T - this.spikePlantT) / 0.34) * 45)); clk = '0:' + ('0' + s).slice(-2); }
+    this.timer.classList.toggle('spike', planted); this.timer.textContent = clk;
+    this.clock.textContent = clk; this.clockWrap.classList.toggle('spike', planted);
     this.phase.textContent = planted ? 'Post-plant' : this.T < 0.16 ? 'Round start' : this.T < 0.45 ? 'Map control' : 'Engaging';
   }
 
