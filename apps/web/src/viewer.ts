@@ -120,6 +120,7 @@ export class Viewer {
   private showCones = true;
   // live scoreboard (kills/deaths through the current moment) — form made visible
   private scores = new Map<string, { k: number; d: number }>();
+  private deadNow = new Set<string>();   // handles down in the CURRENT round at the current moment
   private scoreEls = new Map<string, { row: HTMLElement; k: HTMLElement; d: HTMLElement; kd: HTMLElement }>();
   private boardWraps: [HTMLElement, HTMLElement] = [null as any, null as any];
   private boardDirty = false;
@@ -514,6 +515,9 @@ export class Viewer {
         s.get(e.killer)!.k++; s.get(e.victim)!.d++;
       }
     }
+    // who's down right now (this round, up to frac) — for the live alive/dead board
+    this.deadNow.clear();
+    for (const e of this.tl.rounds[this.roundIdx].events) if (e.kind === 'kill' && e.t <= frac) this.deadNow.add(e.victim);
     this.renderBoard();
   }
   /** Sort each team by kills and repaint the rows (top fragger first). */
@@ -530,6 +534,7 @@ export class Viewer {
         els.kd.className = 'bkd ' + (diff > 0 ? 'pos' : diff < 0 ? 'neg' : '');
         if (i === 0) top = sc.k;
         els.row.classList.toggle('top', sc.k === top && sc.k > 0); // highlight the night's best
+        els.row.classList.toggle('down', this.deadNow.has(h));     // dim players who are down this round
         wrap.appendChild(els.row); // reorder in place
       });
     });
