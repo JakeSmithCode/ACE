@@ -102,6 +102,8 @@ interface VAg {
 const HITCH_DUR = 0.05;     // round-t the viewer pauses a trap-tripped agent (the visible stutter)
 const SPAWN_FAN = 34;       // lateral spacing of attackers across the spawn barrier (px, viewer-only)
 const SPAWN_CONVERGE = 0.12; // round-t over which the spread spawn collapses onto the engine path
+const SEP_MIN = 38;         // min on-screen spacing between same-side bodies — de-stack piles (px, viewer-only)
+const SEP_ITERS = 3;        // relaxation passes per frame to resolve overlaps
 
 export class Viewer {
   private tl: MatchTimeline;
@@ -558,22 +560,41 @@ export class Viewer {
       }
     }
     const cones = this.showCones && !!this.nav;
-    for (const a of this.agents) {
+    // PASS 1 — base position for every agent (with the spawn fan applied)
+    const frame = this.agents.map(a => {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      let p = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
-      // spawn fan: hold the attackers spread across the barrier, collapsing onto the
-      // engine path over the first SPAWN_CONVERGE of the round (cosmetic, see loadRound).
-      // Build a NEW array — posWithDepart can return the path[0] ref at prog=0.
+      const base = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
+      const p: Vec2 = [base[0], base[1]];   // copy — posWithDepart can return the path[0] ref
       if (a.spawnFan && !dead && prog < SPAWN_CONVERGE) {
-        const k = 1 - prog / SPAWN_CONVERGE;
-        p = [p[0] + a.spawnFan[0] * k, p[1] + a.spawnFan[1] * k];
+        const k = 1 - prog / SPAWN_CONVERGE; p[0] += a.spawnFan[0] * k; p[1] += a.spawnFan[1] * k;
       }
-      a.node.setAttribute('transform', `translate(${p[0].toFixed(1)},${p[1].toFixed(1)})`);
+      return { a, dead, prog, p };
+    });
+    // PASS 2 — separate overlapping same-side bodies so a hold reads as a spread
+    // defense, not a pile on one point. A few relaxation passes push close pairs
+    // apart; recomputed fresh each frame (no drift). Pure render — engine untouched.
+    for (let it = 0; it < SEP_ITERS; it++) {
+      for (let i = 0; i < frame.length; i++) {
+        const fi = frame[i]; if (fi.dead) continue;
+        for (let j = i + 1; j < frame.length; j++) {
+          const fj = frame[j]; if (fj.dead || fj.a.side !== fi.a.side) continue;
+          let dx = fj.p[0] - fi.p[0], dy = fj.p[1] - fi.p[1], d = Math.hypot(dx, dy);
+          if (d >= SEP_MIN) continue;
+          if (d < 1e-3) { dx = i % 2 ? 1 : -1; dy = i % 2 ? 0 : 1; d = 1; }  // exact overlap → deterministic split
+          const push = (SEP_MIN - d) / 2, ux = dx / d, uy = dy / d;
+          fi.p[0] -= ux * push; fi.p[1] -= uy * push; fj.p[0] += ux * push; fj.p[1] += uy * push;
+        }
+      }
+    }
+    // PASS 3 — apply (snap to a walkable cell so a nudged body never stands in a wall)
+    for (const { a, dead, prog, p } of frame) {
+      const q = this.nav && !dead && !this.walkAt(p[0], p[1]) ? (this.nearestWalkable(p) ?? p) : p;
+      a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})`);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
-      if (!dead) { a.tp.push(`${p[0].toFixed(0)},${p[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
-      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch))); a.cone.style.display = ''; }
+      if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
+      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(q, facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch))); a.cone.style.display = ''; }
       else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
