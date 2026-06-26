@@ -48,6 +48,7 @@ const PULSE_R = 84, PULSE_R_UTIL = 70;       // recon/flash reach: 84..154
 const PULSE_DUR = 0.07, PULSE_DUR_UTIL = 0.10;
 const TRAP_R = 60, TRAP_R_UTIL = 48;         // sentinel trap watch-zone reach: 60..108
 const TRAP_T0 = 0.05, TRAP_DUR = 0.80;       // armed early, holds most of the round
+const TRAP_SLOW = 0.055;                     // round-fraction an enemy is delayed crossing a trap (denial)
 
 const WEAPONS: Record<Buy, string[]> = {
   full: ['Vandal', 'Phantom', 'Operator', 'Vandal', 'Phantom'],
@@ -180,6 +181,11 @@ function segDist(a: Vec2, b: Vec2, c: Vec2): number {
   const ab2 = abx * abx + aby * aby || 1;
   const t = Math.max(0, Math.min(1, ((c[0] - a[0]) * abx + (c[1] - a[1]) * aby) / ab2));
   return Math.hypot(c[0] - (a[0] + abx * t), c[1] - (a[1] + aby * t));
+}
+/** Does a polyline `path` pass within `r` of point `c`? (a mover crossing a zone) */
+function pathHitsZone(path: Vec2[], c: Vec2, r: number): boolean {
+  for (let i = 0; i + 1 < path.length; i++) if (segDist(path[i], path[i + 1], c) <= r) return true;
+  return false;
 }
 
 function posAt(a: Ag, t: number): Vec2 {
@@ -573,6 +579,7 @@ function simulateRound(
   // comp you pick changes a team's utility profile. Mastery scales each effect.
   const smokes: Smoke[] = [];
   const pulses: Pulse[] = [];
+  const traps: { side: 0 | 1; c: Vec2; r: number }[] = [];
   const choke = lerp(A.mid, sitePt, 0.55);
   // authored utility lineups (either side): a caster's lineup REPLACES their auto
   // cast, so collect those handles to skip below, then add the lineups verbatim.
@@ -612,6 +619,7 @@ function simulateRound(
       const c = jitter(rng, lerp(A.mid, otherPt, 0.5), 24);
       const t0 = TRAP_T0 + rng.range(0, 0.04), r = TRAP_R + TRAP_R_UTIL * u, t1 = t0 + TRAP_DUR;
       pulses.push({ side: ag.side, c, r, t0, t1 });
+      traps.push({ side: ag.side, c, r });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: c, r, until: t1 });
     }
   }
@@ -627,6 +635,18 @@ function simulateRound(
     else pulses.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
     if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind, side: ln.side, at: ln.at, r, until: t1 });
   }
+  // A sentinel trap doesn't just reveal — it SLOWS an enemy who crosses it (denial,
+  // not just info): any agent whose path passes through an enemy trap zone has their
+  // arrival delayed, so a lurk/flank into a trapped lane hitches and gets there out
+  // of position. Setup-time + deterministic (a pure function of paths + trap geom,
+  // no rng), applied before the fork clones spread `arrive`, so forks inherit it and
+  // True Odds stays byte-identical. Scaled by `scale` so the cost is the same
+  // round-fraction on every map. No-op when no sentinel is fielded (traps empty).
+  for (const ag of agents) {
+    if (ag.path.length < 2) continue;
+    if (traps.some(tp => tp.side !== ag.side && pathHitsZone(ag.path, tp.c, tp.r))) ag.arrive += TRAP_SLOW * scale;
+  }
+
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
   // the match rng, so the canonical timeline stays byte-identical.
