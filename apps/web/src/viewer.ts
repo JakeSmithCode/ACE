@@ -17,11 +17,45 @@ function posAlong(path: Vec2[], frac: number): Vec2 {
 const ease = (p: number) => p * (2 - p);
 const unit = (dx: number, dy: number): Vec2 => { const d = Math.hypot(dx, dy) || 1; return [dx / d, dy / d]; };
 
+/** A trap stutter: the agent pauses for `dur` (round-t) at distance-fraction
+ *  `frac` of its path, then resumes — same total arrival, but the motion visibly
+ *  hitches where an enemy trap slowed it. Purely a render concern (no contract). */
+interface Hitch { frac: number; dur: number; start: number; end: number; }
+
 /** Position respecting a hold-then-move: stays at path[0] until departT, then
- *  travels over `arrive`. Mirrors the engine's posAt. */
-function posWithDepart(path: Vec2[], departT: number, arrive: number, prog: number): Vec2 {
+ *  travels over `arrive`. Mirrors the engine's posAt. An optional `hitch` injects
+ *  the trap pause without changing where the agent ends up at `arrive`. */
+function posWithDepart(path: Vec2[], departT: number, arrive: number, prog: number, hitch?: Hitch): Vec2 {
   if (prog <= departT) return path[0] ?? [0, 0];
-  return posAlong(path, ease(Math.min(1, (prog - departT) / arrive)));
+  const local = prog - departT;
+  let lin: number;
+  if (hitch && arrive > hitch.dur) {
+    // steal `dur` from the travel, spent paused at `frac`: the agent reaches the
+    // trap, hitches, then walks the rest a touch quicker — net arrival unchanged.
+    const move = arrive - hitch.dur;
+    const tHit = move * (1 - Math.sqrt(1 - hitch.frac));   // easeInv(frac): moving-time at which eased dist = frac
+    const m = local < tHit ? local : local < tHit + hitch.dur ? tHit : local - hitch.dur;
+    lin = m / move;
+  } else {
+    lin = local / arrive;
+  }
+  return posAlong(path, ease(Math.min(1, lin)));
+}
+
+/** Distance-fraction along `path` where it first enters the circle (c,r), or null.
+ *  Mirrors the engine's pathHitsZone trigger so the viewer hitches exactly the
+ *  agents the engine slowed. Samples by distance; falls back to closest approach. */
+function trapEntryFrac(path: Vec2[], c: Vec2, r: number): number | null {
+  if (!path || path.length < 2) return null;
+  const N = 96;
+  let bestD = Infinity, bestF = 0;
+  for (let i = 0; i <= N; i++) {
+    const f = i / N, p = posAlong(path, f);
+    const d = Math.hypot(p[0] - c[0], p[1] - c[1]);
+    if (d <= r) return f;
+    if (d < bestD) { bestD = d; bestF = f; }
+  }
+  return bestD <= r * 1.5 ? bestF : null;
 }
 
 /** Heading of a path's final non-degenerate segment — the fallback for `hold`. */
@@ -36,11 +70,11 @@ function headingAtEnd(path: Vec2[]): Vec2 {
 /** Reconstruct where an agent looks at progress `prog`: down its travel vector
  *  while moving, down its held angle while holding or once arrived. Mirrors
  *  engine facingAt(). */
-function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number): Vec2 {
+function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number, hitch?: Hitch): Vec2 {
   const moveEnd = departT + arrive;
   if (prog > departT && prog < moveEnd - 1e-6) {
-    const here = posWithDepart(path, departT, arrive, prog);
-    const ahead = posWithDepart(path, departT, arrive, Math.min(moveEnd, prog + 0.02));
+    const here = posWithDepart(path, departT, arrive, prog, hitch);
+    const ahead = posWithDepart(path, departT, arrive, Math.min(moveEnd, prog + 0.02), hitch);
     const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
     if (Math.hypot(dx, dy) > 1e-6) return unit(dx, dy);
   }
@@ -62,8 +96,10 @@ const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clippe
 
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
-  hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement;
+  hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch;
 }
+
+const HITCH_DUR = 0.05;   // round-t the viewer pauses a trap-tripped agent (the visible stutter)
 
 export class Viewer {
   private tl: MatchTimeline;
@@ -280,6 +316,25 @@ export class Viewer {
       return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone };
     });
 
+    // trap STUTTER: an agent whose path crosses an ENEMY trap was slowed by the
+    // engine (its `arrive` already carries TRAP_SLOW). Surface that as a visible
+    // hitch — pause the motion at the crossing — so you SEE the lurk get tripped
+    // instead of just walking uniformly slower. Replays the engine's pathHitsZone.
+    const traps = this.abilities.filter(a => a.ability === 'trap' && a.at != null && a.r != null);
+    if (traps.length) for (const a of this.agents) {
+      if (a.path.length < 2) continue;
+      const aSide = a.side === 'att' ? r.attacker : (r.attacker === 0 ? 1 : 0);   // a's own team index
+      for (const t of traps) {
+        if (t.side === aSide) continue;                 // your own side's trap never slows you
+        const f = trapEntryFrac(a.path, t.at as Vec2, t.r as number);
+        if (f == null) continue;
+        const dur = Math.min(HITCH_DUR, a.arrive * 0.5);
+        const tHit = (a.arrive - dur) * (1 - Math.sqrt(1 - f));
+        a.hitch = { frac: f, dur, start: a.departT + tHit, end: a.departT + tHit + dur };
+        break;                                          // first trap crossed is enough
+      }
+    }
+
     // spike location = planter position at plant time
     const plant = r.events.find(e => e.kind === 'plant') as Extract<Round['events'][number], { kind: 'plant' }> | undefined;
     if (plant) {
@@ -488,10 +543,12 @@ export class Viewer {
     for (const a of this.agents) {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      const p = posWithDepart(a.path, a.departT, a.arrive, prog);
+      const p = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
       a.node.setAttribute('transform', `translate(${p[0].toFixed(1)},${p[1].toFixed(1)})`);
+      // flash the agent while it's hitched on a trap (the visible "tripped" beat)
+      a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
       if (!dead) { a.tp.push(`${p[0].toFixed(0)},${p[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
-      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.departT, a.arrive, a.hold, prog))); a.cone.style.display = ''; }
+      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(p, facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch))); a.cone.style.display = ''; }
       else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);

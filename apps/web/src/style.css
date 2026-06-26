@@ -55,6 +55,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag .hl.att{fill:#cdf5fc}.ace-ag .hl.def{fill:#ffd2d8}
 .ace-ag.dead{opacity:.3}
 .ace-ag.dead .ring{stroke:var(--muted-2)!important}.ace-ag.dead .core{fill:var(--muted-2)!important}.ace-ag.dead .hl{display:none}
+/* trap stutter: while an agent is hitched on an enemy flank trap, pulse its ring
+   amber so the engine's slow reads as "caught", not just a slower walk. (The
+   positional pause itself supplies the stutter; the g's transform is the agent's
+   position, so the cue lives on the ring, never a competing transform.) */
+.ace-ag.tripped .ring{stroke:var(--gold)!important;animation:ace-trip .26s ease-in-out infinite}
+@keyframes ace-trip{0%,100%{stroke-width:2.5;opacity:.6}50%{stroke-width:4.5;opacity:1}}
 .ace-spike{opacity:0}.ace-spike.on{opacity:1}.ace-spike .sp-core{fill:var(--live)}.ace-spike .sp-ring{fill:none;stroke:var(--live);stroke-width:3}
 .ace-controls{margin-top:14px;background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:14px 16px}
 .ace-controls .row{display:flex;align-items:center;gap:12px}
