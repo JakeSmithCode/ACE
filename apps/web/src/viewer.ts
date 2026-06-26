@@ -331,7 +331,7 @@ export class Viewer {
       const cone = svg('path') as SVGPathElement; cone.setAttribute('class', 'ace-cone ' + side); this.coneLayer.appendChild(cone);
       const g = svg('g') as SVGGElement; g.setAttribute('class', 'ace-ag ' + side);
       const npw = mv.agent.length * 6.2 + 11;   // nameplate pill width estimate (Chakra Petch ~6px/char)
-      g.innerHTML = `<circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text>`
+      g.innerHTML = `<circle class="clutch-ring" r="17"></circle><circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text>`
         + `<g class="np"><rect class="np-bg" x="${(-npw / 2).toFixed(1)}" y="-27" width="${npw.toFixed(1)}" height="14" rx="2.5"></rect><text class="hl ${side}" y="-16.5">${mv.agent}</text></g>`;
       g.setAttribute('transform', `translate(${mv.path[0][0]},${mv.path[0][1]})`);
       this.agLayer.appendChild(g);
@@ -669,10 +669,18 @@ export class Viewer {
         }
       }
     }
+    // CLUTCH: a side down to its last player vs 2+ enemies — flag the lone clutcher,
+    // the moment a broadcast lives for. (Pre-plant only — post-plant is its own beat.)
+    const liveAtt = frame.filter(f => !f.dead && f.a.side === 'att');
+    const liveDef = frame.filter(f => !f.dead && f.a.side === 'def');
+    let clutcher: VAg | null = null;
+    if (liveAtt.length === 1 && liveDef.length >= 2) clutcher = liveAtt[0].a;
+    else if (liveDef.length === 1 && liveAtt.length >= 2) clutcher = liveDef[0].a;
     // PASS 3 — apply (snap to a walkable cell so a nudged body never stands in a wall)
     for (const { a, dead, prog, p } of frame) {
       const q = this.nav && !dead && !this.walkAt(p[0], p[1]) ? (this.nearestWalkable(p) ?? p) : p;
       a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})`);
+      a.node.classList.toggle('clutch', a === clutcher);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }

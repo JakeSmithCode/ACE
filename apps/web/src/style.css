@@ -89,6 +89,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag .hl.att{fill:#bdeef8}.ace-ag .hl.def{fill:#ffccd3}
 .ace-ag.att .np-bg{stroke:rgba(34,211,238,.3)}.ace-ag.def .np-bg{stroke:rgba(255,92,110,.3)}
 .ace-ag .xm{display:none;text-anchor:middle;font-family:var(--display);font-weight:700;font-size:15px}
+/* clutch: the lone player in a 1vX gets a pulsing gold ring */
+.ace-ag .clutch-ring{display:none;fill:none;stroke:var(--gold)}
+.ace-ag.clutch .clutch-ring{display:block;filter:drop-shadow(0 0 5px var(--gold));animation:clutch-pulse 1.05s ease-in-out infinite}
+.ace-ag.clutch .ring{stroke:var(--gold)!important;stroke-width:3}
+.ace-ag.clutch .np-bg{stroke:var(--gold)!important;fill:rgba(40,30,8,.9)}.ace-ag.clutch .hl{fill:var(--gold)!important}
+@keyframes clutch-pulse{0%,100%{r:16px;opacity:.8;stroke-width:2.5px}50%{r:21px;opacity:1;stroke-width:4px}}
 .ace-ag.dead{opacity:.5}
 .ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .np{display:none}
 .ace-ag.dead .xm{display:block;fill:var(--muted)}
