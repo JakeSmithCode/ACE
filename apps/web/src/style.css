@@ -77,11 +77,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag .ring{stroke-width:2.5;fill:rgba(8,14,20,.85)}
 .ace-ag .ring.att{stroke:var(--att)}.ace-ag .ring.def{stroke:var(--def)}
 .ace-ag .core.att{fill:var(--att)}.ace-ag .core.def{fill:var(--def)}
-.ace-ag .hl{font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.02em;text-anchor:middle;paint-order:stroke;stroke:#05090d;stroke-width:3px;opacity:.92}
-.ace-ag .hl.att{fill:#cdf5fc}.ace-ag .hl.def{fill:#ffd2d8}
+/* observer-style nameplate: light text on a dark pill, so labels stay readable
+   even when agents are close (each carries its own background) */
+.ace-ag .np-bg{fill:rgba(7,12,18,.86);stroke:var(--line-2);stroke-width:.6}
+.ace-ag .hl{font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.03em;text-anchor:middle}
+.ace-ag .hl.att{fill:#bdeef8}.ace-ag .hl.def{fill:#ffccd3}
+.ace-ag.att .np-bg{stroke:rgba(34,211,238,.3)}.ace-ag.def .np-bg{stroke:rgba(255,92,110,.3)}
 .ace-ag .xm{display:none;text-anchor:middle;font-family:var(--display);font-weight:700;font-size:15px}
 .ace-ag.dead{opacity:.5}
-.ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .hl{display:none}
+.ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .np{display:none}
 .ace-ag.dead .xm{display:block;fill:var(--muted)}
 .ace-ag.dead.att .xm{fill:rgba(34,211,238,.7)}.ace-ag.dead.def .xm{fill:rgba(255,92,110,.7)}
 /* on-map kill pop: a brief expanding ring at the death spot, coloured to the victim */
