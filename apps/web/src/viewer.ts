@@ -113,6 +113,8 @@ export class Viewer {
   private roundIdx = 0;
   private T = 0; private playing = true; private speed = 1; private last: number | null = null;
   private DUR = 20000; private fired = -1; private ended = false; private raf = 0;
+  private advanceTimer: ReturnType<typeof setTimeout> | null = null;   // auto-advance to next round after the result card
+  private clearAdvance() { if (this.advanceTimer) { clearTimeout(this.advanceTimer); this.advanceTimer = null; } }
   private agents: VAg[] = [];
   private spikePos: Vec2 | null = null; private spikePlantT = Infinity;
   private showCones = true;
@@ -134,6 +136,7 @@ export class Viewer {
   private scoreA!: HTMLElement; private scoreB!: HTMLElement;        // running score (no spoiler)
   private clock!: HTMLElement; private clockWrap!: HTMLElement;      // broadcast round clock (centerpiece)
   private endCard!: HTMLElement;                                     // round-result card shown when playback ends
+  private mapSvg!: SVGSVGElement;                                    // the map svg (re-faded on each new round)
   private sideTags: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team ATK/DEF this round
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; // true-odds chart
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
@@ -146,7 +149,7 @@ export class Viewer {
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  destroy() { cancelAnimationFrame(this.raf); }
+  destroy() { cancelAnimationFrame(this.raf); this.clearAdvance(); }
 
   private build() {
     const t = this.tl;
@@ -180,7 +183,7 @@ export class Viewer {
     const left = el('div', 'ace-left');
     const wrap = el('div', 'ace-mapwrap');
     wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-endcard" id="ace-endcard"></div>`;
-    const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox());
+    const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox()); this.mapSvg = s as unknown as SVGSVGElement;
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
     this.abLayer = svg('g') as SVGGElement; this.abLayer.setAttribute('class', 'ace-abils');
@@ -307,8 +310,11 @@ export class Viewer {
   private loadRound(i: number) {
     this.roundIdx = i;
     const r = this.tl.rounds[i];
+    this.clearAdvance();
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
     this.playBtn.textContent = '❚❚'; this.hideEndCard();
+    // quick fade so a new round eases in rather than hard-cutting from the result card
+    this.mapSvg.classList.remove('round-in'); void this.mapSvg.getBoundingClientRect(); this.mapSvg.classList.add('round-in');
     this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = ''; this.abLayer.innerHTML = '';
     // utility with map geometry (older timelines without `at` are simply skipped)
     this.abilities = r.events.filter((e): e is Extract<typeof e, { kind: 'ability' }> => e.kind === 'ability' && (e as { at?: Vec2 }).at != null);
@@ -428,6 +434,7 @@ export class Viewer {
 
   private scrubTo(frac: number) {
     const r = this.tl.rounds[this.roundIdx];
+    this.clearAdvance();
     this.T = frac; this.fired = -1; this.ended = false; this.hideEndCard();
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
@@ -679,7 +686,11 @@ export class Viewer {
       r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t > this.fired && this.T >= e.t) this.fire(e); });
       this.fired = this.T;
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
-      if (this.T >= 1) { this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; this.showEndCard(); }
+      if (this.T >= 1) {
+        this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶'; this.showEndCard();
+        // play on like a broadcast: hold the result card, then roll the next round
+        if (this.roundIdx < this.tl.rounds.length - 1) this.advanceTimer = setTimeout(() => this.loadRound(this.roundIdx + 1), 2400);
+      }
       this.render();
     }
     this.raf = requestAnimationFrame(this.loop);

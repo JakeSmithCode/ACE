@@ -45,6 +45,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-left{min-width:0}
 .ace-mapwrap{position:relative;background:#0b1118;border:1px solid var(--line);clip-path:var(--bevel);overflow:hidden;font-size:0}
 .ace-map{display:block;width:100%;height:auto}
+.ace-map.round-in{animation:round-in .5s ease}
+@keyframes round-in{from{opacity:.2}to{opacity:1}}
 .ace-scrim{fill:rgba(11,17,24,.20)}
 .ace-overlay{position:absolute;top:13px;left:13px;z-index:3}
 .ace-overlay .ovl{font-family:var(--label);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);background:rgba(8,14,20,.8);border:1px solid var(--line);padding:5px 9px}
