@@ -77,8 +77,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag .core.att{fill:var(--att)}.ace-ag .core.def{fill:var(--def)}
 .ace-ag .hl{font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.02em;text-anchor:middle;paint-order:stroke;stroke:#05090d;stroke-width:3px;opacity:.92}
 .ace-ag .hl.att{fill:#cdf5fc}.ace-ag .hl.def{fill:#ffd2d8}
-.ace-ag.dead{opacity:.3}
-.ace-ag.dead .ring{stroke:var(--muted-2)!important}.ace-ag.dead .core{fill:var(--muted-2)!important}.ace-ag.dead .hl{display:none}
+.ace-ag .xm{display:none;text-anchor:middle;font-family:var(--display);font-weight:700;font-size:15px}
+.ace-ag.dead{opacity:.5}
+.ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .hl{display:none}
+.ace-ag.dead .xm{display:block;fill:var(--muted)}
+.ace-ag.dead.att .xm{fill:rgba(34,211,238,.7)}.ace-ag.dead.def .xm{fill:rgba(255,92,110,.7)}
 /* trap stutter: while an agent is hitched on an enemy flank trap, pulse its ring
    amber so the engine's slow reads as "caught", not just a slower walk. (The
    positional pause itself supplies the stutter; the g's transform is the agent's

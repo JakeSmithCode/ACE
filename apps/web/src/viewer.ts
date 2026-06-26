@@ -324,7 +324,7 @@ export class Viewer {
       const side: 'att' | 'def' = this.teamOf.get(mv.agent) === r.attacker ? 'att' : 'def';
       const cone = svg('path') as SVGPathElement; cone.setAttribute('class', 'ace-cone ' + side); this.coneLayer.appendChild(cone);
       const g = svg('g') as SVGGElement; g.setAttribute('class', 'ace-ag ' + side);
-      g.innerHTML = `<circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="hl ${side}" y="-18">${mv.agent}</text>`;
+      g.innerHTML = `<circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text><text class="hl ${side}" y="-18">${mv.agent}</text>`;
       g.setAttribute('transform', `translate(${mv.path[0][0]},${mv.path[0][1]})`);
       this.agLayer.appendChild(g);
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
