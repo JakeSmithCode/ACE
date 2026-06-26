@@ -37,6 +37,7 @@ const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 const ROTATE_SPEED = 0.85; // a rotator's travel speed once it has info and moves with purpose
+const ATK_SPREAD = 18;     // lateral fan across the site entry — pushers hit distinct angles, not one stacked point
 
 // utility — abilities express the `utility` attribute by bending duels through
 // the same geometry. Reach/duration scale with the caster's utility (0..1), so
@@ -44,6 +45,10 @@ const ROTATE_SPEED = 0.85; // a rotator's travel speed once it has info and move
 const SMOKE_R = 58, SMOKE_R_UTIL = 46;       // smoke radius (image units): 58..104
 const SMOKE_T0 = 0.15, SMOKE_JITTER = 0.10;  // when a smoke blooms (normalized t)
 const SMOKE_DUR = 0.20, SMOKE_DUR_UTIL = 0.18;
+const CTRL_RESMOKE_U = 0.5;                   // utility a controller needs to throw a SECOND smoke on the execute
+const RESMOKE_T0 = 0.30;                      // the second smoke blooms just after the first — sustained coverage through the hit
+const RESMOKE_R = 50, RESMOKE_R_UTIL = 38;    // a focused second wall on the connector (50..88)
+const RESMOKE_DUR = 0.16, RESMOKE_DUR_UTIL = 0.12;
 const PULSE_R = 84, PULSE_R_UTIL = 70;       // recon/flash reach: 84..154
 const PULSE_DUR = 0.07, PULSE_DUR_UTIL = 0.10;
 const TRAP_R = 60, TRAP_R_UTIL = 48;         // sentinel trap watch-zone reach: 60..108
@@ -479,17 +484,37 @@ function simulateRound(
       });
     });
   } else {
+    // PROCEDURAL execute: the pushers FAN across the site entry (distinct angles, not
+    // a stack on one point), staged by role — the entry leads deep and fast, duelists
+    // hit the spread, the controller + sentinel trail a beat behind to lob utility and
+    // watch the flank. This is how the hit READS on the map: a coordinated, layered
+    // spread instead of a blob of overlapping bodies/cones. Symmetric (both sides), so
+    // the pool stays balanced; jitter count is unchanged so setup rng doesn't desync.
+    const approach = unit(A.atkSpawn, sitePt);
+    const perp: Vec2 = [-approach[1], approach[0]];
+    const pushers = atkTeam.players.filter(p => p.id !== lurkId);
+    const np = Math.max(1, pushers.length);
     atkTeam.players.forEach(p => {
       const isLurk = p.id === lurkId;
       const isEntry = !isLurk && p.id === entryId;
-      const spawn = jitter(rng, A.atkSpawn, 22);
-      const goal = jitter(rng, isLurk ? lurkPt : sitePt, isLurk ? 30 : 38);
-      const path = pathfind(nav, spawn, goal);
       const lo = loadouts.get(p.handle)!;
+      const support = lo.role === 'controller' || lo.role === 'sentinel';
+      const spawn = jitter(rng, A.atkSpawn, 18);
+      let goal: Vec2;
+      if (isLurk) {
+        goal = jitter(rng, lurkPt, 28);
+      } else {
+        const k = pushers.indexOf(p);
+        const lat = (k - (np - 1) / 2) * ATK_SPREAD;          // fan left..right across the entry
+        const depth = support ? -16 : 0;                      // support eases back a touch to lob util from range
+        goal = jitter(rng, [sitePt[0] + perp[0] * lat + approach[0] * depth, sitePt[1] + perp[1] * lat + approach[1] * depth], 12);
+      }
+      const path = pathfind(nav, spawn, goal);
+      // the entry leads (15% faster), as before — the fan is positional, not a tempo change
+      const speedMul = isEntry ? 1.15 : 1.0;
       agents.push({
         p, side: attacker, handle: p.handle, path, departT: 0,
-        // the entry leads (15% faster); the lurker peels off at normal pace
-        arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
+        arrive: arriveTime(path, atkSpeed * speedMul),
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         // the lurker holds toward the fight (catches unaware rotators); others push to site
@@ -597,12 +622,25 @@ function simulateRound(
     const isAtk = ag.side === attacker;
     const u = (ag.p.attr.utility / 100) * ag.utilFactor;
     if (ag.agentRole === 'controller') {
-      // attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
+      // EXECUTE smoke: attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
       const c = jitter(rng, isAtk ? sitePt : choke, 18);
       const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
       const r = SMOKE_R + SMOKE_R_UTIL * u, t1 = t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u;
       smokes.push({ side: ag.side, c, r, t0, t1 });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, r, until: t1 });
+      // SECOND smoke: a controller with kit to spare double-smokes the execute, walling
+      // the CONNECTOR between mid and site — so the hit reads like real coordinated
+      // utility (two walls up through the fight, not one), and a high-util controller
+      // visibly does more. It blooms just after the first for sustained coverage and is
+      // drawn clipped to the walls by the viewer. PLANNED, not thrown: centre + time are
+      // a deterministic function of the geometry (no jitter, no rng.range) — zero new
+      // rng, symmetric on a mirror, so the canonical stream + pool balance are untouched.
+      if (u >= CTRL_RESMOKE_U) {
+        const rc: Vec2 = lerp(sitePt, A.mid, 0.5);
+        const rr = RESMOKE_R + RESMOKE_R_UTIL * u, rt1 = RESMOKE_T0 + RESMOKE_DUR + RESMOKE_DUR_UTIL * u;
+        smokes.push({ side: ag.side, c: rc, r: rr, t0: RESMOKE_T0, t1: rt1 });
+        events.push({ t: RESMOKE_T0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: rc, r: rr, until: rt1 });
+      }
     } else if (ag.agentRole === 'initiator' || (isAtk && ag.agentRole === 'duelist')) {
       const c = jitter(rng, sitePt, 22);
       // attackers time the execute to their tempo (fast hits flash earlier)
