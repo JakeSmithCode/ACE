@@ -10,6 +10,7 @@ import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, runSeason } from './tick.js';
 import { navOf } from './nav.js';
+import { publicView, liveMatchState, fixtureStatus } from './live.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: string) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -83,5 +84,24 @@ if (watched.length) {
   const matches = replay[0] === f.homeScore && replay[1] === f.awayScore;
   console.log(`  re-sim watch: replay from snapshot → ${replay[0]}–${replay[1]} ${matches ? 'reproduces stored score ✓' : 'MISMATCH ✗'}`);
 }
+
+// ── 5. live broadcast window: result sealed until the match plays out ────────
+const ls = new MemoryStore();
+const lid = seedWorld(ls, { seed, region: 'AMER' });
+const KICK = 0, DUR = 2400;   // "8pm", 40-minute live window
+runTick(ls, lid, { full: (d) => d === 0, navOf, kickoffAt: KICK, broadcastSecs: DUR });
+const game = ls.fixtures(lid, 1).find(f => f.inputSnapshot)!;   // a watchable (full-simmed) Premier match
+const tl = simulateMatch(game.inputSnapshot!, navOf(game.inputSnapshot!.map), 0);   // server re-sim (the live source)
+const at = (now: number) => publicView(game, now);
+const showLive = (now: number) => { const v = at(now); const m = liveMatchState(tl, v.frac); return `${fixtureStatus(game, now).padEnd(9)} frac ${v.frac.toFixed(2)}  public-score ${v.score ? v.score.join('–') : 'SEALED'}  live ${m.scoreA}–${m.scoreB} (rd ${m.round + 1})`; };
+console.log(`\n  live window : a Premier match kicks off at t=${KICK}, ${DUR}s broadcast (${tl.rounds.length} rounds, true result ${tl.finalScore.join('–')})`);
+console.log(`     t=0      ${showLive(0)}`);
+console.log(`     t=600    ${showLive(600)}`);
+console.log(`     t=1200   ${showLive(1200)}`);
+console.log(`     t=2399   ${showLive(2399)}`);
+console.log(`     t=2400   ${showLive(2400)}`);
+const sealedEarly = !at(2399).score && !at(0).snapshot;   // no public score + no snapshot before reveal
+const revealedLate = !!at(2400).score && !!at(2400).snapshot;
+console.log(`  embargo     : result + snapshot hidden during the broadcast → ${sealedEarly ? 'sealed ✓' : 'LEAK ✗'}; public at reveal → ${revealedLate ? 'released ✓' : 'STUCK ✗'}`);
 
 console.log(`\n  persisted (run A): ${A.store.fixtures(A.id).length} fixtures · ${A.store.ticks(A.id).length} ticks logged\n`);

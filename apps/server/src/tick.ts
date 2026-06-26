@@ -20,6 +20,11 @@ export interface TickOptions {
   full?: (division: number) => boolean;
   navOf?: (map: MapId) => Navmesh;
   forks?: number;
+  // broadcast window: when this match-day's matches kick off (wall-clock secs) and
+  // how long they play out live before the result reveals (see live.ts). The
+  // scheduler passes the real 8pm slot; omit for an instantly-revealed tick.
+  kickoffAt?: number;
+  broadcastSecs?: number;
 }
 
 /** Number of match-days in a season = the top division's double round-robin
@@ -83,6 +88,8 @@ export function runTick(store: WorldStore, id: string, opts?: TickOptions): Tick
     const row = fixtureRow(id, w.season, w.day, slot, r);
     const snap = snapshots?.get(r.seed);
     if (snap) row.inputSnapshot = snap;   // persist only for watchable fixtures (§7)
+    if (opts?.kickoffAt != null) row.kickoffAt = opts.kickoffAt;       // broadcast window: seal the
+    if (opts?.broadcastSecs != null) row.broadcastSecs = opts.broadcastSecs;  // result until it plays out
     return row;
   });
   store.appendFixtures(id, rows);

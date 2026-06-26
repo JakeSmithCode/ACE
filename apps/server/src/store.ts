@@ -17,6 +17,8 @@ export interface FixtureRow {
   home: number; away: number; seed: number;
   homeScore: number; awayScore: number; winner: number;
   inputSnapshot?: MatchInput;
+  // broadcast window (live.ts): the result is sealed until kickoffAt + broadcastSecs
+  kickoffAt?: number; broadcastSecs?: number;
 }
 
 /** A tick-log row (the idempotency key — `unique(worldId, season, day, kind)`). */

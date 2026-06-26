@@ -254,6 +254,36 @@ and "watch the replay next week" are the same request — the only difference is
 *when* the row turns `resolved`. Tick-night (§11) just pushes "resolved" events
 as they land and the client pulls replays.
 
+## 8.5 The live window — result embargo (no spoilers until it's over)
+
+The engine resolves a match in ~100 ms, so the result *exists* the instant the
+tick runs. But a match scheduled for 8pm must **play out live** and its result
+must stay **sealed until the broadcast actually finishes** — like a real esports
+match. The model (`apps/server/src/live.ts`, in):
+
+- Each fixture carries a **`kickoffAt`** (8pm) and a **FIXED `broadcastSecs`** →
+  `revealAt = kickoffAt + broadcastSecs`. Fixed on purpose: a 13-3 stomp and a
+  13-11 thriller take the same slot, so the *duration leaks nothing* about how
+  close it was.
+- **Status is derived from wall-clock `now`:** `scheduled` (pre-kickoff), `live`
+  (playing out), `resolved` (past reveal). `publicView(fixture, now)` is
+  spoiler-safe by construction — before reveal it carries **no score and no
+  `input_snapshot`** (so a client can't re-sim ahead), only the live position.
+- **During the window the server streams the match gated to the live position**
+  (`liveMatchState(timeline, frac)`): the running score from *completed* rounds
+  only, never the final, until `frac` reaches 1. Everyone watching is synced to
+  the same wall-clock moment (a real stream, not a per-viewer replay). The server
+  re-sims the snapshot as the live source; the client renders up-to-now.
+- **At `revealAt`** the row flips `resolved`: the snapshot + final score go public
+  and watching reverts to the cheap client-side replay (§8). Standings only count
+  `resolved` fixtures, so the table never moves mid-broadcast.
+
+This is the one place the "watching costs the server nothing" rule (§8) is
+relaxed — *live* watching costs a bounded re-sim + a synced stream, but only for
+matches in their window. Replay (after reveal) stays free. Proven headless by
+`pnpm run server`: a Premier match sealed through its window (running score
+advancing 0–0 → … → 12–7), the final 13–7 released only at reveal.
+
 ## 9. API surface (NestJS modules)
 
 ```
