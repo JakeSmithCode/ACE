@@ -104,6 +104,7 @@ const SPAWN_FAN = 34;       // lateral spacing of attackers across the spawn bar
 const SPAWN_CONVERGE = 0.12; // round-t over which the spread spawn collapses onto the engine path
 const SEP_MIN = 38;         // min on-screen spacing between same-side bodies — de-stack piles (px, viewer-only)
 const SEP_ITERS = 3;        // relaxation passes per frame to resolve overlaps
+const AB_VIS_SCALE = 0.62;  // smoke/flash/recon render at this fraction of the gameplay radius — a Valorant-sized dome, not a room-filling cloud (visual only; the engine's blind reach is unchanged)
 
 export class Viewer {
   private tl: MatchTimeline;
@@ -591,24 +592,6 @@ export class Viewer {
       }
     return null;
   }
-  /** SVG path for an ability clipped to the WALLS — cast rays 360° from the centre,
-   *  each stopping at the first wall up to `radius`, so a smoke fills the room it's
-   *  in (like Valorant) instead of bleeding a perfect circle through walls. */
-  private blobPath(c: Vec2, radius: number): string {
-    const probe = this.nav!.cell * 0.6, RAYS = 40, n = Math.ceil(radius / probe);
-    let d = '';
-    for (let i = 0; i < RAYS; i++) {
-      const a = (i / RAYS) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
-      let last = probe;   // a small floor so a ray into a wall doesn't spike to centre
-      for (let k = 1; k <= n; k++) {
-        const dist = Math.min(radius, k * probe);
-        if (!this.walkAt(c[0] + dx * dist, c[1] + dy * dist)) break;
-        last = dist;
-      }
-      d += (i === 0 ? 'M' : 'L') + (c[0] + dx * last).toFixed(1) + ' ' + (c[1] + dy * last).toFixed(1) + ' ';
-    }
-    return d + 'Z';
-  }
   /** SVG path for the wall-clipped vision cone at p facing unit f. */
   private conePath(p: Vec2, f: Vec2): string {
     const base = Math.atan2(f[1], f[0]);
@@ -623,9 +606,10 @@ export class Viewer {
   }
 
   private render() {
-    // utility on the map: each smoke/flash/trap is a circle active from t..until.
-    // smokes read as solid vision-blockers; flashes/recon as a bright burst; traps as
-    // a side-tinted dashed watch-ring (an armed sensor). Redrawn each frame.
+    // utility on the map: each ability is a clean CIRCLE the size of its gameplay
+    // radius — like a Valorant smoke dome / flash, not CS-style gas filling a room
+    // (this also matches the engine's blind model, which is a plain radius). Smokes
+    // are solid vision-blockers; flashes/recon a fading burst; traps a dashed ring.
     this.abLayer.innerHTML = '';
     if (this.showUtil) {
       const att = this.tl.rounds[this.roundIdx].attacker;
@@ -636,14 +620,9 @@ export class Viewer {
         // a flash/recon burst fades over its short window; smokes/traps hold steady
         const burst = a.ability === 'flash' || a.ability === 'recon';
         const op = burst ? ` style="opacity:${((1 - (this.T - a.t) / Math.max(0.02, until - a.t)) * 0.6 + 0.12).toFixed(2)}"` : '';
-        const cls = `ace-abil ab-${a.ability} ${side}`;
-        // clip to the walls (fills the room, like Valorant) — anchor at the nearest
-        // walkable point; fall back to a plain circle only with no navmesh
-        const anchor = this.nav ? this.nearestWalkable(a.at) : null;
-        const shape = anchor
-          ? `<path class="${cls}" d="${this.blobPath(anchor, a.r)}"${op}></path>`
-          : `<circle class="${cls}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${a.r.toFixed(1)}"${op}></circle>`;
-        this.abLayer.insertAdjacentHTML('beforeend', shape);
+        // traps are a watch-zone (full footprint); smoke/flash/recon are Valorant-sized domes
+        const rr = a.ability === 'trap' ? a.r : a.r * AB_VIS_SCALE;
+        this.abLayer.insertAdjacentHTML('beforeend', `<circle class="ace-abil ab-${a.ability} ${side}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${rr.toFixed(1)}"${op}></circle>`);
       }
     }
     const cones = this.showCones && !!this.nav;

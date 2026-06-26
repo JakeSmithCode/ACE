@@ -73,7 +73,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-cone.def{fill:rgba(255,92,110,.09);stroke:rgba(255,92,110,.28)}
 /* utility on the map: smokes block vision (solid grey), flashes/recon burst bright, traps are an armed dashed watch-ring */
 .ace-abil{pointer-events:none}
-.ab-smoke{fill:rgba(150,150,160,.42);stroke:rgba(180,180,190,.5);stroke-width:1.5}
+.ab-smoke{fill:rgba(156,158,170,.52);stroke:rgba(200,202,214,.6);stroke-width:2}
 .ab-flash{fill:rgba(255,241,150,.32);stroke:rgba(255,241,150,.6);stroke-width:1.5}
 .ab-recon{fill:rgba(120,210,255,.16);stroke:rgba(120,210,255,.55);stroke-width:1.5;stroke-dasharray:5 4}
 .ab-trap{fill:transparent;stroke-width:2;stroke-dasharray:7 6}
