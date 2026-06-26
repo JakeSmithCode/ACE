@@ -82,6 +82,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .hl{display:none}
 .ace-ag.dead .xm{display:block;fill:var(--muted)}
 .ace-ag.dead.att .xm{fill:rgba(34,211,238,.7)}.ace-ag.dead.def .xm{fill:rgba(255,92,110,.7)}
+/* on-map kill pop: a brief expanding ring at the death spot, coloured to the victim */
+.ace-killpop{pointer-events:none}
+.ace-killpop .kp-ring{fill:none;animation:killpop .62s ease-out forwards}
+.ace-killpop.att .kp-ring{stroke:var(--att)}.ace-killpop.def .kp-ring{stroke:var(--def)}
+@keyframes killpop{0%{r:4px;opacity:.95;stroke-width:3px}100%{r:30px;opacity:0;stroke-width:.5px}}
 /* trap stutter: while an agent is hitched on an enemy flank trap, pulse its ring
    amber so the engine's slow reads as "caught", not just a slower walk. (The
    positional pause itself supplies the stutter; the g's transform is the agent's
@@ -109,13 +114,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-panel{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:15px 16px}
 .ace-panel h3{font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:13px;display:flex;align-items:center;gap:8px}
 .ace-panel h3 .b{width:6px;height:6px;background:var(--brand);transform:rotate(45deg)}
-.ace-panel .feed{min-height:170px;display:flex;flex-direction:column;gap:7px}
-.ace-panel .kill{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 9px;background:var(--bg-3);border-left:2px solid var(--line-2)}
-.ace-panel .kill .kr,.ace-panel .kill .vc{font-family:var(--display);font-weight:600;font-size:15px}
-.ace-panel .kill .vc{text-decoration:line-through}
+.ace-panel .feed{min-height:170px;display:flex;flex-direction:column;gap:6px}
+.ace-panel .kill{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 10px;background:var(--bg-3);border-left:3px solid var(--line-2);animation:kill-in .26s cubic-bezier(.16,1,.3,1) both}
+.ace-panel .kill.att{border-left-color:var(--att)}.ace-panel .kill.def{border-left-color:var(--def)}
+@keyframes kill-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+.ace-panel .kill .kr,.ace-panel .kill .vc{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.01em}
+.ace-panel .kill .vc{text-decoration:line-through;opacity:.78}
 .ace-panel .kill .att{color:var(--att)}.ace-panel .kill .def{color:var(--def)}
-.ace-panel .kill .wp{font-family:var(--label);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);flex:1;text-align:center}
-.ace-panel .kill .trade{color:var(--win);font-size:13px;margin-right:-2px;title:trade}
+.ace-panel .kill .wp{font-family:var(--label);font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);flex:1;text-align:center;display:flex;align-items:center;justify-content:center;gap:5px}
+.ace-panel .kill .wp::after{content:'►';font-size:8px;color:var(--muted-2)}
+.ace-panel .kill .trade{color:var(--win);font-size:14px;font-weight:700;margin-right:-2px}
 .ace-panel .kill.event{justify-content:center;color:var(--gold);font-family:var(--label);font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-left-color:var(--gold);background:rgba(229,181,103,.07)}
 .ace-panel .kill.event.defuse{color:var(--win);border-left-color:var(--win);background:rgba(59,209,127,.07)}
 .ace-panel .empty{color:var(--muted-2);font-size:13px;font-style:italic;padding:8px 2px}

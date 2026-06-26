@@ -431,27 +431,40 @@ export class Viewer {
     this.T = frac; this.fired = -1; this.ended = false; this.hideEndCard();
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
-    r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e); });
+    r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e, false); });
     this.fired = frac;
     if (this.feedItems.length === 0) this.feed.innerHTML = '<div class="empty">Round in progress…</div>';
     this.boardDirty = false; this.updateBoard(frac);
     this.render();
   }
 
-  private fire(e: Round['events'][number]) {
+  private fire(e: Round['events'][number], live = true) {
     if (e.kind === 'kill') {
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
-      const d = el('div', 'kill');
       const kc = this.teamOf.get(e.killer) === this.tl.rounds[this.roundIdx].attacker ? 'att' : 'def';
       const vc = kc === 'att' ? 'def' : 'att';
+      const d = el('div', 'kill ' + kc);                  // left accent = the killer's colour
       // a trade: this kill drops someone who themselves killed in the last ~3s
       const lk = this.lastKill.get(e.victim);
       const traded = lk != null && e.t - lk <= 0.04;
       this.lastKill.set(e.killer, e.t);
-      d.innerHTML = `${traded ? '<span class="trade">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>`;
+      d.innerHTML = `${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>`;
       this.feed.appendChild(d); this.feedItems.push(d);
       while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
-      const v = this.agents.find(a => a.handle === e.victim); if (v) v.node.classList.add('dead');
+      const v = this.agents.find(a => a.handle === e.victim);
+      if (v) {
+        v.node.classList.add('dead');
+        // on-map kill pop: a brief expanding ring at the death spot draws the eye to
+        // the action (live only — replaying past kills on a scrub shouldn't re-pop).
+        if (live) {
+          const dp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch);
+          const pop = svg('g') as SVGGElement; pop.setAttribute('class', 'ace-killpop ' + vc);
+          pop.setAttribute('transform', `translate(${dp[0].toFixed(1)},${dp[1].toFixed(1)})`);
+          pop.innerHTML = `<circle class="kp-ring" r="5"></circle>`;
+          this.agLayer.appendChild(pop);
+          setTimeout(() => pop.remove(), 680);
+        }
+      }
       this.boardDirty = true;
     } else if (e.kind === 'plant') {
       this.spike.classList.add('on');
