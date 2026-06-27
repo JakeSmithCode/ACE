@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOf, divisionSchedule, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -30,7 +30,7 @@ export interface TickOptions {
 /** Number of match-days in a season = the top division's double round-robin
  *  length (every tier has `size` clubs → the same schedule length). */
 export function seasonLength(w: WorldState): number {
-  return divisionSchedule(membersOf(w.clubs.map(c => c.tier), 0)).length;
+  return divisionSchedule(membersOfDiv(w.clubs.map(c => c.tier), w.clubs.map(c => c.group), 0, 0)).length;
 }
 
 /** A deterministic per-(season, day) dev-rng seed. The day-granular runtimes (the

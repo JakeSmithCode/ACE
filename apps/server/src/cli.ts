@@ -4,7 +4,7 @@
 // double-resolves), and it's DETERMINISTIC (same seed → byte-identical world). No
 // DB, no HTTP — the exact resolution code the server runs, against an in-memory
 // store.
-import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, type WorldState } from '@ace/world';
+import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, createWorld, simulateSeason, advanceWorld, worldDivisions, type WorldState } from '@ace/world';
 import { simulateMatch } from '@ace/engine';
 import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
@@ -135,5 +135,20 @@ const planKept = afterRevert.owner === null && afterRevert.tactics.defense.read 
 // the always-field-a-competent-five invariant holds for EVERY club post-ops
 const allValid = load(os, oid).clubs.every(c => validFive(planFive(c)));
 console.log(`  invariants  : bad lineup rejected → ${badRejected ? '✓' : '✗'}; revert → AI keeps plan → ${planKept ? '✓' : '✗'}; every club fields a valid five → ${allValid ? '✓' : '✗'}`);
+
+// ── 7. fan-out: a pyramid of (tier, group) divisions + the funnel ────────────
+// scale is horizontal — a tier is many parallel divisions, wider toward the base.
+const LAYOUT = [1, 2, 4], GSIZE = 6;   // Premier · Challengers ×2 · base ×4 (42 clubs)
+const sizesOf = (w: WorldState) => worldDivisions(w).map(d => d.members.length);
+const digestG = (w: WorldState) => w.clubs.map(c => `${c.tag}:${c.tier}.${c.group}:${Math.round(c.strength * 1000)}`).join('|');
+const runPyramid = (s: number) => { let w = createWorld(s, { tiers: LAYOUT.length, size: GSIZE, promo: 1, layout: LAYOUT }); const log: string[] = []; for (let n = 0; n < 4; n++) { w = simulateSeason(w); const adv = advanceWorld(w); log.push(`s${adv.world.season - 1}: ${adv.moves.length} moves, champ ${adv.world.clubs[adv.champion].tag}`); w = adv.world; } return { w, log }; };
+const P = runPyramid(seed);
+const w7 = createWorld(seed, { tiers: LAYOUT.length, size: GSIZE, promo: 1, layout: LAYOUT });
+const divCount = worldDivisions(w7).length, allFull = sizesOf(P.w).every(n => n === GSIZE);
+console.log(`\n  fan-out     : layout [${LAYOUT.join(',')}] × ${GSIZE} → ${w7.clubs.length} clubs in ${divCount} divisions (${worldDivisions(w7).map(d => `T${d.tier}g${d.group}`).join(' ')})`);
+P.log.forEach(l => console.log(`     ${l}`));
+console.log(`  funnel      : every division still full at ${GSIZE} after 4 seasons → ${allFull ? 'conserved ✓' : 'BROKEN ✗'}; clubs churn tiers each season → ${P.log.every(l => !l.startsWith('s0: 0')) ? '✓' : '✗'}`);
+const detG = digestG(runPyramid(seed).w) === digestG(P.w);
+console.log(`  determinism : two independent grouped runs → ${detG ? 'IDENTICAL ✓' : 'DIVERGED ✗'}`);
 
 console.log(`\n  persisted (run A): ${A.store.fixtures(A.id).length} fixtures · ${A.store.ticks(A.id).length} ticks logged\n`);

@@ -401,7 +401,25 @@ not a sim rewrite.
    rejected, revert returns the club to AI with its plan intact, and **every club
    still fields a valid five**. Auth (which account may call these) is the HTTP
    layer's job (step 3); the engine never sees ownership, so seed 42 is unchanged.*
-6. **Fan-out `(tier, grp)` + the funnel.**
+6. **Fan-out `(tier, grp)` + the funnel.** ✅ *Done — `(tier, group)` is a real
+   division dimension. `createWorld(seed, { layout })` takes a pyramid (`groups per
+   tier`, e.g. `[1,2,4]`) and assigns the strength-descending field to `(tier,
+   group)` slots (`assignDivisions`, snake-seeded by strength); the flat default
+   (every tier one group) is **byte-identical** to before. `worldDivisions(w)` lists
+   every division; `resolveSeasonDay` / `simulateSeason` schedule and resolve across
+   all of them (per-fixture seed offset `tier·1000 + group·1e6`, which reduces to the
+   old `tier·1000` at group 0 — so a flat world's fixture seeds are unchanged). The
+   **funnel** (`funnelPromoteRelegate`) runs promotion/relegation across a pyramid
+   where tiers have differing group counts: the bottom `k` of **each** group relegate,
+   exactly that many promote up from the wider tier below (group winners first, ties
+   by strength) so each tier's population is **conserved**, then each tier is
+   **regrouped** (snake-seeded by strength) so groups stay full and balanced. Reduces
+   exactly to `promoteRelegate` when every tier has one group. `pnpm run server`
+   proves it: a `[1,2,4]×6` world → 42 clubs in 7 divisions, every division still full
+   at 6 after 4 seasons (populations conserved, 6 moves/season), deterministic across
+   two runs. `membersOf` / `promoteRelegate` / `divisionSchedule` are untouched (the
+   single-player store still uses them flat); the engine never sees groups, so seed 42
+   is byte-identical.*
 7. **Re-sim-to-watch endpoint** + wire the existing viewer to it. 🟡 *The core is
    proven — full-sim persists the `input_snapshot` and a re-sim reproduces the
    score byte-for-byte (server CLI). What remains is the HTTP `GET

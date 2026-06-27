@@ -4,8 +4,8 @@
 import { createWorld } from '@ace/world';
 import type { WorldStore } from './store.js';
 
-export function seedWorld(store: WorldStore, opts: { seed: number; region?: string; tiers?: number; size?: number; promo?: number }): string {
+export function seedWorld(store: WorldStore, opts: { seed: number; region?: string; tiers?: number; size?: number; promo?: number; layout?: number[] }): string {
   return store.createWorld(createWorld(opts.seed, {
-    region: opts.region ?? 'AMER', tiers: opts.tiers, size: opts.size, promo: opts.promo,
+    region: opts.region ?? 'AMER', tiers: opts.tiers, size: opts.size, promo: opts.promo, layout: opts.layout,
   }));
 }

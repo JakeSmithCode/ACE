@@ -7,7 +7,7 @@
 import type { Player, Tactics, Comp, Team, PatchState } from '@ace/shared';
 import { Rng, PATCH } from '@ace/engine';
 import { makeLeague, ROLE_AGENTS } from './clubs.js';
-import { membersOf, divisionSchedule, promoteRelegate, type DivMove } from './divisions.js';
+import { divisionSchedule, funnelPromoteRelegate, snakeGroup, type DivMove } from './divisions.js';
 import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, finishOf } from './playoffs.js';
@@ -43,10 +43,49 @@ export interface WorldClub {
 export interface WorldState {
   seed: number; region: string;
   tiers: number; size: number; promo: number;
+  layout: number[];         // groups per tier (the pyramid: 1 at the top, wider below)
   season: number; day: number;
   patch: PatchState;
   clubs: WorldClub[];
   results: MatchResult[];   // the current season's fixtures
+}
+
+/** Every `(tier, group)` division and its member club indices, tier-major. A flat
+ *  world (every tier one group) yields one division per tier — the order the
+ *  pre-fan-out code iterated, so it stays byte-identical. */
+export interface WorldDivision { tier: number; group: number; members: number[] }
+export function worldDivisions(w: WorldState): WorldDivision[] {
+  const out: WorldDivision[] = [];
+  for (let t = 0; t < w.tiers; t++)
+    for (let g = 0; g < w.layout[t]; g++)
+      out.push({ tier: t, group: g, members: w.clubs.map((c, i) => [c, i] as const).filter(([c]) => c.tier === t && c.group === g).map(([, i]) => i) });
+  return out;
+}
+
+/** Per-fixture seed offset for a division. Spaced so tiers (×1000) and groups
+ *  (×1e6) never collide with a within-day slot, and **group 0 reduces to the old
+ *  `tier·1000`** — so a flat world's fixture seeds are unchanged. */
+const divSeedOffset = (tier: number, group: number): number => tier * 1000 + group * 1_000_000;
+
+/** Assign `n` strength-descending clubs to `(tier, group)` slots per a layout: tier
+ *  t holds `size·layout[t]` clubs top-down, snake-seeded across its groups by
+ *  strength. A flat layout (all 1s) gives `tier = floor(i/size)`, group 0 — exactly
+ *  the pre-fan-out assignment, so generated worlds are byte-identical. */
+function assignDivisions(layout: number[], size: number, n: number): { tierOf: number[]; groupOf: number[] } {
+  const T = layout.length;
+  const cap = layout.map(g => g * size);
+  const tierOf: number[] = [];
+  let t = 0, used = 0;
+  for (let i = 0; i < n; i++) {
+    while (t < T - 1 && i >= used + cap[t]) { used += cap[t]; t++; }
+    tierOf.push(t);
+  }
+  const groupOf = new Array<number>(n).fill(0);
+  for (let tt = 0; tt < T; tt++) {
+    let j = 0;
+    for (let i = 0; i < n; i++) if (tierOf[i] === tt) { groupOf[i] = snakeGroup(j, layout[tt]); j++; }
+  }
+  return { tierOf, groupOf };
 }
 
 /** The best five from a roster (2 duelists + 1 each, IGL = the sentinel) — what
@@ -81,24 +120,37 @@ export function planFive(c: WorldClub): Player[] {
 }
 export const clubTeam = (c: WorldClub): Team => ({ id: c.id, tag: c.tag, name: c.name, players: planFive(c) });
 
-/** Generate a fresh world from a seed: a strength-descending field split into
- *  `tiers` tiers of `size` (Premier at the top, the rank ladder below). */
-export function createWorld(seed: number, opts: { tiers?: number; size?: number; promo?: number; region?: string } = {}): WorldState {
+/** Generate a fresh world from a seed: a strength-descending field split into the
+ *  rank pyramid. `tiers` tiers of `size` (Premier at the top, the ladder below) by
+ *  default — pass `layout` (groups per tier, e.g. `[1,2,4]`) for the at-scale
+ *  fan-out where a tier is many parallel divisions, wider toward the base
+ *  (docs/PHASE2.md §3). The flat default (every tier one group) is byte-identical
+ *  to before fan-out. */
+export function createWorld(seed: number, opts: { tiers?: number; size?: number; promo?: number; region?: string; layout?: number[] } = {}): WorldState {
   const tiers = opts.tiers ?? 11, size = opts.size ?? 10, promo = opts.promo ?? 2;
-  const clubs = makeLeague(seed, tiers * size).map((c, i): WorldClub => ({
+  const layout = opts.layout ?? new Array<number>(tiers).fill(1);
+  const n = layout.reduce((a, b) => a + b, 0) * size;
+  const { tierOf, groupOf } = assignDivisions(layout, size, n);
+  const clubs = makeLeague(seed, n).map((c, i): WorldClub => ({
     id: c.team.id, name: c.team.name, tag: c.team.tag,
-    tier: Math.min(tiers - 1, Math.floor(i / size)), group: 0,
+    tier: tierOf[i], group: groupOf[i],
     roster: c.team.players, tactics: c.tactics, comp: {},
     strength: c.strength, balance: startingBalance(c.strength), titles: 0, owner: null,
   }));
-  return { seed, region: opts.region ?? 'AMER', tiers, size, promo, season: 1, day: 0, patch: fullPatch(PATCH, ALL_AGENTS), clubs, results: [] };
+  return { seed, region: opts.region ?? 'AMER', tiers: layout.length, size, promo, layout, season: 1, day: 0, patch: fullPatch(PATCH, ALL_AGENTS), clubs, results: [] };
 }
 
-const divisionOf = (w: WorldState) => w.clubs.map(c => c.tier);
-const tablesOf = (w: WorldState) => {
-  const div = divisionOf(w);
-  return Array.from({ length: w.tiers }, (_, t) => standings(w.clubs.length, w.results.filter(r => div[r.home] === t)).filter(s => div[s.club] === t));
-};
+/** A lookup of each `(tier, group)` division's final table (best-first), built once
+ *  from the season's results. A division's fixtures are intra-division, so filtering
+ *  results by the home club's `(tier, group)` selects exactly that table's games. */
+function divTables(w: WorldState): (tier: number, group: number) => ReturnType<typeof standings> {
+  const map = new Map<number, ReturnType<typeof standings>>();
+  for (const d of worldDivisions(w)) {
+    const res = w.results.filter(r => w.clubs[r.home].tier === d.tier && w.clubs[r.home].group === d.group);
+    map.set(divSeedOffset(d.tier, d.group), standings(w.clubs.length, res).filter(s => w.clubs[s.club].tier === d.tier && w.clubs[s.club].group === d.group));
+  }
+  return (tier, group) => map.get(divSeedOffset(tier, group)) ?? [];
+}
 
 /** Resolve ONE match-day across every division + apply that day's in-season
  *  development (the five who played grow on reps; reserves rust). This is the
@@ -112,14 +164,14 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
   schedules?: Matchday[][];
   resolve?: (fx: Fixture, seed: number, division: number) => MatchResult;
 } = {}): { results: MatchResult[]; clubs: WorldClub[] } {
-  const div = divisionOf(w);
-  const schedules = opts.schedules ?? Array.from({ length: w.tiers }, (_, t) => divisionSchedule(membersOf(div, t)));
+  const divs = worldDivisions(w);
+  const schedules = opts.schedules ?? divs.map(d => divisionSchedule(d.members));
   const seasonSeed = (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
   const total = schedules[0].length;
   const results: MatchResult[] = [];
-  schedules.forEach((sched, t) => sched[day].forEach((fx, slot) => {
-    const seed = fixtureSeed(seasonSeed, day, slot + t * 1000);
-    results.push(opts.resolve ? opts.resolve(fx, seed, t) : quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, seed));
+  divs.forEach((d, di) => schedules[di][day].forEach((fx, slot) => {
+    const seed = fixtureSeed(seasonSeed, day, slot + divSeedOffset(d.tier, d.group));
+    results.push(opts.resolve ? opts.resolve(fx, seed, d.tier) : quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, seed));
   }));
   const clubs = w.clubs.map(c => {
     const five = new Set(startingFive(c.roster).map(p => p.id));
@@ -133,8 +185,7 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
  *  (the server full-sims watched tiers instead; the math is the same). Loops the
  *  shared `resolveSeasonDay` with one season-long rng, so its stream is unchanged. */
 export function simulateSeason(w: WorldState): WorldState {
-  const div = divisionOf(w);
-  const schedules = Array.from({ length: w.tiers }, (_, t) => divisionSchedule(membersOf(div, t)));
+  const schedules = worldDivisions(w).map(d => divisionSchedule(d.members));
   const devRng = new Rng((w.seed ^ (w.season * 0x2545f491)) >>> 0);
   const total = schedules[0].length;
   const results: MatchResult[] = [];
@@ -153,14 +204,14 @@ export interface Rollover { world: WorldState; champion: number; moves: DivMove[
  *  club's books by division rank, develop every squad, shift the meta, then
  *  promote/relegate across all boundaries. Returns the new world + the events. */
 export function advanceWorld(w: WorldState): Rollover {
-  const tables = tablesOf(w);
-  const div = divisionOf(w);
-  const rankIn = (i: number) => tables[div[i]].findIndex(s => s.club === i) + 1;
-  // the Premier crowns a champion via the playoff bracket (quick-resolved, so the
-  // map veto is trivial here — strength-vs-strength is map-agnostic)
-  const bracket = runPlayoffs(tables[0], w.seed, w.season, ['ascent'], () => 0, (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
-  const champion = bracket.champion ?? tables[0][0].club;
-  const poPrize = (i: number) => div[i] === 0 ? playoffPrize(finishOf(bracket, i)) : 0;
+  const tableOf = divTables(w);
+  const rankIn = (i: number) => { const c = w.clubs[i]; return tableOf(c.tier, c.group).findIndex(s => s.club === i) + 1; };
+  // the Premier (tier 0, always one group) crowns a champion via the playoff
+  // bracket (quick-resolved, so the map veto is trivial — strength is map-agnostic)
+  const premier = tableOf(0, 0);
+  const bracket = runPlayoffs(premier, w.seed, w.season, ['ascent'], () => 0, (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
+  const champion = bracket.champion ?? premier[0].club;
+  const poPrize = (i: number) => w.clubs[i].tier === 0 ? playoffPrize(finishOf(bracket, i)) : 0;
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);
   let clubs = w.clubs.map((c, i): WorldClub => {
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster), playoff: poPrize(i) });
@@ -168,7 +219,12 @@ export function advanceWorld(w: WorldState): Rollover {
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0) };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
-  const pr = promoteRelegate(div, tables, w.promo);
-  clubs = clubs.map((c, i) => ({ ...c, tier: pr.division[i] }));
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [] }, champion, moves: pr.moves, notes: meta.changes };
+  // the funnel: promote/relegate across all boundaries + regroup each tier (reduces
+  // to plain promote/relegate when every tier is one group — the flat world)
+  const fr = funnelPromoteRelegate({
+    tiers: clubs.map(c => c.tier), groups: clubs.map(c => c.group), layout: w.layout, k: w.promo,
+    tableOf, strengthOf: i => w.clubs[i].strength,
+  });
+  clubs = clubs.map((c, i) => ({ ...c, tier: fr.tiers[i], group: fr.groups[i] }));
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [] }, champion, moves: fr.moves, notes: meta.changes };
 }
