@@ -1,0 +1,27 @@
+# Local Postgres + Redis for the Phase-2 server (docs/PHASE2.md §5/§6). Postgres is
+# the persistence boundary (the WorldStore/AccountStore tables in migrations/);
+# Redis backs the BullMQ tick scheduler. Bring up with `docker compose up -d`, then
+# apply the schema: `psql "$DATABASE_URL" -f migrations/0001_init.sql`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ace
+      POSTGRES_PASSWORD: ace
+      POSTGRES_DB: ace
+    ports: ['5432:5432']
+    volumes: ['ace_pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ace']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    volumes: ['ace_redisdata:/data']
+
+volumes:
+  ace_pgdata:
+  ace_redisdata:

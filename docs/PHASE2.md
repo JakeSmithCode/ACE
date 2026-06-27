@@ -365,7 +365,15 @@ not a sim rewrite.
    tables mirror `WorldClub`/`fixture`). 🟡 *Partial — `apps/server` defines the
    persistence boundary (`WorldStore`: world snapshot + `fixture` rows + the
    idempotency `tick_log`) and `seedWorld(store, …)`, with a `MemoryStore` impl.
-   The `PgStore` (same interface) + migrations are the remaining half.*
+   **The migrations are in** (`infra/migrations/0001_init.sql` — the full §5 schema:
+   `account`/`refresh_token`, `world`, `club`, `player`, `fixture`, `listing`/
+   `transfer`, `honor`, `tick_log`; `jsonb` holds the value objects verbatim so a
+   `world`+`club`+`player` row set IS a `WorldState`), plus `infra/docker-compose.yml`
+   (Postgres 16 + Redis 7) and `infra/README.md`. The remaining half is the `PgStore`/
+   `PgAccountStore` — the **same** `WorldStore`/`AccountStore` interfaces the
+   `MemoryStore` already implements, backed by these tables; mechanical wiring that
+   changes no resolution code (the schema artifact is committed but not yet applied
+   against a live DB in CI).*
 3. **Self-owned auth** (register/verify/login/refresh). ✅ *Done — `auth.ts` +
    `accounts.ts`, **zero-dep** (node `crypto`: scrypt password hash, a hand-rolled
    HS256 JWT access token, an opaque rotating refresh token stored hashed). The
