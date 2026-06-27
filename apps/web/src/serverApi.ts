@@ -15,8 +15,14 @@ export interface LiveFixture {
   final: [number, number] | null; home: ClubLabel; away: ClubLabel; map: MapId | null;
 }
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
+export interface Session { accountId: string; accessToken: string; refreshToken: string }
+export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: unknown }
 
-const j = async <T>(r: Response): Promise<T> => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json() as Promise<T>; };
+const j = async <T>(r: Response): Promise<T> => {
+  if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
+  return r.json() as Promise<T>;
+};
 
 /** A handle to one live server. `base` is its origin (e.g. http://127.0.0.1:8787). */
 export class AceServer {
@@ -30,6 +36,23 @@ export class AceServer {
   async replay(season: number, day: number, slot: number): Promise<ReplayPayload | null> {
     const r = await fetch(`${this.base}/fixtures/${season}/${day}/${slot}/replay`);
     return r.status === 425 ? null : await j<ReplayPayload>(r);
+  }
+
+  // ── identity + ownership (self-owned auth → claim a club → author its plan) ──
+  private post<T>(path: string, body: unknown, token?: string): Promise<T> {
+    return fetch(`${this.base}${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    }).then(r => j<T>(r));
+  }
+  register(email: string, password: string): Promise<Session> { return this.post('/auth/register', { email, password }); }
+  login(email: string, password: string): Promise<Session> { return this.post('/auth/login', { email, password }); }
+  /** Claim an AI club (by tag or id) for the bearer's account. */
+  claim(clubTag: string, token: string): Promise<ClubPage> { return this.post(`/clubs/${clubTag}/claim`, {}, token); }
+  /** The club this account owns (null if none). */
+  async me(token: string): Promise<ClubPage | null> {
+    const r = await fetch(`${this.base}/me`, { headers: { authorization: `Bearer ${token}` } });
+    return r.ok ? (r.json() as Promise<ClubPage | null>) : null;
   }
 
   /** Subscribe to a day's synced live match-center (SSE). `onFrame` fires ~1/s with

@@ -78,6 +78,12 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
+    // CORS preflight: a cross-origin POST/PATCH with a JSON body or Authorization
+    // header triggers an OPTIONS preflight — answer it so the browser allows the call.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS', 'access-control-allow-headers': 'content-type,authorization', 'access-control-max-age': '600' });
+      return res.end();
+    }
     const path = (req.url ?? '/').split('?')[0].split('/').filter(Boolean);
     // the account making the request: a verified Bearer access token (the
     // `x-account` header is a dev fallback for unauthenticated local pokes).

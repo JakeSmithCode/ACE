@@ -8,8 +8,9 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import type { MapId } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
+import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -30,6 +31,33 @@ async function ensureNav(map: MapId) {
   return navs[map];
 }
 
+// --- identity: register / log in → claim a Premier club (the async-PvP loop) ---
+const token = ref<string | null>(null);
+const myClub = ref<ClubPage | null>(null);
+const authOpen = ref(false);
+const authMode = ref<'register' | 'login'>('register');
+const email = ref(''); const password = ref(''); const authErr = ref(''); const busy = ref(false);
+const claimTag = ref('');
+const authed = computed(() => !!token.value);
+const tierName = (t: number) => RANK_TIERS[t] ?? `T${t}`;
+const mine = (tag: string) => myClub.value?.tag === tag;
+
+async function doAuth() {
+  if (!server.value) return; busy.value = true; authErr.value = '';
+  try {
+    const s = authMode.value === 'register' ? await server.value.register(email.value, password.value) : await server.value.login(email.value, password.value);
+    token.value = s.accessToken; authOpen.value = false; password.value = '';
+    await refreshMe();
+  } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
+async function refreshMe() { if (server.value && token.value) myClub.value = await server.value.me(token.value).catch(() => null); }
+async function doClaim() {
+  if (!server.value || !token.value || !claimTag.value) return; busy.value = true; authErr.value = '';
+  try { myClub.value = await server.value.claim(claimTag.value, token.value); }
+  catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
+function signOut() { token.value = null; myClub.value = null; authErr.value = ''; }
+
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
 // the score to display: the running (completed-round) tally while live, but the TRUE
 // final once revealed (the live running-score excludes the in-progress decider round)
@@ -44,6 +72,7 @@ async function connect() {
     world.value = await s.world();
     table.value = (await s.standings(world.value.season, 0, 0)).table;
     server.value = s; status.value = 'live';
+    await refreshMe();
     stopStream?.();
     stopStream = s.liveStream(world.value.season, DAY, fs => { fixtures.value = [...fs].sort((a, b) => a.slot - b.slot); }, refreshTable);
     // standings only move at reveal — refresh them every few seconds while watching
@@ -100,6 +129,39 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
     <div v-else-if="status === 'connecting'" class="lv-err lv-wait">Connecting to {{ url }}…</div>
 
     <template v-if="status === 'live' && world">
+      <!-- identity: sign in → claim a Premier club → your matches are marked -->
+      <div class="lv-ident">
+        <template v-if="myClub">
+          <span class="lv-mine">★ YOUR CLUB</span>
+          <i class="lv-badge id" :style="{ background: `hsl(${hue(myClub.tag)} 60% 24%)`, borderColor: `hsl(${hue(myClub.tag)} 65% 55%)` }">{{ myClub.tag }}</i>
+          <b class="lv-myname">{{ myClub.name }}</b>
+          <span class="lv-tier">{{ tierName(myClub.tier) }} · {{ myClub.rating }} OVR</span>
+          <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
+          <button class="lv-signout" @click="signOut">sign out</button>
+        </template>
+        <template v-else-if="authed">
+          <span class="lv-signedin">● signed in</span>
+          <span class="lv-claimlbl">claim a Premier club</span>
+          <select v-model="claimTag" class="lv-claimsel"><option value="">choose…</option><option v-for="s in table" :key="s.club" :value="s.club">{{ s.club }}</option></select>
+          <button class="lv-go sm" :disabled="!claimTag || busy" @click="doClaim">claim</button>
+          <button class="lv-signout" @click="signOut">sign out</button>
+          <span v-if="authErr" class="lv-autherr">{{ authErr }}</span>
+        </template>
+        <template v-else>
+          <button class="lv-signin" @click="authOpen = !authOpen">⬡ Sign in to claim a club</button>
+          <div v-if="authOpen" class="lv-authpanel">
+            <div class="lv-authtabs">
+              <button :class="{ on: authMode === 'register' }" @click="authMode = 'register'">Register</button>
+              <button :class="{ on: authMode === 'login' }" @click="authMode = 'login'">Log in</button>
+            </div>
+            <input v-model="email" placeholder="email" class="lv-authin" spellcheck="false" />
+            <input v-model="password" type="password" placeholder="password (8+ chars)" class="lv-authin" @keyup.enter="doAuth" />
+            <button class="lv-go sm" :disabled="busy" @click="doAuth">{{ authMode === 'register' ? 'Create account' : 'Log in' }}</button>
+            <span v-if="authErr" class="lv-autherr">{{ authErr }}</span>
+          </div>
+        </template>
+      </div>
+
       <!-- the day's live matches -->
       <div class="lv-stage">
         <div class="lv-stageh">
@@ -108,7 +170,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <span class="lv-embargo" v-if="anyLive">results sealed until each broadcast ends — no spoilers</span>
         </div>
         <div class="lv-cards">
-          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="f.status">
+          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag) }]">
             <div class="lv-team">
               <i class="lv-badge" :style="{ background: `hsl(${hue(f.home.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.home.tag)} 65% 55%)` }">{{ f.home.tag }}</i>
               <span class="lv-tname">{{ f.home.name }}</span>
@@ -149,9 +211,9 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
       <div class="lv-table">
         <div class="lv-tableh"><span class="lv-kicker">Premier standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
         <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
-        <div v-for="(s, rank) in table" :key="s.club" class="lv-trow">
+        <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
           <span class="r">{{ rank + 1 }}</span>
-          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname">{{ s.club }}</span></span>
+          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
           <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
           <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
           <span class="pts">{{ s.points }}</span>

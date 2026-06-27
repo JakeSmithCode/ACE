@@ -734,3 +734,28 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-table{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:14px 16px;max-width:560px}
 .lv-tableh{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}
 .lv-note{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--muted-2)}
+/* Match Center — identity / ownership */
+.lv-ident{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--brand);clip-path:var(--bevel);padding:11px 16px;margin-bottom:16px;min-height:48px}
+.lv-mine{font-family:var(--label);font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--gold)}
+.lv-badge.id{width:30px;height:30px;font-size:12px}
+.lv-myname{font-family:var(--display);font-size:18px;letter-spacing:.02em}
+.lv-tier{font-family:var(--label);font-size:11px;letter-spacing:.06em;color:var(--brand);text-transform:uppercase}
+.lv-five{font-family:var(--body);font-size:11px;color:var(--muted);margin-left:2px}
+.lv-signedin{font-family:var(--label);font-size:11px;letter-spacing:.08em;color:var(--win);text-transform:uppercase}
+.lv-claimlbl{font-family:var(--label);font-size:11px;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.lv-claimsel{background:#0a121b;border:1px solid var(--line-2);color:var(--text);font-family:var(--label);font-size:12px;padding:6px 10px;clip-path:var(--bevel)}
+.lv-signin{background:rgba(229,181,103,.12);border:1px solid rgba(229,181,103,.4);color:var(--gold);font-family:var(--label);font-weight:600;font-size:12px;letter-spacing:.05em;padding:8px 16px;cursor:pointer;clip-path:var(--bevel)}
+.lv-signin:hover{background:rgba(229,181,103,.2)}
+.lv-signout{margin-left:auto;background:none;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:11px;padding:6px 12px;cursor:pointer;clip-path:var(--bevel)}
+.lv-signout:hover{color:var(--text)}
+.lv-go.sm{padding:6px 14px;font-size:11px}
+.lv-authpanel{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;margin-top:4px;padding-top:11px;border-top:1px solid var(--line)}
+.lv-authtabs{display:flex;gap:0}
+.lv-authtabs button{background:#0a121b;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:11px;letter-spacing:.05em;padding:6px 13px;cursor:pointer}
+.lv-authtabs button.on{color:var(--brand);border-color:rgba(34,211,238,.5);background:rgba(34,211,238,.1)}
+.lv-authin{background:#0a121b;border:1px solid var(--line-2);color:var(--text);font-family:var(--body);font-size:12px;padding:8px 11px;width:190px;clip-path:var(--bevel)}
+.lv-autherr{font-family:var(--label);font-size:11px;color:var(--def);letter-spacing:.03em}
+.lv-card.mine{border-color:rgba(229,181,103,.5);box-shadow:0 0 0 1px rgba(229,181,103,.25),0 8px 26px rgba(0,0,0,.4)}
+.lv-trow.mine{background:rgba(229,181,103,.07)}
+.lv-trow.mine .lv-cname{color:var(--gold)}
+.lv-youtag{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.1em;color:var(--gold);border:1px solid rgba(229,181,103,.5);padding:1px 4px;margin-left:6px}
