@@ -16,6 +16,7 @@ import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
+import { buildCircuitView, type CircuitView } from './circuitView.js';
 import { randomBytes } from 'node:crypto';
 
 export interface LiveServerOpts {
@@ -63,6 +64,8 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   const store = new MemoryStore();
   const id = seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
   const auth = new AuthService(new MemoryAccountStore(), randomBytes(32).toString('hex'), clock);
+  const circuitSeed = opts.seed ?? 7;
+  let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
   const kickoffAt = clock();
   runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt, broadcastSecs });
 
@@ -145,6 +148,11 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     if (path[0] === 'standings' && path.length === 4) {
       const w = store.loadWorld(id)!;
       return json(res, 200, { tier: +path[2], group: +path[3], table: standingsView(w, store.fixtures(id, +path[1]), +path[2], +path[3], now) });
+    }
+    // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
+    if (path[0] === 'circuit' && path.length === 1) {
+      if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
+      return json(res, 200, circuit);
     }
     // GET /world  → the shard summary (region, clock, the division pyramid)
     if (path[0] === 'world' && path.length === 1) {

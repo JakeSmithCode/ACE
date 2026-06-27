@@ -776,3 +776,37 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-plansave{display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:170px;border-left:1px solid var(--line);padding-left:24px}
 .lv-savedok{font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--win)}
 .lv-plannote{font-family:var(--body);font-size:11px;color:var(--muted-2);line-height:1.4}
+/* ── Circuit (international / Masters) ────────────────────────────────────── */
+.cir{max-width:1240px;margin:0 auto;padding:18px 22px 40px}
+.cir-champ{display:flex;align-items:center;gap:18px;background:linear-gradient(110deg,rgba(229,181,103,.1),var(--bg-2) 60%);border:1px solid var(--line);border-left:3px solid var(--ch,var(--gold));clip-path:var(--bevel);padding:18px 24px;margin-bottom:18px}
+.cir-trophy{font-size:40px;filter:drop-shadow(0 0 14px rgba(229,181,103,.5))}
+.cir-champmeta{display:flex;flex-direction:column;gap:3px}
+.cir-champk{font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
+.cir-champname{font-family:var(--display);font-size:30px;line-height:1;letter-spacing:.01em}
+.cir-champreg{font-family:var(--label);font-size:12px;letter-spacing:.08em;color:var(--ch,var(--text));text-transform:uppercase}
+.cir-watch{margin-left:auto;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.4);color:var(--brand);font-family:var(--label);font-weight:600;font-size:13px;letter-spacing:.04em;padding:11px 22px;cursor:pointer;clip-path:var(--bevel)}
+.cir-watch:hover{background:rgba(34,211,238,.22)}
+.cir-regions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+.cir-region{background:var(--bg-2);border:1px solid var(--line);border-top:2px solid var(--rg);clip-path:var(--bevel);padding:13px 15px}
+.cir-regh{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.06em;color:var(--rg)}
+.cir-regch{font-family:var(--label);font-size:12px;color:var(--text);margin:6px 0 9px}
+.cir-regtop{display:flex;flex-wrap:wrap;gap:5px}
+.cir-regtop span{font-family:var(--label);font-size:11px;color:var(--muted-2);border:1px solid var(--line-2);padding:2px 7px}
+.cir-regtop span.q{color:var(--text);border-color:var(--rg);background:rgba(255,255,255,.03)}
+.cir-reglbl{font-family:var(--label);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2);margin-top:9px}
+.cir-brackwrap{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:18px 20px}
+.cir-brackh{font-family:var(--label);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+.cir-brack{display:flex;gap:30px;align-items:center;overflow-x:auto}
+.cir-col{display:flex;flex-direction:column;gap:18px;justify-content:space-around;min-width:170px}
+.cir-colh{font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);text-align:center;margin-bottom:2px}
+.cir-match{display:flex;flex-direction:column;gap:3px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel);padding:7px 9px}
+.cir-match.fin{border-color:rgba(229,181,103,.4);box-shadow:0 0 0 1px rgba(229,181,103,.2)}
+.cir-side{display:flex;align-items:center;gap:8px;padding:4px 5px;opacity:.55}
+.cir-side.win{opacity:1}
+.cir-side .cir-reg{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;background:var(--s);padding:2px 5px;font-style:normal;flex:none}
+.cir-side b{font-family:var(--display);font-size:17px;letter-spacing:.02em}
+.cir-side .cir-sc{margin-left:auto;font-family:var(--display);font-weight:700;font-size:17px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.cir-side.win .cir-sc{color:var(--text)}
+.cir-side.champ{background:linear-gradient(90deg,rgba(229,181,103,.18),transparent)}
+.cir-side.champ b{color:var(--gold)}
+.cir-finmap{font-family:var(--label);font-size:9px;letter-spacing:.06em;color:var(--muted-2);text-align:center;margin-top:3px;text-transform:uppercase}

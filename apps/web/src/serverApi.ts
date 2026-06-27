@@ -20,6 +20,18 @@ export interface FivePlayer { handle: string; role: string; overall: number; igl
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
 export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan }
 
+export interface IntlSide { region: string; tag: string }
+export interface CircuitView {
+  seed: number;
+  regions: { region: string; champion: string; top: string[] }[];
+  bracket: {
+    field: IntlSide[];
+    rounds: { round: number; a: IntlSide; b: IntlSide; winner: IntlSide }[][];
+    champion: { region: string; tag: string; name: string };
+  };
+  final: { a: IntlSide; b: IntlSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput; prize: number };
+}
+
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
   return r.json() as Promise<T>;
@@ -30,6 +42,7 @@ export class AceServer {
   constructor(public base: string) { this.base = base.replace(/\/$/, ''); }
 
   world(): Promise<WorldSummary> { return fetch(`${this.base}/world`).then(r => j<WorldSummary>(r)); }
+  circuit(): Promise<CircuitView> { return fetch(`${this.base}/circuit`).then(r => j<CircuitView>(r)); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }
