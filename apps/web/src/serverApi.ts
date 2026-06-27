@@ -6,7 +6,7 @@
 // ownership write-path (claim/plan) rides the same base.
 import type { MatchInput, MapId, Tactics } from '@ace/shared';
 
-export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number }
+export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number; broadcastDay: number; lastDay: number; kickoffAt: number; revealAt: number; now: number }
 export interface StandingRow { club: string; played: number; won: number; lost: number; diff: number; points: number }
 export interface ClubLabel { tag: string; name: string }
 export interface LiveFixture {
@@ -79,6 +79,8 @@ export class AceServer {
   bid(handle: string, amount: number, token: string): Promise<BidResult> { return this.post('/market/bid', { handle, amount }, token); }
   /** Sell a rostered player to the richest willing AI club (market fee). */
   sell(ref: string, token: string): Promise<SaleResult> { return this.post('/market/sell', { ref }, token); }
+  /** Advance the season a match-day (owner action — the scheduler does this in prod). */
+  advance(token: string): Promise<{ broadcastDay: number; done: boolean }> { return this.post('/advance', {}, token); }
 
   /** Author your club's plan — the tactics that drive your matches on the next tick. */
   setPlan(tactics: Tactics, token: string): Promise<ClubPlan> {

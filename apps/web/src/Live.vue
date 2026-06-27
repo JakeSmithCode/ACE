@@ -24,7 +24,8 @@ let stopStream: (() => void) | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 const season = computed(() => world.value?.season ?? 1);
-const DAY = 0;   // the server demo broadcasts day 0
+const DAY = ref(0);   // the match-day currently on air (the server's broadcast cursor)
+const advancing = ref(false);
 const navs: Record<string, any> = {};
 async function ensureNav(map: MapId) {
   if (!navs[map]) navs[map] = await fetch(`/${map}.navmesh.json`).then(r => r.json());
@@ -120,15 +121,30 @@ async function connect() {
   const s = new AceServer(url.value);
   try {
     world.value = await s.world();
+    DAY.value = world.value.broadcastDay ?? 0;
     table.value = (await s.standings(world.value.season, 0, 0)).table;
     server.value = s; status.value = 'live';
     await refreshMe();
-    stopStream?.();
-    stopStream = s.liveStream(world.value.season, DAY, fs => { fixtures.value = [...fs].sort((a, b) => a.slot - b.slot); }, refreshTable);
+    openStream();
     // standings only move at reveal — refresh them every few seconds while watching
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refreshTable, 4000);
   } catch (e) { status.value = 'error'; errMsg.value = (e as Error).message; }
+}
+function openStream() {
+  if (!server.value || !world.value) return;
+  stopStream?.();
+  fixtures.value = [];
+  stopStream = server.value.liveStream(world.value.season, DAY.value, fs => { fixtures.value = [...fs].sort((a, b) => a.slot - b.slot); }, refreshTable);
+}
+// advance the season a match-day — your authored tactics drive your next fixtures
+async function advance() {
+  if (!server.value || !token.value) return;
+  advancing.value = true;
+  try {
+    const r = await server.value.advance(token.value);
+    if (!r.done) { DAY.value = r.broadcastDay; if (world.value) world.value = await server.value.world(); openStream(); await refreshTable(); await refreshMe(); }
+  } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
 
@@ -141,7 +157,7 @@ async function watch(fx: LiveFixture) {
   if (!server.value || fx.status !== 'resolved') return;
   loadingWatch.value = true;
   try {
-    const rep = await server.value.replay(season.value, DAY, fx.slot);
+    const rep = await server.value.replay(season.value, DAY.value, fx.slot);
     if (!rep?.snapshot) return;
     const map = rep.snapshot.map;
     const nav = await ensureNav(map);
@@ -277,9 +293,11 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
       <!-- the day's live matches -->
       <div class="lv-stage">
         <div class="lv-stageh">
-          <span class="lv-kicker">Premier · Match-day {{ DAY + 1 }}</span>
+          <span class="lv-kicker">Premier · Match-day {{ DAY + 1 }}<template v-if="world"> / {{ world.lastDay + 1 }}</template></span>
           <span class="lv-livetag" :class="{ on: anyLive }">{{ anyLive ? '● LIVE' : allDone ? 'FINAL' : '—' }}</span>
           <span class="lv-embargo" v-if="anyLive">results sealed until each broadcast ends — no spoilers</span>
+          <button v-if="myClub && allDone && world && DAY < world.lastDay" class="lv-advance" :disabled="advancing" @click="advance">▶ advance match-day</button>
+          <span v-else-if="myClub && allDone && world && DAY >= world.lastDay" class="lv-seasondone">season complete · playoffs next</span>
         </div>
         <div class="lv-cards">
           <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag) }]">

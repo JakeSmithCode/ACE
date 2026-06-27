@@ -843,3 +843,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-sellbtn{background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.4);color:var(--def);font-family:var(--label);font-weight:600;font-size:11px;letter-spacing:.05em;padding:6px 16px;cursor:pointer;clip-path:var(--bevel);transition:background .12s ease}
 .lv-sellbtn:hover{background:rgba(255,92,110,.2)}
 .lv-sellbtn:disabled{opacity:.5;cursor:default}
+/* Match Center — advance the season */
+.lv-advance{margin-left:auto;background:rgba(34,211,238,.14);border:1px solid rgba(34,211,238,.45);color:var(--brand);font-family:var(--label);font-weight:600;font-size:12px;letter-spacing:.05em;padding:7px 16px;cursor:pointer;clip-path:var(--bevel);transition:background .12s ease}
+.lv-advance:hover{background:rgba(34,211,238,.24)}
+.lv-advance:disabled{opacity:.5;cursor:default}
+.lv-seasondone{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.06em;color:var(--gold);text-transform:uppercase}

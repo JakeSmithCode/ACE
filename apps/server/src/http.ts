@@ -12,7 +12,7 @@ import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule,
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
-import { runTick } from './tick.js';
+import { runTick, seasonLength } from './tick.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
@@ -72,12 +72,31 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   let board: Player[] | undefined;
   const sold = new Set<string>();
   const getBoard = () => (board ??= marketBoard(store.loadWorld(id)!));
-  const kickoffAt = clock();
-  runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt, broadcastSecs });
+  // the live broadcast cursor — which match-day is on air + when it kicked off. Mutable
+  // so the season can PROGRESS: `advance` ticks the next day and moves the cursor.
+  let liveDay = 0;
+  let liveKickoff = clock();
+  runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
 
-  // re-sim each watchable fixture once → the live source the match-center streams
+  // re-sim each watchable fixture once → the live source the match-center streams.
+  // Keyed by season:day:slot, so days accumulate as the season advances.
   const timelines = new Map<string, MatchTimeline>();
-  for (const f of store.fixtures(id, 1)) if (f.inputSnapshot) timelines.set(key(f), simulateMatch(f.inputSnapshot, navOf(f.inputSnapshot.map), 0));
+  const cacheDay = (season: number, day: number) => {
+    for (const f of store.fixtures(id, season)) if (f.day === day && f.inputSnapshot && !timelines.has(key(f))) timelines.set(key(f), simulateMatch(f.inputSnapshot, navOf(f.inputSnapshot.map), 0));
+  };
+  cacheDay(1, 0);
+  /** Tick the next match-day onto the air (a fresh broadcast window). The owner's
+   *  authored tactics drive their fixtures, so a season plays out under your plan. */
+  const advance = (): { broadcastDay: number; done: boolean } => {
+    const w = store.loadWorld(id)!;
+    if (w.day >= seasonLength(w)) return { broadcastDay: liveDay, done: true };   // season's match-days exhausted
+    const day = w.day;
+    liveKickoff = clock();
+    runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
+    liveDay = day;
+    cacheDay(w.season, day);
+    return { broadcastDay: liveDay, done: false };
+  };
   const fixtureAt = (season: number, day: number, slot: number): FixtureRow | undefined =>
     store.fixtures(id, season).find(f => f.day === day && f.slot === slot);
   // a static tag/name lookup (club identities don't change tag) — for labelling the
@@ -99,7 +118,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     const account = (bearer && auth.verify(bearer)) || (req.headers['x-account'] as string | undefined) || null;
 
-    if (path[0] === 'health') return json(res, 200, { ok: true, id, now, kickoffAt, revealAt: kickoffAt + broadcastSecs });
+    if (path[0] === 'health') return json(res, 200, { ok: true, id, now, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs });
 
     // ── self-owned auth (§5/§9): register / login / refresh ──────────────────
     if (path[0] === 'auth' && req.method === 'POST') {
@@ -196,10 +215,17 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
       if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
       return json(res, 200, circuit);
     }
-    // GET /world  → the shard summary (region, clock, the division pyramid)
+    // GET /world  → the shard summary (region, clock, the division pyramid + the
+    // live broadcast cursor so the client streams the right match-day)
     if (path[0] === 'world' && path.length === 1) {
       const w = store.loadWorld(id)!;
-      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length });
+      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs, lastDay: seasonLength(w) - 1, now });
+    }
+    // POST /advance  → tick the next match-day onto the air (owner action; the
+    // scheduler does this in production). The day reveals, the standings move.
+    if (path[0] === 'advance' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      return json(res, 200, advance());
     }
     // GET /schedule/:tier/:group  → a division's fixtures (pure, with live status)
     if (path[0] === 'schedule' && path.length === 3) {
