@@ -21,3 +21,4 @@ export * from './market.js';
 export * from './scouting.js';
 export * from './meta.js';
 export * from './transfers.js';
+export * from './worldMarket.js';

@@ -16,9 +16,11 @@ export interface LiveFixture {
 }
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean }
+export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -68,6 +70,12 @@ export class AceServer {
     const r = await fetch(`${this.base}/me`, { headers: { authorization: `Bearer ${token}` } });
     return r.ok ? (r.json() as Promise<ClubPage | null>) : null;
   }
+  /** The free-agent board (value + contested flag). */
+  market(): Promise<{ board: MarketEntry[] }> { return fetch(`${this.base}/market`).then(r => j<{ board: MarketEntry[] }>(r)); }
+  /** Bid on a free agent — signs if you clear the asking price AND beat the rival
+   *  ceiling; otherwise returns the leader + their bid so you can raise or walk. */
+  bid(handle: string, amount: number, token: string): Promise<BidResult> { return this.post('/market/bid', { handle, amount }, token); }
+
   /** Author your club's plan — the tactics that drive your matches on the next tick. */
   setPlan(tactics: Tactics, token: string): Promise<ClubPlan> {
     return fetch(`${this.base}/me/plan`, {

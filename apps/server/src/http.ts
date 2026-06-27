@@ -8,7 +8,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, type WorldState, type WorldClub } from '@ace/world';
+import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick } from './tick.js';
@@ -66,6 +67,11 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   const auth = new AuthService(new MemoryAccountStore(), randomBytes(32).toString('hex'), clock);
   const circuitSeed = opts.seed ?? 7;
   let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
+  // the transfer market: a free-agent board built once (stable) + a `sold` set of
+  // handles already signed this session (a regenerated board would shift, so cache it)
+  let board: Player[] | undefined;
+  const sold = new Set<string>();
+  const getBoard = () => (board ??= marketBoard(store.loadWorld(id)!));
   const kickoffAt = clock();
   runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt, broadcastSecs });
 
@@ -149,6 +155,28 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
       const w = store.loadWorld(id)!;
       return json(res, 200, { tier: +path[2], group: +path[3], table: standingsView(w, store.fixtures(id, +path[1]), +path[2], +path[3], now) });
     }
+    // GET /market  → the free-agent board (value + contested flag, current world)
+    if (path[0] === 'market' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
+      const w = store.loadWorld(id)!;
+      return json(res, 200, { board: getBoard().filter(p => !sold.has(p.handle)).map(p => marketEntry(w, p)) });
+    }
+    // POST /market/bid  → bid on a free agent (the war); signs if you clear the field
+    if (path[0] === 'market' && path[1] === 'bid' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { handle?: string; amount?: number };
+      const player = getBoard().find(p => p.handle === b.handle && !sold.has(p.handle));
+      if (!player) return json(res, 404, { error: 'not on the board' });
+      const w = store.loadWorld(id)!;
+      const clubIdx = w.clubs.findIndex(c => c.id === mine.id);
+      const result = resolveWorldBid(w, clubIdx, player, b.amount ?? 0);
+      if (!result.ok) return json(res, 200, result);                 // outbid / below / broke → raise or walk
+      sold.add(player.handle);
+      store.saveWorld(id, applySigning(w, mine.id, player, result.paid!));
+      const after = store.loadWorld(id)!;
+      return json(res, 200, { ...result, club: publicClub(after, after.clubs[clubIdx]) });
+    }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {
       if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
@@ -175,7 +203,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     if (path[0] === 'me' && path.length === 1) {
       if (!account) return json(res, 401, { error: 'no account' });
       const c = myClub(store, id, account);
-      return json(res, 200, c ? { ...publicClub(store.loadWorld(id)!, c), plan: planOf(c) } : null);
+      return json(res, 200, c ? { ...publicClub(store.loadWorld(id)!, c), plan: planOf(c), balance: c.balance } : null);
     }
     // POST /clubs/:id/claim  → take over an AI club (x-account)
     if (path[0] === 'clubs' && path.length === 3 && path[2] === 'claim' && req.method === 'POST') {

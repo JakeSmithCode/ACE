@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -70,6 +70,32 @@ async function savePlan() {
 }
 const readLabel = (v: number) => v <= -0.34 ? 'stack B' : v >= 0.34 ? 'stack A' : 'spread';
 const pct = (v: number) => Math.round(v * 100) + '%';
+
+// --- the transfer market — bid on free agents (a real bidding war) ------------
+const marketOpen = ref(false);
+const board = ref<MarketEntry[]>([]);
+const bidAmt = ref<Record<string, number>>({});
+const bidMsg = ref<Record<string, string>>({});
+const marketBusy = ref(false);
+const kfmt = (n: number) => '$' + (n / 1000).toFixed(1) + 'k';
+async function loadBoard() {
+  if (!server.value) return;
+  try { board.value = (await server.value.market()).board; bidAmt.value = Object.fromEntries(board.value.map(e => [e.handle, e.value])); }
+  catch (e) { authErr.value = (e as Error).message; }
+}
+async function toggleMarket() { marketOpen.value = !marketOpen.value; if (marketOpen.value && !board.value.length) await loadBoard(); }
+async function bid(e: MarketEntry) {
+  if (!server.value || !token.value) return; marketBusy.value = true;
+  const msg = (m: string) => (bidMsg.value = { ...bidMsg.value, [e.handle]: m });
+  msg('');
+  try {
+    const r = await server.value.bid(e.handle, bidAmt.value[e.handle] ?? e.value, token.value);
+    if (r.ok) { msg(`✓ signed for ${kfmt(r.paid!)}`); await loadBoard(); await refreshMe(); }
+    else if (r.reason === 'outbid') msg(`outbid by ${r.leader} (${kfmt(r.leadBid!)}) — raise`);
+    else if (r.reason === 'below asking price') msg(`below asking (${kfmt(r.leadBid!)})`);
+    else msg(r.reason ?? 'rejected');
+  } catch (err) { msg((err as Error).message); } finally { marketBusy.value = false; }
+}
 
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
 // the score to display: the running (completed-round) tally while live, but the TRUE
@@ -151,6 +177,8 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <span class="lv-tier">{{ tierName(myClub.tier) }} · {{ myClub.rating }} OVR</span>
           <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
           <button class="lv-planbtn" :class="{ on: planOpen }" @click="planOpen = !planOpen">✎ tactics</button>
+          <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
+          <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <button class="lv-signout" @click="signOut">sign out</button>
         </template>
         <template v-else-if="authed">
@@ -198,6 +226,27 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <span v-if="planSaved" class="lv-savedok">✓ saved — drives your next match</span>
             <span class="lv-plannote">authored tactics resolve on the server tick (the read-vs-site mind-game is real)</span>
           </div>
+        </div>
+      </div>
+
+      <!-- the transfer market — bid on free agents (a real bidding war vs the AI clubs) -->
+      <div v-if="myClub && marketOpen" class="lv-mktpanel">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Free agents</span>
+          <span class="lv-mktsub">a bid must clear the asking price <b>and</b> beat the top rival club — a 🔥 contested player goes above value</span>
+        </div>
+        <div class="lv-mktboard">
+          <div v-for="e in board" :key="e.handle" class="lv-mktrow">
+            <span class="rs-role" :class="e.role">{{ e.role.slice(0, 3).toUpperCase() }}</span>
+            <b class="lv-mkthandle">{{ e.handle }}</b>
+            <span class="lv-mktage">age {{ e.age }}</span>
+            <span class="lv-mktovr">{{ e.overall }} <i>OVR</i></span>
+            <span class="lv-mktval">{{ kfmt(e.value) }}<i v-if="e.contested" class="lv-hot" title="contested by AI clubs">🔥</i></span>
+            <input type="number" class="lv-mktbid" v-model.number="bidAmt[e.handle]" step="500" min="0" />
+            <button class="lv-go sm" :disabled="marketBusy" @click="bid(e)">bid</button>
+            <span class="lv-mktmsg" :class="{ ok: (bidMsg[e.handle] || '').startsWith('✓') }">{{ bidMsg[e.handle] }}</span>
+          </div>
+          <div v-if="!board.length" class="lv-empty">loading the board…</div>
         </div>
       </div>
 
