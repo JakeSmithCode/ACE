@@ -420,11 +420,14 @@ not a sim rewrite.
    two runs. `membersOf` / `promoteRelegate` / `divisionSchedule` are untouched (the
    single-player store still uses them flat); the engine never sees groups, so seed 42
    is byte-identical.*
-7. **Re-sim-to-watch endpoint** + wire the existing viewer to it. 🟡 *The core is
-   proven — full-sim persists the `input_snapshot` and a re-sim reproduces the
-   score byte-for-byte (server CLI). What remains is the HTTP `GET
-   /fixtures/:id/replay` returning the snapshot + the client loading it into the
-   viewer.*
+7. **Re-sim-to-watch endpoint** + wire the existing viewer to it. 🟡 *Server half
+   done — `GET /fixtures/:s/:d/:slot/replay` returns `{ seed, snapshot, score }`
+   (425 until resolved, so a client can't pull it early to re-sim ahead), proven by
+   `pnpm run server:live` (replay 200s with the full snapshot at reveal; a re-sim
+   reproduces the score byte-for-byte per the CLI). What remains is the **web client**
+   loading the snapshot into the existing viewer (the single-player viewer already
+   re-sims; this just points it at the server's snapshot instead of the bundled
+   sample).*
 8. **Regional shards.** ✅ *Done — `@ace/world/circuit.ts`. A shard is one region's
    pyramid (a self-contained `WorldState` with its own seed + clock → its own `world`
    row, ticked independently, partitioning load). `createCircuit(seed, { regions })`
@@ -439,7 +442,18 @@ not a sim rewrite.
    bracket crowns a global champion each season, the region-cup tally accumulates, and
    the whole circuit is deterministic across two runs. (Awarding intl prize/prestige
    back to the shard is a cheap follow-up; the connector is read-only today.)*
-9. **Tick-night realtime** (match center MVP) + **public club page**.
+9. **Tick-night realtime** (match center MVP) + **public club page**. 🟡 *Largely
+   done over the `node:http` slice (`http.ts`): the SSE `GET /live/:s/:d` match-center
+   streams the synced running score (step done earlier); the **public club page**
+   `GET /clubs/:slug` (identity, division, fielded five, owned-or-AI) and
+   **embargo-aware standings** `GET /standings/:season/:tier/:group` (derived from
+   RESOLVED fixtures only, so the table never moves mid-broadcast) are in, plus the
+   ownership write-path `POST /clubs/:id/claim` + `PATCH /me/plan` + `GET /me`
+   (account via an `x-account` header — the stand-in step 3's JWT replaces).
+   `pnpm run server:live` exercises all of it end to end: claim → 409 on a rival's
+   second claim, author a plan and read it back, the club page, and standings showing
+   0 games during the window then moving only after reveal. The NestJS controllers +
+   WS gateway formalize these exact shapes.*
 10. **Stripe VIP.**
 
 Each step is shippable; the world is playable (vs AI) from step 4.

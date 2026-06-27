@@ -8,11 +8,13 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
+import { standings, planFive, overall, planOf, type WorldState, type WorldClub } from '@ace/world';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick } from './tick.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
+import { claim, savePlan, myClub } from './owner.js';
 
 export interface LiveServerOpts {
   seed?: number; broadcastSecs?: number; port?: number;
@@ -25,6 +27,30 @@ const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
 };
+const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve => {
+  let buf = '';
+  req.on('data', c => (buf += c));
+  req.on('end', () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
+});
+
+/** The public club page (§9) — identity, division, lifecycle, the fielded five, and
+ *  whether a human owns it. Read-only, always available (no embargo on a club). */
+const publicClub = (w: WorldState, c: WorldClub) => ({
+  tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles,
+  owned: c.owner != null, rating: Math.round(c.strength * 100),
+  five: planFive(c).map(p => ({ handle: p.handle, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl })),
+});
+
+/** Embargo-aware standings (§8.5): derived from RESOLVED fixtures only, so the
+ *  table never moves mid-broadcast. Built from the store's fixture rows (not the
+ *  world's results) so the `revealAt` gate is honoured. */
+function standingsView(w: WorldState, rows: FixtureRow[], tier: number, group: number, now: number) {
+  const inDiv = rows.filter(r => fixtureStatus(r, now) === 'resolved' && w.clubs[r.home].tier === tier && w.clubs[r.home].group === group);
+  const results = inDiv.map(r => ({ home: r.home, away: r.away, score: [r.homeScore, r.awayScore] as [number, number], winner: r.winner, seed: r.seed }));
+  return standings(w.clubs.length, results)
+    .filter(s => w.clubs[s.club].tier === tier && w.clubs[s.club].group === group)
+    .map(s => ({ club: w.clubs[s.club].tag, played: s.played, won: s.won, lost: s.lost, diff: s.diff, points: s.points }));
+}
 
 /** Boot a world, kick its Premier (division 0) off live *now*, and serve it. The
  *  watchable fixtures' timelines are re-simmed once and cached as the live source
@@ -43,9 +69,12 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   const fixtureAt = (season: number, day: number, slot: number): FixtureRow | undefined =>
     store.fixtures(id, season).find(f => f.day === day && f.slot === slot);
 
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
     const path = (req.url ?? '/').split('?')[0].split('/').filter(Boolean);
+    // the account making the request. A header stand-in for step-3 JWT — the auth
+    // module will verify a bearer token and set this; the routes below are unchanged.
+    const account = (req.headers['x-account'] as string | undefined) ?? null;
 
     if (path[0] === 'health') return json(res, 200, { ok: true, id, now, kickoffAt, revealAt: kickoffAt + broadcastSecs });
 
@@ -80,6 +109,43 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
       frame();
       req.on('close', () => clearInterval(timer));
       return;
+    }
+    // GET /clubs/:slug  → public club page (read-only, no embargo)
+    if (path[0] === 'clubs' && path.length === 2 && (req.method ?? 'GET') === 'GET') {
+      const w = store.loadWorld(id)!;
+      const c = w.clubs.find(x => x.tag.toLowerCase() === path[1].toLowerCase());
+      return c ? json(res, 200, publicClub(w, c)) : json(res, 404, { error: 'no such club' });
+    }
+    // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)
+    if (path[0] === 'standings' && path.length === 4) {
+      const w = store.loadWorld(id)!;
+      return json(res, 200, { tier: +path[2], group: +path[3], table: standingsView(w, store.fixtures(id, +path[1]), +path[2], +path[3], now) });
+    }
+    // GET /me  → the club this account owns (x-account)
+    if (path[0] === 'me' && path.length === 1) {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const c = myClub(store, id, account);
+      return json(res, 200, c ? { ...publicClub(store.loadWorld(id)!, c), plan: planOf(c) } : null);
+    }
+    // POST /clubs/:id/claim  → take over an AI club (x-account)
+    if (path[0] === 'clubs' && path.length === 3 && path[2] === 'claim' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const w = store.loadWorld(id)!;
+      const c = w.clubs.find(x => x.tag.toLowerCase() === path[1].toLowerCase() || x.id === path[1]);
+      if (!c) return json(res, 404, { error: 'no such club' });
+      try { return json(res, 200, publicClub(store.loadWorld(id)!, claim(store, id, c.id, account))); }
+      catch (e) { return json(res, 409, { error: (e as Error).message }); }
+    }
+    // PATCH /me/plan  → author your club's plan (x-account)
+    if (path[0] === 'me' && path[1] === 'plan' && req.method === 'PATCH') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const body = (await readBody(req)) as { tactics?: WorldClub['tactics']; comp?: WorldClub['comp']; lineup?: string[] };
+      const cur = planOf(mine);
+      try { savePlan(store, id, mine.id, { tactics: body.tactics ?? cur.tactics, comp: body.comp ?? cur.comp, lineup: body.lineup ?? cur.lineup }); }
+      catch (e) { return json(res, 422, { error: (e as Error).message }); }
+      return json(res, 200, planOf(myClub(store, id, account)!));
     }
     return json(res, 404, { error: 'not found' });
   });
