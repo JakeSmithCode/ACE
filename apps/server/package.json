@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "demo": "tsx src/cli.ts"
+    "demo": "tsx src/cli.ts",
+    "live": "tsx src/http-demo.ts"
   },
   "dependencies": {
     "@ace/shared": "workspace:*",

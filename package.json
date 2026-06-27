@@ -14,6 +14,7 @@
     "season": "tsx packages/world/src/cli.ts",
     "world": "tsx packages/world/src/cli-world.ts",
     "server": "tsx apps/server/src/cli.ts",
+    "server:live": "tsx apps/server/src/http-demo.ts",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
