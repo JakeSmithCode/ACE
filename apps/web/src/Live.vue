@@ -6,7 +6,7 @@
 // viewer (the engine runs client-side, so watching costs the server nothing). This is
 // the seam between the deep persistence backend and the broadcast-grade viewer.
 import { onMounted, onUnmounted, ref, computed } from 'vue';
-import type { MapId } from '@ace/shared';
+import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
@@ -50,13 +50,26 @@ async function doAuth() {
     await refreshMe();
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-async function refreshMe() { if (server.value && token.value) myClub.value = await server.value.me(token.value).catch(() => null); }
+async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); } }
 async function doClaim() {
   if (!server.value || !token.value || !claimTag.value) return; busy.value = true; authErr.value = '';
-  try { myClub.value = await server.value.claim(claimTag.value, token.value); }
+  try { myClub.value = await server.value.claim(claimTag.value, token.value); await refreshMe(); }  // refresh → /me carries the plan
   catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-function signOut() { token.value = null; myClub.value = null; authErr.value = ''; }
+function signOut() { token.value = null; myClub.value = null; authErr.value = ''; planOpen.value = false; }
+
+// --- author your club's tactics (PATCH /me/plan → drives your next tick) ------
+const planOpen = ref(false);
+const tac = ref<Tactics | null>(null);
+const planSaved = ref(false);
+function syncTac() { const t = myClub.value?.plan?.tactics; tac.value = t ? JSON.parse(JSON.stringify(t)) as Tactics : null; }
+async function savePlan() {
+  if (!server.value || !token.value || !tac.value) return; busy.value = true; authErr.value = '';
+  try { await server.value.setPlan(tac.value, token.value); planSaved.value = true; setTimeout(() => (planSaved.value = false), 2200); await refreshMe(); }
+  catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
+const readLabel = (v: number) => v <= -0.34 ? 'stack B' : v >= 0.34 ? 'stack A' : 'spread';
+const pct = (v: number) => Math.round(v * 100) + '%';
 
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
 // the score to display: the running (completed-round) tally while live, but the TRUE
@@ -137,6 +150,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <b class="lv-myname">{{ myClub.name }}</b>
           <span class="lv-tier">{{ tierName(myClub.tier) }} · {{ myClub.rating }} OVR</span>
           <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
+          <button class="lv-planbtn" :class="{ on: planOpen }" @click="planOpen = !planOpen">✎ tactics</button>
           <button class="lv-signout" @click="signOut">sign out</button>
         </template>
         <template v-else-if="authed">
@@ -160,6 +174,31 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <span v-if="authErr" class="lv-autherr">{{ authErr }}</span>
           </div>
         </template>
+      </div>
+
+      <!-- author your tactics — saved to the server, drives your matches on the next tick -->
+      <div v-if="myClub && planOpen && tac" class="lv-planpanel">
+        <div class="lv-plangrid">
+          <div class="lv-plancol">
+            <span class="lv-planh att">◢ Attack</span>
+            <label class="lv-dial"><span>Site bias <i>{{ tac.attack.siteBias <= -0.34 ? 'B' : tac.attack.siteBias >= 0.34 ? 'A' : 'balanced' }}</i></span>
+              <input type="range" min="-1" max="1" step="0.1" v-model.number="tac.attack.siteBias" /></label>
+            <label class="lv-dial"><span>Tempo <i>{{ tac.attack.tempo <= 0.4 ? 'slow' : tac.attack.tempo >= 0.66 ? 'fast' : 'mid' }} · {{ pct(tac.attack.tempo) }}</i></span>
+              <input type="range" min="0" max="1" step="0.05" v-model.number="tac.attack.tempo" /></label>
+          </div>
+          <div class="lv-plancol">
+            <span class="lv-planh def">◣ Defense</span>
+            <label class="lv-dial"><span>Read <i>{{ readLabel(tac.defense.read) }}</i></span>
+              <input type="range" min="-1" max="1" step="0.1" v-model.number="tac.defense.read" /></label>
+            <label class="lv-dial"><span>Aggression <i>{{ tac.defense.aggression <= 0.34 ? 'passive' : tac.defense.aggression >= 0.66 ? 'aggressive' : 'measured' }} · {{ pct(tac.defense.aggression) }}</i></span>
+              <input type="range" min="0" max="1" step="0.05" v-model.number="tac.defense.aggression" /></label>
+          </div>
+          <div class="lv-plansave">
+            <button class="lv-go" :disabled="busy" @click="savePlan">Save plan</button>
+            <span v-if="planSaved" class="lv-savedok">✓ saved — drives your next match</span>
+            <span class="lv-plannote">authored tactics resolve on the server tick (the read-vs-site mind-game is real)</span>
+          </div>
+        </div>
       </div>
 
       <!-- the day's live matches -->

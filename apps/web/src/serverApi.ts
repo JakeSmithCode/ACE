@@ -4,7 +4,7 @@
 // result embargo, then by re-simming the snapshot once revealed (the engine runs
 // client-side, so watching still costs the server ~nothing). Read-only here; the
 // ownership write-path (claim/plan) rides the same base.
-import type { MatchInput, MapId } from '@ace/shared';
+import type { MatchInput, MapId, Tactics } from '@ace/shared';
 
 export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number }
 export interface StandingRow { club: string; played: number; won: number; lost: number; diff: number; points: number }
@@ -17,7 +17,8 @@ export interface LiveFixture {
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: unknown }
+export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan }
 
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
@@ -53,6 +54,13 @@ export class AceServer {
   async me(token: string): Promise<ClubPage | null> {
     const r = await fetch(`${this.base}/me`, { headers: { authorization: `Bearer ${token}` } });
     return r.ok ? (r.json() as Promise<ClubPage | null>) : null;
+  }
+  /** Author your club's plan — the tactics that drive your matches on the next tick. */
+  setPlan(tactics: Tactics, token: string): Promise<ClubPlan> {
+    return fetch(`${this.base}/me/plan`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tactics }),
+    }).then(r => j<ClubPlan>(r));
   }
 
   /** Subscribe to a day's synced live match-center (SSE). `onFrame` fires ~1/s with

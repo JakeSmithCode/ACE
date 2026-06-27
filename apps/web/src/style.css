@@ -759,3 +759,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-trow.mine{background:rgba(229,181,103,.07)}
 .lv-trow.mine .lv-cname{color:var(--gold)}
 .lv-youtag{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.1em;color:var(--gold);border:1px solid rgba(229,181,103,.5);padding:1px 4px;margin-left:6px}
+/* Match Center — tactics authoring */
+.lv-planbtn{background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.35);color:var(--brand);font-family:var(--label);font-size:11px;letter-spacing:.04em;padding:6px 13px;cursor:pointer;clip-path:var(--bevel)}
+.lv-planbtn.on,.lv-planbtn:hover{background:rgba(34,211,238,.2)}
+.lv-planpanel{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:16px 18px;margin-bottom:16px}
+.lv-plangrid{display:grid;grid-template-columns:1fr 1fr auto;gap:26px;align-items:start}
+.lv-plancol{display:flex;flex-direction:column;gap:12px}
+.lv-planh{font-family:var(--label);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.lv-planh.att{color:var(--att)}.lv-planh.def{color:var(--def)}
+.lv-dial{display:flex;flex-direction:column;gap:5px}
+.lv-dial>span{font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--muted);display:flex;justify-content:space-between;gap:10px}
+.lv-dial>span i{color:var(--text);font-style:normal;font-weight:600}
+.lv-dial input[type=range]{-webkit-appearance:none;appearance:none;height:4px;background:linear-gradient(90deg,rgba(34,211,238,.5),rgba(255,92,110,.5));border-radius:2px;outline:none}
+.lv-dial input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:var(--text);border-radius:50%;cursor:pointer;box-shadow:0 0 6px rgba(0,0,0,.5)}
+.lv-dial input[type=range]::-moz-range-thumb{width:14px;height:14px;background:var(--text);border:none;border-radius:50%;cursor:pointer}
+.lv-plansave{display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:170px;border-left:1px solid var(--line);padding-left:24px}
+.lv-savedok{font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--win)}
+.lv-plannote{font-family:var(--body);font-size:11px;color:var(--muted-2);line-height:1.4}
