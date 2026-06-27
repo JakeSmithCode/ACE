@@ -366,7 +366,21 @@ not a sim rewrite.
    persistence boundary (`WorldStore`: world snapshot + `fixture` rows + the
    idempotency `tick_log`) and `seedWorld(store, …)`, with a `MemoryStore` impl.
    The `PgStore` (same interface) + migrations are the remaining half.*
-3. **Self-owned auth** (register/verify/login/refresh).
+3. **Self-owned auth** (register/verify/login/refresh). ✅ *Done — `auth.ts` +
+   `accounts.ts`, **zero-dep** (node `crypto`: scrypt password hash, a hand-rolled
+   HS256 JWT access token, an opaque rotating refresh token stored hashed). The
+   NestJS version swaps in argon2id/passport but exposes the same tokens.
+   `AuthService` over an `AccountStore` (`MemoryAccountStore` now, `PgAccountStore`
+   the mechanical follow-up — accounts span worlds, so it's separate from
+   `WorldStore`). Wired into `http.ts`: `POST /auth/register|login|refresh`, and the
+   ownership routes now resolve the account from a verified **Bearer** access token
+   (the `x-account` header demoted to a dev fallback). `pnpm run server:live` proves
+   it: register issues access+refresh, no token / bad password → 401, refresh
+   **rotates** (the old refresh is single-use → 401 on replay), and a club is claimed
+   via the Bearer token. The KDF salt is the only randomness and it's auth-not-sim,
+   so engine/world determinism is untouched; the `clock` is injectable so expiry is
+   testable. Email verification + Stripe `vip_until` are the remaining account fields
+   (steps 9/10).*
 4. **The tick worker** resolving one world end-to-end (matchday → season rollover),
    idempotent. ✅ *Done — `apps/server/src/tick.ts` `runTick` resolves the current
    match-day (via the shared pure `resolveSeasonDay`) or rolls the season over

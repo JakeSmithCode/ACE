@@ -9,4 +9,6 @@ export * from './sim.js';
 export * from './nav.js';
 export * from './live.js';
 export * from './owner.js';
+export * from './auth.js';
+export * from './accounts.js';
 export * from './http.js';

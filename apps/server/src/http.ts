@@ -15,12 +15,14 @@ import { runTick } from './tick.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
+import { AuthService, MemoryAccountStore } from './accounts.js';
+import { randomBytes } from 'node:crypto';
 
 export interface LiveServerOpts {
   seed?: number; broadcastSecs?: number; port?: number;
   clock?: () => number;   // seconds; default real wall-clock
 }
-export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; close: () => Promise<void> }
+export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; auth: AuthService; close: () => Promise<void> }
 
 const key = (f: { season: number; day: number; slot: number }) => `${f.season}:${f.day}:${f.slot}`;
 const json = (res: ServerResponse, code: number, body: unknown) => {
@@ -60,6 +62,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   const broadcastSecs = opts.broadcastSecs ?? 2400;
   const store = new MemoryStore();
   const id = seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
+  const auth = new AuthService(new MemoryAccountStore(), randomBytes(32).toString('hex'), clock);
   const kickoffAt = clock();
   runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt, broadcastSecs });
 
@@ -72,11 +75,23 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
     const path = (req.url ?? '/').split('?')[0].split('/').filter(Boolean);
-    // the account making the request. A header stand-in for step-3 JWT — the auth
-    // module will verify a bearer token and set this; the routes below are unchanged.
-    const account = (req.headers['x-account'] as string | undefined) ?? null;
+    // the account making the request: a verified Bearer access token (the
+    // `x-account` header is a dev fallback for unauthenticated local pokes).
+    const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+    const account = (bearer && auth.verify(bearer)) || (req.headers['x-account'] as string | undefined) || null;
 
     if (path[0] === 'health') return json(res, 200, { ok: true, id, now, kickoffAt, revealAt: kickoffAt + broadcastSecs });
+
+    // ── self-owned auth (§5/§9): register / login / refresh ──────────────────
+    if (path[0] === 'auth' && req.method === 'POST') {
+      const b = (await readBody(req)) as { email?: string; password?: string; refreshToken?: string };
+      try {
+        if (path[1] === 'register') return json(res, 201, auth.register(b.email ?? '', b.password ?? ''));
+        if (path[1] === 'login') return json(res, 200, auth.login(b.email ?? '', b.password ?? ''));
+        if (path[1] === 'refresh') return json(res, 200, auth.refresh(b.refreshToken ?? ''));
+      } catch (e) { return json(res, 401, { error: (e as Error).message }); }
+      return json(res, 404, { error: 'unknown auth route' });
+    }
 
     // GET /fixtures/:season/:day/:slot  → spoiler-safe public view
     if (path[0] === 'fixtures' && path.length === 4) {
@@ -154,7 +169,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     server.listen(opts.port ?? 0, () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : opts.port;
-      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, close: () => new Promise(r => server.close(() => r())) });
+      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => server.close(() => r())) });
     });
   });
 }

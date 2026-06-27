@@ -37,10 +37,20 @@ async function main() {
   const SEASON = 1, DAY = 0, SLOT = 0;
   const fxUrl = `${srv.url}/fixtures/${SEASON}/${DAY}/${SLOT}`;
 
-  // ── 0. the API surface: public club page, ownership, embargo-aware standings ─
+  // ── 0a. self-owned auth: register → tokens → refresh rotation ─────────────
+  const reg = await (await fetch(`${srv.url}/auth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'jake@ace.gg', password: 'correct horse' }) })).json();
+  const noAuth = await fetch(`${srv.url}/me`);                                    // no token → 401
+  const reused = await fetch(`${srv.url}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'jake@ace.gg', password: 'wrong' }) });
+  const refreshed = await (await fetch(`${srv.url}/auth/refresh`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: reg.refreshToken }) })).json();
+  const replayOld = await fetch(`${srv.url}/auth/refresh`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refreshToken: reg.refreshToken }) });
+  console.log(`  auth          : register → access+refresh issued ${reg.accessToken ? '✓' : '✗'}; no token → HTTP ${noAuth.status}; bad password → HTTP ${reused.status}`);
+  console.log(`  refresh       : rotated → new access ${refreshed.accessToken ? '✓' : '✗'}; reusing the old refresh → HTTP ${replayOld.status} ${replayOld.status === 401 ? '(single-use ✓)' : '(REPLAY ✗)'}`);
+  const token = refreshed.accessToken as string;   // the rotated, valid access token
+
+  // ── 0b. the API surface: public club page, ownership, embargo-aware standings ─
   const w = srv.store.loadWorld(srv.id)!;
   const target = w.clubs.find(c => c.tier === 0 && !c.owner)!.tag;
-  const acct = (m: string, p: string, body?: unknown) => fetch(`${srv.url}${p}`, { method: m, headers: { 'x-account': 'acct-jake', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const acct = (m: string, p: string, body?: unknown) => fetch(`${srv.url}${p}`, { method: m, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const standDuring = await get(`${srv.url}/standings/${SEASON}/0/0`);
   const claimed = await (await acct('POST', `/clubs/${target}/claim`)).json();
   const denied = await fetch(`${srv.url}/clubs/${target}/claim`, { method: 'POST', headers: { 'x-account': 'acct-rival' } });
@@ -48,7 +58,7 @@ async function main() {
   const me = await (await acct('GET', '/me')).json();
   const clubPage = await get(`${srv.url}/clubs/${target}`);
   console.log(`  club page     : ${clubPage.tag} (T${clubPage.tier} · ${clubPage.rating} OVR · five ${clubPage.five.map((p: any) => p.handle).join('/')}) owned=${clubPage.owned}`);
-  console.log(`  ownership     : claimed ${claimed.tag} → owned ${claimed.owned ? '✓' : '✗'}; rival claim → HTTP ${denied.status} ${denied.status === 409 ? '(blocked ✓)' : '(LEAK ✗)'}`);
+  console.log(`  ownership     : ${reg.accountId} claimed ${claimed.tag} via Bearer → owned ${claimed.owned ? '✓' : '✗'}; rival claim → HTTP ${denied.status} ${denied.status === 409 ? '(blocked ✓)' : '(LEAK ✗)'}`);
   console.log(`  plan write    : /me read=${me.plan.tactics.defense.read} tempo=${me.plan.tactics.attack.tempo} → authored ✓`);
   const playedDuring = standDuring.table.reduce((n: number, r: any) => n + r.played, 0);
   console.log(`  standings     : during window → ${playedDuring} games played in the table ${playedDuring === 0 ? '(embargoed ✓)' : '(LEAK ✗)'}`);
