@@ -71,6 +71,10 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   for (const f of store.fixtures(id, 1)) if (f.inputSnapshot) timelines.set(key(f), simulateMatch(f.inputSnapshot, navOf(f.inputSnapshot.map), 0));
   const fixtureAt = (season: number, day: number, slot: number): FixtureRow | undefined =>
     store.fixtures(id, season).find(f => f.day === day && f.slot === slot);
+  // a static tag/name lookup (club identities don't change tag) — for labelling the
+  // live feed + fixture views with who's actually playing (not a spoiler)
+  const meta = store.loadWorld(id)!;
+  const labelOf = (i: number) => ({ tag: meta.clubs[i]?.tag ?? '?', name: meta.clubs[i]?.name ?? '?' });
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
@@ -93,11 +97,11 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
       return json(res, 404, { error: 'unknown auth route' });
     }
 
-    // GET /fixtures/:season/:day/:slot  → spoiler-safe public view
+    // GET /fixtures/:season/:day/:slot  → spoiler-safe public view (+ who's playing)
     if (path[0] === 'fixtures' && path.length === 4) {
       const f = fixtureAt(+path[1], +path[2], +path[3]);
       if (!f) return json(res, 404, { error: 'no such fixture' });
-      return json(res, 200, publicView(f, now));
+      return json(res, 200, { ...publicView(f, now), home: labelOf(f.home), away: labelOf(f.away), map: f.inputSnapshot?.map ?? null });
     }
     // GET /fixtures/:season/:day/:slot/replay  → snapshot, but only once resolved
     if (path[0] === 'fixtures' && path.length === 5 && path[4] === 'replay') {
@@ -115,7 +119,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
         const t = clock();
         const fixtures = watched.map(f => {
           const v = publicView(f, t), m = liveMatchState(timelines.get(key(f))!, v.frac);
-          return { slot: f.slot, status: v.status, frac: +v.frac.toFixed(3), running: [m.scoreA, m.scoreB], round: m.round + 1, final: v.score ?? null };
+          return { slot: f.slot, status: v.status, frac: +v.frac.toFixed(3), running: [m.scoreA, m.scoreB], round: m.round + 1, rounds: timelines.get(key(f))!.rounds.length, final: v.score ?? null, home: labelOf(f.home), away: labelOf(f.away), map: f.inputSnapshot?.map ?? null };
         });
         res.write(`data: ${JSON.stringify({ now: t, fixtures })}\n\n`);
         if (fixtures.every(f => f.status === 'resolved')) { clearInterval(timer); res.write('event: done\ndata: {}\n\n'); res.end(); }

@@ -446,10 +446,12 @@ not a sim rewrite.
    done — `GET /fixtures/:s/:d/:slot/replay` returns `{ seed, snapshot, score }`
    (425 until resolved, so a client can't pull it early to re-sim ahead), proven by
    `pnpm run server:live` (replay 200s with the full snapshot at reveal; a re-sim
-   reproduces the score byte-for-byte per the CLI). What remains is the **web client**
-   loading the snapshot into the existing viewer (the single-player viewer already
-   re-sims; this just points it at the server's snapshot instead of the bundled
-   sample).*
+   reproduces the score byte-for-byte per the CLI). **The web client is wired** — the
+   Match Center (`apps/web/src/Live.vue` + `serverApi.ts`) connects to a running
+   server, and `▷ watch` pulls a resolved fixture's snapshot and runs `simulateMatch`
+   in the browser, rendering it in the **same broadcast viewer** the single-player
+   loop uses (verified in headless Chromium: IRN 13–7 QSR re-simmed from the server
+   snapshot, full scoreboard/True-Odds/kill-feed). ✅*
 8. **Regional shards.** ✅ *Done — `@ace/world/circuit.ts`. A shard is one region's
    pyramid (a self-contained `WorldState` with its own seed + clock → its own `world`
    row, ticked independently, partitioning load). `createCircuit(seed, { regions })`
@@ -468,8 +470,14 @@ not a sim rewrite.
    pure + opt-in so the no-circuit CLIs + seed 42 are untouched (the s1 champion banks
    +$250k → a deep run reshapes a club's transfer budget and pulls money into a strong
    region). Prestige counters (intl titles) are the remaining polish.*
-9. **Tick-night realtime** (match center MVP) + **public club page**. 🟡 *Largely
-   done over the `node:http` slice (`http.ts`): the SSE `GET /live/:s/:d` match-center
+9. **Tick-night realtime** (match center MVP) + **public club page**. ✅ *Done — the
+   web **Match Center** (`apps/web/src/Live.vue`) is the async-PvP client: it connects
+   to a live server, streams the day's Premier matches over SSE with running scores +
+   the result embargo (sealed/locked during each window, the standings frozen at 0–0),
+   then on reveal flips to the true finals and lets you `▷ watch` a re-simmed replay in
+   the broadcast viewer. `pnpm run server:serve` boots a long-running server for it.
+   Verified end-to-end in headless Chromium (live → reveal → watch). The server side
+   is the `node:http` slice (`http.ts`): the SSE `GET /live/:s/:d` match-center
    streams the synced running score (step done earlier); the **public club page**
    `GET /clubs/:slug` (identity, division, fielded five, owned-or-AI) and
    **embargo-aware standings** `GET /standings/:season/:tier/:group` (derived from

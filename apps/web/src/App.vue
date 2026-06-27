@@ -2,8 +2,9 @@
 import { ref } from 'vue';
 import Hq from './Hq.vue';
 import Editor from './Editor.vue';
+import Live from './Live.vue';
 
-const view = ref<'hq' | 'editor'>('hq');
+const view = ref<'hq' | 'editor' | 'live'>('hq');
 </script>
 
 <template>
@@ -13,11 +14,13 @@ const view = ref<'hq' | 'editor'>('hq');
       <nav class="ace-nav">
         <button :class="{ on: view === 'hq' }" @click="view = 'hq'">HQ · Season</button>
         <button :class="{ on: view === 'editor' }" @click="view = 'editor'">Tactics Editor</button>
+        <button :class="{ on: view === 'live' }" @click="view = 'live'">Match Center<span class="nav-live">LIVE</span></button>
       </nav>
       <div class="crumb-r"><b>@ace/engine</b> · live in your browser</div>
     </header>
 
     <Hq v-if="view === 'hq'" />
-    <Editor v-else />
+    <Editor v-else-if="view === 'editor'" />
+    <Live v-else />
   </div>
 </template>
