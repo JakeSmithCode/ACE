@@ -799,7 +799,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .cir-brack{display:flex;gap:30px;align-items:center;overflow-x:auto}
 .cir-col{display:flex;flex-direction:column;gap:18px;justify-content:space-around;min-width:170px}
 .cir-colh{font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);text-align:center;margin-bottom:2px}
-.cir-match{display:flex;flex-direction:column;gap:3px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel);padding:7px 9px}
+.cir-match{position:relative;display:flex;flex-direction:column;gap:3px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel);padding:7px 9px}
 .cir-match.fin{border-color:rgba(229,181,103,.4);box-shadow:0 0 0 1px rgba(229,181,103,.2)}
 .cir-side{display:flex;align-items:center;gap:8px;padding:4px 5px;opacity:.55}
 .cir-side.win{opacity:1}
@@ -829,3 +829,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-mktbid{background:#0a121b;border:1px solid var(--line-2);color:var(--text);font-family:var(--label);font-size:12px;padding:6px 9px;width:96px;clip-path:var(--bevel);font-variant-numeric:tabular-nums}
 .lv-mktmsg{font-family:var(--label);font-size:11px;letter-spacing:.02em;color:var(--def)}
 .lv-mktmsg.ok{color:var(--win)}
+/* tactile hover on interactive Match Center / Circuit elements */
+.lv-card,.cir-match,.lv-mktrow,.cir-region{transition:transform .12s ease,box-shadow .12s ease,background .12s ease}
+.lv-card.resolved:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.45)}
+.cir-match:hover,.cir-region:hover{transform:translateY(-2px)}
+.lv-mktrow:hover{background:rgba(255,255,255,.025)}
+.lv-watch,.cir-watch,.lv-go,.lv-planbtn{transition:background .12s ease,transform .1s ease}
+.lv-watch:active,.cir-watch:active,.lv-go:active{transform:translateY(1px)}
