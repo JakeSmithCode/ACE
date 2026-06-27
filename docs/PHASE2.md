@@ -370,10 +370,15 @@ not a sim rewrite.
    `transfer`, `honor`, `tick_log`; `jsonb` holds the value objects verbatim so a
    `world`+`club`+`player` row set IS a `WorldState`), plus `infra/docker-compose.yml`
    (Postgres 16 + Redis 7) and `infra/README.md`. The remaining half is the `PgStore`/
-   `PgAccountStore` — the **same** `WorldStore`/`AccountStore` interfaces the
-   `MemoryStore` already implements, backed by these tables; mechanical wiring that
-   changes no resolution code (the schema artifact is committed but not yet applied
-   against a live DB in CI).*
+   `PgAccountStore`. **Finding (correction to the earlier "mechanical wiring" note):**
+   the `WorldStore`/`AccountStore` interfaces are **synchronous** (designed for the
+   in-memory store + the sync tick worker), but a Postgres-backed store is inherently
+   **async** — so PgStore first needs the store interfaces + every caller (`tick.ts`,
+   `http.ts`, `owner.ts`, the market routes, `cli.ts`) made async (await-through), and
+   only then the SQL impl, and only then a live Postgres to integration-test. That's a
+   real refactor, not a drop-in, and it's risky to land unverified — so it's deferred
+   until a Postgres is available (or an explicit opt-in to the async refactor). The
+   resolution *math* still doesn't change; the interface shape does.*
 3. **Self-owned auth** (register/verify/login/refresh). ✅ *Done — `auth.ts` +
    `accounts.ts`, **zero-dep** (node `crypto`: scrypt password hash, a hand-rolled
    HS256 JWT access token, an opaque rotating refresh token stored hashed). The

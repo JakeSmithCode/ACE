@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -177,6 +177,20 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
       const after = store.loadWorld(id)!;
       return json(res, 200, { ...result, club: publicClub(after, after.clubs[clubIdx]) });
     }
+    // POST /market/sell  → sell a rostered player to the richest willing AI club
+    if (path[0] === 'market' && path[1] === 'sell' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { ref?: string };
+      const w = store.loadWorld(id)!;
+      const sale = resolveSale(w, mine.id, b.ref ?? '');
+      if (!sale.ok) return json(res, 200, sale);                      // blocked / no buyer → client shows why
+      store.saveWorld(id, applySale(w, mine.id, b.ref!, sale.buyerIdx!, sale.fee!));
+      const after = store.loadWorld(id)!;
+      const ci = after.clubs.findIndex(c => c.id === mine.id);
+      return json(res, 200, { ...sale, club: publicClub(after, after.clubs[ci]) });
+    }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {
       if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
@@ -203,7 +217,7 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     if (path[0] === 'me' && path.length === 1) {
       if (!account) return json(res, 401, { error: 'no account' });
       const c = myClub(store, id, account);
-      return json(res, 200, c ? { ...publicClub(store.loadWorld(id)!, c), plan: planOf(c), balance: c.balance } : null);
+      return json(res, 200, c ? { ...publicClub(store.loadWorld(id)!, c), plan: planOf(c), balance: c.balance, squad: squadView(store.loadWorld(id)!, c) } : null);
     }
     // POST /clubs/:id/claim  → take over an AI club (x-account)
     if (path[0] === 'clubs' && path.length === 3 && path[2] === 'claim' && req.method === 'POST') {

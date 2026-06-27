@@ -10,7 +10,7 @@ import type { Player } from '@ace/shared';
 import { freeAgents, playerValue } from './market.js';
 import { topRivalBid, aiWantsToBuy } from './transfers.js';
 import { overall } from './develop.js';
-import { clubTeam, type WorldState, type WorldClub } from './state.js';
+import { clubTeam, startingFive, validFive, type WorldState, type WorldClub } from './state.js';
 
 /** The free-agent board for a world — deterministic per (seed, season), with handles
  *  disjoint from every rostered player (the engine assumes unique handles). The
@@ -63,4 +63,52 @@ export function applySigning(w: WorldState, clubId: string, player: Player, cost
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean }
 export function marketEntry(w: WorldState, p: Player): MarketEntry {
   return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p) };
+}
+
+/** The richest AI club (not the seller) that genuinely wants `player` as an upgrade
+ *  and can afford the market fee — the buyer for a sale. `{ club: -1 }` = nobody's in. */
+export function findBuyer(w: WorldState, sellerIdx: number, player: Player): { club: number; fee: number } {
+  const clubs = asClubs(w), balances = w.clubs.map(c => c.balance);
+  const fee = playerValue(player, w.patch);
+  let best = { club: -1, fee };
+  clubs.forEach((_, i) => {
+    if (i === sellerIdx || !aiWantsToBuy(clubs, balances, i, player) || fee > balances[i]) return;
+    if (best.club < 0 || balances[i] > balances[best.club]) best = { club: i, fee };   // the richest willing buyer
+  });
+  return best;
+}
+
+export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; buyerIdx?: number }
+
+/** Resolve a human's sale of a rostered player: blocked if it would break the seller's
+ *  valid five, else matched to the richest AI buyer who wants him (the fee is market
+ *  value). Returns the deal to confirm; `applySale` commits it. */
+export function resolveSale(w: WorldState, sellerClubId: string, ref: string): SaleResult {
+  const si = w.clubs.findIndex(c => c.id === sellerClubId);
+  if (si < 0) return { ok: false, reason: 'no such club' };
+  const player = w.clubs[si].roster.find(p => p.id === ref || p.handle === ref);
+  if (!player) return { ok: false, reason: 'not on your roster' };
+  if (!validFive(startingFive(w.clubs[si].roster.filter(p => p !== player)))) return { ok: false, reason: 'would break your valid five' };
+  const buyer = findBuyer(w, si, player);
+  if (buyer.club < 0) return { ok: false, reason: 'no club wants him right now' };
+  return { ok: true, fee: buyer.fee, buyer: w.clubs[buyer.club].tag, buyerIdx: buyer.club };
+}
+
+/** Commit a sale: the player moves to the buyer (ungelled), the fee moves to the
+ *  seller. A real transfer between two clubs — the exact resolution the server runs. */
+export function applySale(w: WorldState, sellerClubId: string, ref: string, buyerIdx: number, fee: number): WorldState {
+  const si = w.clubs.findIndex(c => c.id === sellerClubId);
+  const player = w.clubs[si].roster.find(p => p.id === ref || p.handle === ref)!;
+  const moved: Player = { ...player, tenure: 0 };
+  return { ...w, clubs: w.clubs.map((c, j) =>
+    j === si ? { ...c, roster: c.roster.filter(p => p !== player), balance: c.balance + fee } :
+    j === buyerIdx ? { ...c, roster: [...c.roster, moved], balance: c.balance - fee } : c) };
+}
+
+/** The owner's full squad for the wire (so the UI can list reserves to sell). */
+export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
+export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
+  const five = new Set(startingFive(c.roster).map(p => p.id));
+  return c.roster.map(p => ({ id: p.id, handle: p.handle, role: p.role, overall: Math.round(overall(p)), value: playerValue(p, w.patch), starter: five.has(p.id) }))
+    .sort((a, b) => Number(b.starter) - Number(a.starter) || b.overall - a.overall);
 }

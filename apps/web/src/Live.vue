@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -95,6 +95,17 @@ async function bid(e: MarketEntry) {
     else if (r.reason === 'below asking price') msg(`below asking (${kfmt(r.leadBid!)})`);
     else msg(r.reason ?? 'rejected');
   } catch (err) { msg((err as Error).message); } finally { marketBusy.value = false; }
+}
+const sellMsg = ref<Record<string, string>>({});
+async function sell(sp: SquadPlayer) {
+  if (!server.value || !token.value) return; marketBusy.value = true;
+  const msg = (m: string) => (sellMsg.value = { ...sellMsg.value, [sp.id]: m });
+  msg('');
+  try {
+    const r = await server.value.sell(sp.id, token.value);
+    if (r.ok) { msg(`✓ sold to ${r.buyer} for ${kfmt(r.fee!)}`); await refreshMe(); }
+    else msg(r.reason ?? 'rejected');
+  } catch (e) { msg((e as Error).message); } finally { marketBusy.value = false; }
 }
 
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
@@ -247,6 +258,19 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <span class="lv-mktmsg" :class="{ ok: (bidMsg[e.handle] || '').startsWith('✓') }">{{ bidMsg[e.handle] }}</span>
           </div>
           <div v-if="!board.length" class="lv-empty">loading the board…</div>
+        </div>
+        <div v-if="myClub.squad && myClub.squad.length" class="lv-squad">
+          <div class="lv-mkth"><span class="lv-kicker">Your squad</span><span class="lv-mktsub">sell to the richest club that wants him — blocked if it would break your valid five</span></div>
+          <div class="lv-mktboard">
+            <div v-for="sp in myClub.squad" :key="sp.id" class="lv-mktrow squad">
+              <span class="rs-role" :class="sp.role">{{ sp.role.slice(0, 3).toUpperCase() }}</span>
+              <b class="lv-mkthandle">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i></b>
+              <span class="lv-mktovr">{{ sp.overall }} <i>OVR</i></span>
+              <span class="lv-mktval">{{ kfmt(sp.value) }}</span>
+              <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
+              <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
+            </div>
+          </div>
         </div>
       </div>
 

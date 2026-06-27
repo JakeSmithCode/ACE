@@ -836,3 +836,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-mktrow:hover{background:rgba(255,255,255,.025)}
 .lv-watch,.cir-watch,.lv-go,.lv-planbtn{transition:background .12s ease,transform .1s ease}
 .lv-watch:active,.cir-watch:active,.lv-go:active{transform:translateY(1px)}
+/* Match Center — sell your squad */
+.lv-squad{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-2)}
+.lv-mktrow.squad{grid-template-columns:42px 1fr 70px 96px auto 1fr}
+.lv-starter{margin-left:7px;font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--brand);border:1px solid rgba(34,211,238,.4);padding:1px 4px;font-style:normal;vertical-align:middle}
+.lv-sellbtn{background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.4);color:var(--def);font-family:var(--label);font-weight:600;font-size:11px;letter-spacing:.05em;padding:6px 16px;cursor:pointer;clip-path:var(--bevel);transition:background .12s ease}
+.lv-sellbtn:hover{background:rgba(255,92,110,.2)}
+.lv-sellbtn:disabled{opacity:.5;cursor:default}
