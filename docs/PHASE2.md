@@ -381,6 +381,26 @@ not a sim rewrite.
    persisted score **byte-for-byte**. The BullMQ job is a thin async wrapper over
    this.*
 5. **Claim + AI takeover/revert + `club.plan`** (the always-has-a-plan rule).
+   ✅ *Done — the ownership overlay is pure `WorldState` transforms in
+   `@ace/world/owner.ts` (`claimClub` / `revertClub` / `setClubPlan`, with
+   `clubOf` / `planOf` / `ownedClubs`), wrapped for the store in
+   `apps/server/src/owner.ts` (`claim` / `revert` / `savePlan` / `myClub` —
+   load → transform → save; the Pg version runs the same transforms in a row
+   UPDATE). `club.owner` flips null↔account (one owner per club, one club per
+   account, enforced); the **plan** is `(tactics, comp, lineup)` and is always
+   present — an AI/ghosting club runs its generated tactics + comp and the derived
+   best five, a human authors theirs. `lineup` is additive/optional on `WorldClub`
+   (undefined → `startingFive`), so generated worlds are byte-identical; `planFive`
+   resolves an owner's explicit five when it's a `validFive` and **falls back**
+   otherwise, so a stale/invalid lineup can never break the always-field-a-five
+   rule (defense in depth alongside the `setClubPlan` write-time validation). On
+   revert the plan **persists** — the AI keeps fielding the last saved five.
+   `pnpm run server` proves it: claiming the Premier home club then authoring its
+   read/tempo makes the **full-sim snapshot carry the authored tactics** (the
+   human's plan drives the engine), a second claim is blocked, a bad lineup is
+   rejected, revert returns the club to AI with its plan intact, and **every club
+   still fields a valid five**. Auth (which account may call these) is the HTTP
+   layer's job (step 3); the engine never sees ownership, so seed 42 is unchanged.*
 6. **Fan-out `(tier, grp)` + the funnel.**
 7. **Re-sim-to-watch endpoint** + wire the existing viewer to it. 🟡 *The core is
    proven — full-sim persists the `input_snapshot` and a re-sim reproduces the

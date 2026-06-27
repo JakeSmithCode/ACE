@@ -4,13 +4,14 @@
 // double-resolves), and it's DETERMINISTIC (same seed → byte-identical world). No
 // DB, no HTTP — the exact resolution code the server runs, against an in-memory
 // store.
-import { RANK_TIERS, type WorldState } from '@ace/world';
+import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, type WorldState } from '@ace/world';
 import { simulateMatch } from '@ace/engine';
 import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, runSeason } from './tick.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
+import { claim, revert, savePlan, myClub } from './owner.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: string) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -103,5 +104,36 @@ console.log(`     t=2400   ${showLive(2400)}`);
 const sealedEarly = !at(2399).score && !at(0).snapshot;   // no public score + no snapshot before reveal
 const revealedLate = !!at(2400).score && !!at(2400).snapshot;
 console.log(`  embargo     : result + snapshot hidden during the broadcast → ${sealedEarly ? 'sealed ✓' : 'LEAK ✗'}; public at reveal → ${revealedLate ? 'released ✓' : 'STUCK ✗'}`);
+
+// ── 6. ownership overlay: claim a club, author its plan → the tick fields it ──
+const os = new MemoryStore();
+const oid = seedWorld(os, { seed, region: 'AMER' });
+const w6 = load(os, oid);
+// the Premier (watchable) club that is HOME in day-0 slot-0 — author its match
+const sched0 = divisionSchedule(membersOf(w6.clubs.map(c => c.tier), 0));
+const mine = w6.clubs[sched0[0][0].home];
+claim(os, oid, mine.id, 'acct-jake');
+const claimed = !!myClub(os, oid, 'acct-jake');
+let doubleBlocked = false; try { claim(os, oid, w6.clubs[sched0[0][0].away].id, 'acct-jake'); } catch { doubleBlocked = true; }
+// author a distinct plan: keep the comp, but flip the defensive read hard one way
+const authored = structuredClone(mine.tactics); authored.defense.read = 1; authored.attack.tempo = 1;
+savePlan(os, oid, mine.id, { tactics: authored, comp: mine.comp, lineup: planFive(mine).map(p => p.id) });
+console.log(`\n  ownership   : claimed ${mine.tag} for acct-jake → owned ${claimed ? '✓' : '✗'}; second claim blocked → ${doubleBlocked ? '✓' : '✗ LEAK'}`);
+
+// full-sim the Premier with the authored plan in place → the snapshot must carry it
+runTick(os, oid, { full: (d) => d === 0, navOf });
+const myFx = os.fixtures(oid, 1).find(f => f.inputSnapshot && f.home === sched0[0][0].home)!;
+const slot = myFx.home === sched0[0][0].home ? 0 : 1;
+const planReached = myFx.inputSnapshot!.tactics![slot].defense.read === 1 && myFx.inputSnapshot!.tactics![slot].attack.tempo === 1;
+console.log(`  plan→engine : ${mine.tag}'s authored read/aggression in the full-sim snapshot → ${planReached ? 'drives the match ✓' : 'MISSING ✗'}`);
+
+// a bad lineup is rejected; revert returns the club to AI but the plan persists
+let badRejected = false; try { savePlan(os, oid, mine.id, { tactics: authored, comp: mine.comp, lineup: [mine.roster[0].id] }); } catch { badRejected = true; }
+revert(os, oid, mine.id);
+const afterRevert = load(os, oid).clubs.find(c => c.id === mine.id)!;
+const planKept = afterRevert.owner === null && afterRevert.tactics.defense.read === 1;
+// the always-field-a-competent-five invariant holds for EVERY club post-ops
+const allValid = load(os, oid).clubs.every(c => validFive(planFive(c)));
+console.log(`  invariants  : bad lineup rejected → ${badRejected ? '✓' : '✗'}; revert → AI keeps plan → ${planKept ? '✓' : '✗'}; every club fields a valid five → ${allValid ? '✓' : '✗'}`);
 
 console.log(`\n  persisted (run A): ${A.store.fixtures(A.id).length} fixtures · ${A.store.ticks(A.id).length} ticks logged\n`);

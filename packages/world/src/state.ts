@@ -25,13 +25,19 @@ const clampStr = (s: number) => Math.max(0.3, Math.min(0.95, s));
 const ROLE_NEED = { duelist: 2, initiator: 1, controller: 1, sentinel: 1 } as const;
 
 /** A club in the world: a full roster (depth), a plan, money, a tier/group slot.
- *  `owner` is the human overlay (null = AI) — unused headless, the server sets it. */
+ *  `owner` is the human overlay (null = AI) — the server sets it on claim.
+ *  The **plan** the tick grabs is `(tactics, comp, lineup)`: an AI/ghosting club
+ *  runs its generated tactics + comp and the derived best five; a human owner may
+ *  override `lineup` (an explicit chosen five). `lineup` is additive/optional —
+ *  undefined derives the best five (`startingFive`), so every existing world is
+ *  byte-identical. */
 export interface WorldClub {
   id: string; name: string; tag: string;
   tier: number; group: number;
   roster: Player[]; tactics: Tactics; comp: Comp;
   strength: number; balance: number; titles: number;
   owner: string | null;
+  lineup?: string[];   // an owner's explicit five (player ids); undefined → best five
 }
 
 export interface WorldState {
@@ -53,7 +59,27 @@ export function startingFive(roster: Player[]): Player[] {
   });
   return five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
 }
-export const clubTeam = (c: WorldClub): Team => ({ id: c.id, tag: c.tag, name: c.name, players: startingFive(c.roster) });
+
+/** Does this exact five satisfy the comp floor (2 duelist + 1 init/ctrl/sentinel)?
+ *  The engine assumes a valid composition; a forced lineup that doesn't is ignored. */
+export function validFive(five: Player[]): boolean {
+  if (five.length !== 5) return false;
+  return (['duelist', 'initiator', 'controller', 'sentinel'] as const)
+    .every(role => five.filter(p => p.role === role).length === ROLE_NEED[role]);
+}
+
+/** The five a club actually fields: an owner's explicit `lineup` when it's a valid
+ *  five drawn from the roster, otherwise the derived best five. So a saved lineup
+ *  can never break the always-field-a-competent-five rule — a stale/invalid one
+ *  simply falls back (defense in depth alongside the `setClubPlan` validation). */
+export function planFive(c: WorldClub): Player[] {
+  if (c.lineup && c.lineup.length === 5) {
+    const chosen = c.lineup.map(id => c.roster.find(p => p.id === id)).filter((p): p is Player => !!p);
+    if (validFive(chosen)) return chosen.map(p => ({ ...p, igl: p.role === 'sentinel' }));
+  }
+  return startingFive(c.roster);
+}
+export const clubTeam = (c: WorldClub): Team => ({ id: c.id, tag: c.tag, name: c.name, players: planFive(c) });
 
 /** Generate a fresh world from a seed: a strength-descending field split into
  *  `tiers` tiers of `size` (Premier at the top, the rank ladder below). */
