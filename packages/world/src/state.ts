@@ -140,15 +140,20 @@ export function createWorld(seed: number, opts: { tiers?: number; size?: number;
   return { seed, region: opts.region ?? 'AMER', tiers: layout.length, size, promo, layout, season: 1, day: 0, patch: fullPatch(PATCH, ALL_AGENTS), clubs, results: [] };
 }
 
-/** A lookup of each `(tier, group)` division's final table (best-first), built once
- *  from the season's results. A division's fixtures are intra-division, so filtering
- *  results by the home club's `(tier, group)` selects exactly that table's games. */
+/** One `(tier, group)` division's final table (best-first) from the season's
+ *  results. A division's fixtures are intra-division, so filtering results by the
+ *  home club's `(tier, group)` selects exactly that table's games. The Premier table
+ *  is `divisionTable(w, 0, 0)` — what seeds the playoff bracket + the international
+ *  circuit. */
+export function divisionTable(w: WorldState, tier: number, group: number): ReturnType<typeof standings> {
+  const res = w.results.filter(r => w.clubs[r.home].tier === tier && w.clubs[r.home].group === group);
+  return standings(w.clubs.length, res).filter(s => w.clubs[s.club].tier === tier && w.clubs[s.club].group === group);
+}
+
+/** A lookup of every division's final table, built once for the off-season roll. */
 function divTables(w: WorldState): (tier: number, group: number) => ReturnType<typeof standings> {
   const map = new Map<number, ReturnType<typeof standings>>();
-  for (const d of worldDivisions(w)) {
-    const res = w.results.filter(r => w.clubs[r.home].tier === d.tier && w.clubs[r.home].group === d.group);
-    map.set(divSeedOffset(d.tier, d.group), standings(w.clubs.length, res).filter(s => w.clubs[s.club].tier === d.tier && w.clubs[s.club].group === d.group));
-  }
+  for (const d of worldDivisions(w)) map.set(divSeedOffset(d.tier, d.group), divisionTable(w, d.tier, d.group));
   return (tier, group) => map.get(divSeedOffset(tier, group)) ?? [];
 }
 

@@ -425,7 +425,20 @@ not a sim rewrite.
    score byte-for-byte (server CLI). What remains is the HTTP `GET
    /fixtures/:id/replay` returning the snapshot + the client loading it into the
    viewer.*
-8. **Regional shards.**
+8. **Regional shards.** ✅ *Done — `@ace/world/circuit.ts`. A shard is one region's
+   pyramid (a self-contained `WorldState` with its own seed + clock → its own `world`
+   row, ticked independently, partitioning load). `createCircuit(seed, { regions })`
+   generates one shard per region (each `createWorld` on a `shardSeed`, so a whole
+   multi-region circuit is a function of one seed). The **international circuit**
+   (`internationalEvent`, DESIGN §9) connects shard tops: each season the top `slots`
+   of every region's Premier qualify, are seeded overall (region winners first, ties
+   by strength), and play a single-elim bracket (the field trimmed to a power of two,
+   classic spread seeding, every game seed a stable hash) — Masters/Champions. Pure +
+   deterministic; the engine never sees it. `pnpm run server` proves it: 4 regional
+   pyramids resolve independently (distinct Premier champions), an 8-team Masters
+   bracket crowns a global champion each season, the region-cup tally accumulates, and
+   the whole circuit is deterministic across two runs. (Awarding intl prize/prestige
+   back to the shard is a cheap follow-up; the connector is read-only today.)*
 9. **Tick-night realtime** (match center MVP) + **public club page**.
 10. **Stripe VIP.**
 
