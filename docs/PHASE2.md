@@ -454,8 +454,12 @@ not a sim rewrite.
    deterministic; the engine never sees it. `pnpm run server` proves it: 4 regional
    pyramids resolve independently (distinct Premier champions), an 8-team Masters
    bracket crowns a global champion each season, the region-cup tally accumulates, and
-   the whole circuit is deterministic across two runs. (Awarding intl prize/prestige
-   back to the shard is a cheap follow-up; the connector is read-only today.)*
+   the whole circuit is deterministic across two runs. **The prize loop is in** —
+   `awardInternational(worlds, result)` pays each qualifier's club by bracket finish
+   (champion $250k … appearance $25k, `DEFAULT_INTL_PRIZE`) into its shard's balance,
+   pure + opt-in so the no-circuit CLIs + seed 42 are untouched (the s1 champion banks
+   +$250k → a deep run reshapes a club's transfer budget and pulls money into a strong
+   region). Prestige counters (intl titles) are the remaining polish.*
 9. **Tick-night realtime** (match center MVP) + **public club page**. 🟡 *Largely
    done over the `node:http` slice (`http.ts`): the SSE `GET /live/:s/:d` match-center
    streams the synced running score (step done earlier); the **public club page**

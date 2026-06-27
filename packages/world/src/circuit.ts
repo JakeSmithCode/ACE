@@ -105,3 +105,24 @@ export function regionTitles(results: IntlResult[]): Record<string, number> {
   for (const r of results) t[r.champion.region] = (t[r.champion.region] ?? 0) + 1;
   return t;
 }
+
+/** International prize money by finish (DESIGN §9 — the event has to *matter*). The
+ *  pool dwarfs a domestic season so a deep international run reshapes a club's
+ *  transfer budget, and a strong region pulls money into its shard. */
+export interface IntlPrize { champion: number; finalist: number; semifinal: number; appearance: number }
+export const DEFAULT_INTL_PRIZE: IntlPrize = { champion: 250_000, finalist: 120_000, semifinal: 60_000, appearance: 25_000 };
+
+/** Pay out an event into the shards: each qualifier's club banks a prize by its
+ *  bracket finish (champion > finalist > semifinalist > appearance). Pure — returns
+ *  new shard states (balances bumped), so it's opt-in and the no-circuit CLIs +
+ *  seed 42 are untouched. The server applies this at the off-season seam. */
+export function awardInternational(worlds: WorldState[], result: IntlResult, prize: IntlPrize = DEFAULT_INTL_PRIZE): WorldState[] {
+  const payout = new Map<string, number>();   // `${region}|${club}` → prize
+  result.placement.forEach((e, rank) => {
+    payout.set(`${e.region}|${e.club}`, rank === 0 ? prize.champion : rank === 1 ? prize.finalist : rank < 4 ? prize.semifinal : prize.appearance);
+  });
+  return worlds.map(w => {
+    if (![...payout.keys()].some(k => k.startsWith(`${w.region}|`))) return w;
+    return { ...w, clubs: w.clubs.map((c, i) => { const add = payout.get(`${w.region}|${i}`) ?? 0; return add ? { ...c, balance: c.balance + add } : c; }) };
+  });
+}

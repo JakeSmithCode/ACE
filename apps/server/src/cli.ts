@@ -4,7 +4,7 @@
 // double-resolves), and it's DETERMINISTIC (same seed → byte-identical world). No
 // DB, no HTTP — the exact resolution code the server runs, against an in-memory
 // store.
-import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, createWorld, simulateSeason, advanceWorld, worldDivisions, createCircuit, internationalEvent, regionTitles, divisionTable, type IntlResult, type WorldState } from '@ace/world';
+import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, createWorld, simulateSeason, advanceWorld, worldDivisions, createCircuit, internationalEvent, regionTitles, awardInternational, DEFAULT_INTL_PRIZE, divisionTable, type IntlResult, type WorldState } from '@ace/world';
 import { simulateMatch } from '@ace/engine';
 import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
@@ -155,25 +155,28 @@ console.log(`  determinism : two independent grouped runs → ${detG ? 'IDENTICA
 // a shard is one region's pyramid (its own world row, ticked independently); each
 // season the regions' best meet at an international event (Masters/Champions).
 const REGIONS_DEMO = ['AMER', 'EMEA', 'PACIFIC', 'CHINA'];
-function runCircuit(s: number): { champs: string[]; intl: IntlResult[]; premierChamps: string[] } {
+function runCircuit(s: number): { champs: string[]; intl: IntlResult[]; premierChamps: string[]; prizeBump: number } {
   const cs = new MemoryStore();
   const ids = createCircuit(s, { regions: REGIONS_DEMO, tiers: 3, size: 6, promo: 1 }).map(w => cs.createWorld(w));
   const intl: IntlResult[] = [], champs: string[] = [];
-  let premierChamps: string[] = [];
+  let premierChamps: string[] = [], prizeBump = 0;
   for (let yr = 0; yr < 3; yr++) {
     const worlds = ids.map(id => simulateSeason(load(cs, id)));
     const ev = internationalEvent(worlds, { seed: (s ^ (yr * 0x9e3779b9)) >>> 0, slots: 2 });
     intl.push(ev); champs.push(`${ev.champion.region}·${ev.champion.tag}`);
     if (yr === 0) premierChamps = worlds.map(w => `${w.region}·${w.clubs[divisionTable(w, 0, 0)[0].club].tag}`);
-    ids.forEach((id, i) => cs.saveWorld(id, advanceWorld(worlds[i]).world));
+    const paid = awardInternational(worlds, ev);   // prize money into the shards (DESIGN §9)
+    if (yr === 0) { const champW = paid.find(w => w.region === ev.champion.region)!; prizeBump = champW.clubs[ev.champion.club].balance - worlds.find(w => w.region === ev.champion.region)!.clubs[ev.champion.club].balance; }
+    ids.forEach((id, i) => cs.saveWorld(id, advanceWorld(paid[i]).world));
   }
-  return { champs, intl, premierChamps };
+  return { champs, intl, premierChamps, prizeBump };
 }
 const C = runCircuit(seed);
 const fieldN = C.intl[0].field.length, bracketN = C.intl[0].placement.length;
 console.log(`\n  shards      : ${REGIONS_DEMO.length} regional pyramids (${REGIONS_DEMO.join(' ')}) — independent world rows; s1 Premier champs ${C.premierChamps.join('  ')}`);
 console.log(`  intl event  : ${fieldN} qualifiers (2/region) → ${bracketN}-team bracket; champions by season ${C.champs.join('  ')}`);
 console.log(`  region cup  : ${Object.entries(regionTitles(C.intl)).map(([r, n]) => `${r}×${n}`).join('  ')}`);
+console.log(`  prize money : s1 champion banked +$${C.prizeBump.toLocaleString()} (of $${DEFAULT_INTL_PRIZE.champion.toLocaleString()} top prize) → the circuit reshapes budgets ${C.prizeBump === DEFAULT_INTL_PRIZE.champion ? '✓' : '✗'}`);
 const detC = JSON.stringify(runCircuit(seed).champs) === JSON.stringify(C.champs);
 const independent = new Set(C.premierChamps).size === REGIONS_DEMO.length;
 console.log(`  properties  : shards resolve independently → ${independent ? '✓' : '✗'}; whole circuit deterministic → ${detC ? '✓' : '✗'}`);
