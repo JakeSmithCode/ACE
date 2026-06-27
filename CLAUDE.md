@@ -168,7 +168,7 @@ To re-balance or measure a tuning change, an A/B is easy: gate utility generatio
 
 - Monorepo: pnpm + turbo. Packages are consumed as source via path mapping (`@ace/shared`, `@ace/maps`, `@ace/engine`) — tsx runs the engine, Vite bundles the app — so packages have no separate compile step; their "build" is a typecheck (`tsc --noEmit`). Don't add `rootDir`/`outDir` emit back to them, and don't commit `.js`/`.d.ts` next to `.ts` source (the web build is `vue-tsc --noEmit && vite build` specifically to avoid emitting those).
 - Commit artifacts that make a cold clone work: the committed sample `apps/web/public/timeline.json` and `packages/maps/data/*.navmesh.json` are intentional so `pnpm install && pnpm dev` works without running the engine first. Regenerate them when their inputs change.
-- Before opening a PR / finishing a task: `pnpm typecheck` green, `pnpm sim` deterministic across two runs and complete across several seeds, `pnpm build` green.
+- Before opening a PR / finishing a task: `pnpm typecheck` green, `pnpm sim` deterministic across two runs and complete across several seeds, `pnpm build` green. **`pnpm sim:check`** is the automated determinism golden test (the manual two-run diff, as a gate): it re-sims the canonical seed-42 input and fails non-zero if the output isn't run-to-run byte-identical *and* an exact match for the committed `apps/web/public/timeline.json` — run it in CI and after any engine change (if the change was intentional, regenerate the sample with `pnpm sim -- --seed 42` and commit it on purpose).
 - TypeScript strict is on (incl. `noUnusedLocals`) — no dead variables.
 
 ## Roadmap (see `DESIGN.md` §17 for detail)

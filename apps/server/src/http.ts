@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, type WorldState, type WorldClub } from '@ace/world';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick } from './tick.js';
@@ -135,6 +135,23 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
     if (path[0] === 'standings' && path.length === 4) {
       const w = store.loadWorld(id)!;
       return json(res, 200, { tier: +path[2], group: +path[3], table: standingsView(w, store.fixtures(id, +path[1]), +path[2], +path[3], now) });
+    }
+    // GET /world  → the shard summary (region, clock, the division pyramid)
+    if (path[0] === 'world' && path.length === 1) {
+      const w = store.loadWorld(id)!;
+      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length });
+    }
+    // GET /schedule/:tier/:group  → a division's fixtures (pure, with live status)
+    if (path[0] === 'schedule' && path.length === 3) {
+      const w = store.loadWorld(id)!;
+      const tier = +path[1], group = +path[2];
+      const members = membersOfDiv(w.clubs.map(c => c.tier), w.clubs.map(c => c.group), tier, group);
+      const rows = store.fixtures(id, w.season);
+      const matchdays = divisionSchedule(members).map((day, d) => day.map(fx => {
+        const row = rows.find(r => r.day === d && r.home === fx.home && r.away === fx.away);
+        return { day: d, home: w.clubs[fx.home].tag, away: w.clubs[fx.away].tag, status: row ? fixtureStatus(row, now) : 'scheduled' };
+      }));
+      return json(res, 200, { tier, group, matchdays });
     }
     // GET /me  → the club this account owns (x-account)
     if (path[0] === 'me' && path.length === 1) {

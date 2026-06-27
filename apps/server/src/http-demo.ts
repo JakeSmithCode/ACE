@@ -62,6 +62,11 @@ async function main() {
   console.log(`  plan write    : /me read=${me.plan.tactics.defense.read} tempo=${me.plan.tactics.attack.tempo} → authored ✓`);
   const playedDuring = standDuring.table.reduce((n: number, r: any) => n + r.played, 0);
   console.log(`  standings     : during window → ${playedDuring} games played in the table ${playedDuring === 0 ? '(embargoed ✓)' : '(LEAK ✗)'}`);
+  const world = await get(`${srv.url}/world`);
+  const sched = await get(`${srv.url}/schedule/0/0`);
+  const liveDay = sched.matchdays[0].filter((f: any) => f.status !== 'scheduled').length;
+  console.log(`  world         : ${world.region} S${world.season} D${world.day} · ${world.tiers} tiers · ${world.divisions} divisions · ${world.clubs} clubs`);
+  console.log(`  schedule      : Premier ${sched.matchdays.length} match-days, ${sched.matchdays[0].length} games/day; day-0 live/resolved ${liveDay} ${liveDay > 0 ? '✓' : '✗'}`);
 
   // ── 1. mid-broadcast: the result is SEALED ───────────────────────────────
   const during = await get(fxUrl);
