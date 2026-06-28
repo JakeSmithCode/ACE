@@ -451,6 +451,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-fatpct{font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--muted-2);font-variant-numeric:tabular-nums}
 .rs-fatpct.tired{color:var(--gold)}
 .rs-inj{font-family:var(--label);font-size:9.5px;letter-spacing:.04em;color:var(--def);background:rgba(255,92,110,.12);border:1px solid rgba(255,92,110,.35);padding:2px 6px;clip-path:var(--bevel)}
+.rs-trait{margin-top:4px;font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--brand);display:inline-block}
+.rs-trait.tr-bigGame{color:var(--gold)}
+.rs-trait.tr-leader{color:var(--win)}
+.rs-trait.tr-hothead{color:var(--def)}
+.rs-trait.tr-professional{color:var(--brand)}
+.rs-trait.tr-workhorse{color:#8fd3c0}
+.rs-trait.tr-mercurial{color:#c79bf0}
 .rs-capt{width:17px;height:17px;border-radius:50%;border:1px solid var(--line-2);background:transparent;color:var(--muted-2);font-family:var(--display);font-weight:700;font-size:11px;line-height:1;cursor:pointer;padding:0;display:inline-grid;place-items:center;vertical-align:middle}
 .rs-capt:hover{border-color:var(--gold);color:var(--gold)}
 .rs-capt.on{background:var(--gold);border-color:var(--gold);color:var(--bg)}
@@ -1012,6 +1019,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-clubfive{display:flex;flex-direction:column;gap:6px}
 .lv-fiverow{display:grid;grid-template-columns:42px 1fr auto auto auto;align-items:center;gap:10px;padding:7px 9px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel)}
 .lv-fiveagent{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--brand);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.22);padding:2px 7px;clip-path:var(--bevel)}
+.lv-fivetrait{font-family:var(--label);font-size:9px;letter-spacing:.03em;color:var(--muted-2);margin-left:7px;white-space:nowrap}
 .lv-dossier{margin:10px 0;padding:11px 13px;background:linear-gradient(180deg,#0c1925,#0a141d);border:1px solid var(--line-2);clip-path:var(--bevel)}
 .lv-doshead{font-family:var(--label);font-size:10px;letter-spacing:.16em;color:var(--muted);margin-bottom:8px}
 .lv-dosrow,.lv-doscounter{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:baseline;padding:3px 0}

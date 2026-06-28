@@ -20,6 +20,7 @@ import {
   defaultAcademy, academyIntake, academyCost, academyUpkeep, academyWageBill, intakeSize, ACADEMY_MAX,
   staffMarket, staffEffect, withStaffBoost, staffWageBill, STAFF_ROLES,
   sponsorOffers, sponsorGoalMet, sponsorGoalText, type SponsorOffer, type ActiveSponsor,
+  traitKeyOf,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
@@ -287,17 +288,18 @@ function updateFitness(fielded: Set<string>, rng: Rng) {
   for (const p of myRoster.value) {
     const played = fielded.has(p.id);
     const cur = fat.get(p.id) ?? 0;
+    const horse = traitKeyOf(p.id) === 'workhorse';             // an iron man tires slower + gets hurt less
     if (played) {
       // injury risk is read at the fatigue he PLAYED at (pre-increment); one draw per starter.
       // a sports psychologist cuts both the injury rate and how hard the day fatigues.
-      if (!inj.has(p.id) && rng.chance((INJ_BASE + INJ_FAT * (cur / FAT_MAX)) * staffEff.value.injuryMul)) {
+      if (!inj.has(p.id) && rng.chance((INJ_BASE + INJ_FAT * (cur / FAT_MAX)) * staffEff.value.injuryMul * (horse ? 0.7 : 1))) {
         const days = rng.int(2, 4);
         inj.set(p.id, days); fat.set(p.id, 20);           // sidelined; rests while out
         const o = overall(p);
         if (!worst || o > worst.ovr) worst = { handle: p.handle, days, ovr: o };
       } else {
         const campFit = camp.value === 'fitness' ? CAMP_FAT : 1;   // a fitness camp slows the burn
-        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN * staffEff.value.fatigueMul * campFit));
+        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN * staffEff.value.fatigueMul * campFit * (horse ? 0.8 : 1)));
       }
     } else {
       fat.set(p.id, Math.max(0, cur - FAT_RECOVER));      // bench/rest recovers
@@ -316,14 +318,21 @@ function updateMorale(fielded: Set<string>, won: boolean | null, derby = false) 
   const cap = captainOf();
   const capLift = cap ? ((leadership(cap) - 50) / 100) * 3 : 0;        // a strong armband lifts spirits, a weak one drags
   const capRevert = cap ? 0.06 * (0.7 + (leadership(cap) / 100) * 0.8) : 0.06;   // a leader steadies the room (faster reversion)
+  // a fielded "Natural Leader" lifts the whole room (a trait, on top of the captain)
+  const leaderLift = myRoster.value.filter(p => fielded.has(p.id) && traitKeyOf(p.id) === 'leader').length * 0.8;
   const next = new Map(morale.value);
   for (const p of myRoster.value) {
     let m = next.get(p.id) ?? MORALE_BASE;
-    m += won === true ? 6 : won === false ? -5 : 0;              // the result moves the room
-    m += derbySwing;                                            // a derby is worth more either way
+    const tr = traitKeyOf(p.id);
+    let result = won === true ? 6 : won === false ? -5 : 0;     // the result moves the room
+    if (tr === 'hothead' && won === false) result *= 1.6;       // a hothead takes a loss hard
+    if (tr === 'mercurial') result *= 1.4;                      // a streak player swings harder either way
+    if (tr === 'professional') result *= 0.55;                  // a pro stays level
+    const revert = tr === 'professional' ? capRevert * 1.5 : capRevert;
+    m += result + derbySwing;                                  // result (trait-shaped) + derby stakes
     m += fielded.has(p.id) ? 1.5 : -2.5;                         // minutes: starters happy, reserves restless
     if (isInjured(p.id)) m -= 3;                                 // being hurt stings
-    m += psych + talkMood + capLift + (camp.value === 'sharpness' ? CAMP_MOOD : 0) + (MORALE_BASE - m) * capRevert;   // psych + talk + captain + camp + leader-steadied reversion
+    m += psych + talkMood + capLift + leaderLift + (camp.value === 'sharpness' ? CAMP_MOOD : 0) + (MORALE_BASE - m) * revert;
     next.set(p.id, Math.max(0, Math.min(100, m)));
   }
   morale.value = next;
@@ -603,10 +612,12 @@ function buildInput(fx: { home: number; away: number }, seed: number, map: MapId
   // your fielded five carry their match-night fitness (fatigue dulls, an injury played
   // through hits harder); the engine just sees the scaled attrs — pure store concern.
   const talk = talkFactor();   // a team-wide one-match edge from the team talk (1 = neutral)
+  const matchDerby = isRival(fx.home === myClub.value ? fx.away : fx.home);   // a "Big-Game Player" rises here
   const fit = (i: number, team: Team): Team => {
     if (i !== myClub.value) return team;
     return { ...team, players: team.players.map(p => {
-      const f = fitnessFactor(p.id, team.players) * moraleFactor(p.id) * talk;   // fitness × mood × team talk
+      const big = matchDerby && traitKeyOf(p.id) === 'bigGame' ? 1.04 : 1;     // big-game players sharpen for the derby
+      const f = fitnessFactor(p.id, team.players) * moraleFactor(p.id) * talk * big;   // fitness × mood × talk × big-game
       if (f === 1) return p;
       const attr = { ...p.attr };
       for (const k of Object.keys(attr) as (keyof Attributes)[]) attr[k] = Math.max(1, Math.min(99, Math.round(attr[k] * f)));

@@ -4,7 +4,7 @@
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank, traitOf } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -52,6 +52,7 @@ const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '
             :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>
         </div>
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
+        <div v-if="traitOf(p.id)" class="rs-trait" :class="'tr-' + traitOf(p.id)!.key" :title="traitOf(p.id)!.blurb">✦ {{ traitOf(p.id)!.label }}</div>
         <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
         <div class="rs-fit">
           <span v-if="w.isInjured(p.id)" class="rs-inj" :title="`injured — out for ${w.injuryOf(p.id)} more match-day(s); a reserve covers, or he plays through hurt`">⚕ OUT {{ w.injuryOf(p.id) }}d</span>
