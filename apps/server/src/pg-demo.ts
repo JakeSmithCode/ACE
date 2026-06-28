@@ -25,6 +25,7 @@ class FakeQueryable implements Queryable {
   private ticks: { world_id: string; season: number; day: number; kind: string; fixtures: number }[] = [];
   private accounts = new Map<string, { id: string; email: string; password_hash: string; created_at: number; verified: boolean; verify_token: string | null }>();
   private refresh = new Map<string, { token_hash: string; account_id: string; expires_at: number; revoked: boolean }>();
+  private acctData = new Map<string, string>();   // `${world}:${account}` → jsonb string
 
   async query(text: string, params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> {
     const t = text.trim();
@@ -42,7 +43,7 @@ class FakeQueryable implements Queryable {
     if (t.startsWith('insert into ace_tick_log')) { if (this.ticks.some(x => x.world_id === p[0] && x.season === p[1] && x.day === p[2] && x.kind === p[3])) throw new Error('duplicate key (idempotency PK)'); this.ticks.push({ world_id: p[0], season: p[1], day: p[2], kind: p[3], fixtures: p[4] }); return { rows: [] }; }
     if (t.startsWith('select world_id, season, day, kind, fixtures from ace_tick_log')) return { rows: this.ticks.filter(x => x.world_id === p[0]) };
     // ── ace_account / ace_refresh ──
-    if (t.startsWith('insert into ace_account')) { if ([...this.accounts.values()].some(a => a.email === p[1])) throw new Error('unique(email) violation'); this.accounts.set(p[0], { id: p[0], email: p[1], password_hash: p[2], created_at: p[3], verified: false, verify_token: p[4] }); return { rows: [] }; }
+    if (t.startsWith('insert into ace_account (')) { if ([...this.accounts.values()].some(a => a.email === p[1])) throw new Error('unique(email) violation'); this.accounts.set(p[0], { id: p[0], email: p[1], password_hash: p[2], created_at: p[3], verified: false, verify_token: p[4] }); return { rows: [] }; }
     if (t.startsWith('select * from ace_account where email')) { const a = [...this.accounts.values()].find(x => x.email === p[0]); return { rows: a ? [a] : [] }; }
     if (t.startsWith('select * from ace_account where verify_token')) { const a = [...this.accounts.values()].find(x => x.verify_token != null && x.verify_token === p[0]); return { rows: a ? [a] : [] }; }
     if (t.startsWith('select * from ace_account where id')) { const a = this.accounts.get(p[0]); return { rows: a ? [a] : [] }; }
@@ -50,6 +51,10 @@ class FakeQueryable implements Queryable {
     if (t.startsWith('insert into ace_refresh')) { this.refresh.set(p[0], { token_hash: p[0], account_id: p[1], expires_at: p[2], revoked: false }); return { rows: [] }; }
     if (t.startsWith('select account_id, token_hash, expires_at, revoked from ace_refresh')) { const r = this.refresh.get(p[0]); return { rows: r ? [r] : [] }; }
     if (t.startsWith('update ace_refresh set revoked')) { const r = this.refresh.get(p[0]); if (r) r.revoked = true; return { rows: [] }; }
+    // ── ace_account_data (per-account jsonb blob, upsert on (world, account)) ──
+    if (t.startsWith('select data from ace_account_data')) { const d = this.acctData.get(`${p[0]}:${p[1]}`); return { rows: d ? [{ data: JSON.parse(d) }] : [] }; }
+    if (t.startsWith('insert into ace_account_data')) { this.acctData.set(`${p[0]}:${p[1]}`, p[2] as string); return { rows: [] }; }   // ON CONFLICT DO UPDATE → upsert
+    if (t.startsWith('select account_id, data from ace_account_data')) { const out: Record<string, unknown>[] = []; for (const [k, v] of this.acctData) { const wid = k.slice(0, k.indexOf(':')); if (wid === p[0]) out.push({ account_id: k.slice(k.indexOf(':') + 1), data: JSON.parse(v) }); } return { rows: out }; }
     throw new Error(`FakeQueryable: unhandled query → ${t}`);
   }
 }
@@ -65,6 +70,19 @@ async function main() {
   const same = digest(memW) === digest(pgW);
   console.log(`  tick parity : 3 seasons via PgStore vs MemoryStore → ${same ? 'IDENTICAL ✓' : 'DIVERGED ✗'} (${digest(pgW)})`);
   console.log(`  persistence : ${(await pg.fixtures(pgId)).length} fixtures · ${(await pg.ticks(pgId)).length} ticks round-tripped through jsonb`);
+
+  // 1b. per-account data (academy/scout/inboxes blob) round-trips + upserts + lists, Pg == Memory
+  const blob = { academy: { level: 2, prospects: [{ handle: 'NOVA2', age: 16 }] }, scout: { NOVA2: 2 } };
+  let acctOk = true;
+  for (const [, store, sid] of [['Memory', mem, memId], ['Pg', pg, pgId]] as const) {
+    await store.saveAccountData(sid, 'acct-1', blob);
+    await store.saveAccountData(sid, 'acct-1', { ...blob, academy: { ...blob.academy, level: 3 } });   // upsert overwrites
+    await store.saveAccountData(sid, 'acct-2', { scout: { ICEX: 1 } });
+    const got = await store.loadAccountData(sid, 'acct-1') as typeof blob;
+    const list = await store.listAccountData(sid);
+    if (((got?.academy as { level: number })?.level) !== 3 || list.length !== 2) acctOk = false;
+  }
+  console.log(`  account data: jsonb blob saved/upserted/listed, Pg == Memory → ${acctOk ? '✓' : '✗'}`);
 
   // 2. idempotency at the DB level: re-recording a tick fails on the PK
   let dup = false; try { await pg.recordTick({ worldId: pgId, season: 1, day: 0, kind: 'matchday', fixtures: 0 }); } catch { dup = true; }

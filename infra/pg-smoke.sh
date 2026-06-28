@@ -24,9 +24,10 @@ su postgres -c "$PGBIN/pg_ctl -D '$PGDATA' -o \"-k '$SOCK' -c listen_addresses='
 psql() { printf '%s\n' "$1" | su postgres -c "$PGBIN/psql -h '$SOCK' -d ace -v ON_ERROR_STOP=1 -qtA"; }
 su postgres -c "$PGBIN/createdb -h '$SOCK' ace"
 
-echo "  migrations  : apply 0002_worldstore.sql + 0003_email_verify.sql on real PG"
-su postgres -c "$PGBIN/psql -h '$SOCK' -d ace -v ON_ERROR_STOP=1 -q -f '$ROOT/infra/migrations/0002_worldstore.sql'" >/dev/null
-su postgres -c "$PGBIN/psql -h '$SOCK' -d ace -v ON_ERROR_STOP=1 -q -f '$ROOT/infra/migrations/0003_email_verify.sql'" >/dev/null
+echo "  migrations  : apply 0002 + 0003 + 0004 on real PG"
+for mig in 0002_worldstore 0003_email_verify 0004_account_data; do
+  su postgres -c "$PGBIN/psql -h '$SOCK' -d ace -v ON_ERROR_STOP=1 -q -f '$ROOT/infra/migrations/$mig.sql'" >/dev/null
+done
 
 fail=0
 # ── ace_world: a WorldState stored verbatim as jsonb, read back ──
@@ -64,6 +65,12 @@ if psql "insert into ace_account (id,email,password_hash,created_at) values ('ac
 else
   echo "  unique email: duplicate email rejected ✓"
 fi
+
+# ── ace_account_data: per-account jsonb blob, upsert on (world, account) ──
+psql "insert into ace_account_data (world_id, account_id, data) values ('world-1','acct-1','{\"academy\":{\"level\":2}}'::jsonb)" >/dev/null
+psql "insert into ace_account_data (world_id, account_id, data) values ('world-1','acct-1','{\"academy\":{\"level\":3}}'::jsonb) on conflict (world_id, account_id) do update set data = excluded.data" >/dev/null
+LVL=$(psql "select data->'academy'->>'level' from ace_account_data where world_id='world-1' and account_id='acct-1'")
+[ "$LVL" = "3" ] && echo "  account data: jsonb blob upserted on (world,account) PK (level=$LVL) ✓" || { echo "  account data: FAIL ($LVL)"; fail=1; }
 
 echo ""
 [ "$fail" = "0" ] && echo "  ✓ PgStore SQL verified against a real PostgreSQL 16 engine." || { echo "  ✗ real-Postgres verification FAILED."; exit 1; }

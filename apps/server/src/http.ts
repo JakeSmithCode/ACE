@@ -106,6 +106,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // + prospects are the owner's state; the money (upgrade, upkeep) hits the club balance.
   const academies = new Map<string, Academy>();
   const acadOf = (account: string) => academies.get(account) ?? defaultAcademy();
+  // The academy + scout Maps above are a write-through CACHE over the store's per-account
+  // data blob (`ace_account_data`), so a PgStore-backed deployment keeps a human's youth
+  // pipeline + scout reports across restarts. Hydrated at startup; persisted on mutation.
+  const persistAccount = (account: string) => store.saveAccountData(id, account, {
+    academy: academies.get(account) ?? null,
+    scout: Object.fromEntries(scoutReports.get(account) ?? []),
+  });
+  for (const { account, data } of await store.listAccountData(id)) {
+    if (data.academy) academies.set(account, data.academy as Academy);
+    if (data.scout) scoutReports.set(account, new Map(Object.entries(data.scout as Record<string, number>)));
+  }
   // every handle in the world that an intake must avoid (engine assumes unique handles):
   // every rostered player, every academy prospect, AND the cached free-agent board (a
   // promoted prospect must never collide with a signable free agent).
@@ -205,6 +216,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         acad = takeIntake(((dev.world.seed ^ 0x5f356495) >>> 0), newSeason, acad, allHandles(dev.world));
         academies.set(acct, acad);
         await store.saveWorld(id, dev.world);
+        await persistAccount(acct);
       }
     };
     // targeted notifications: each owner gets their fixture-going-live + any new result
@@ -369,6 +381,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const reports = scoutReports.get(account) ?? new Map<string, number>();
       reports.set(player.handle, level + 1);
       scoutReports.set(account, reports);
+      await persistAccount(account);
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ok: true, level: level + 1, cost, ceiling: scoutedRange(player, false, level + 1), nextCost: level + 1 < SCOUT_MAX ? scoutCost(level + 1) : null, balance: after.clubs.find(c => c.id === mine.id)!.balance });
     }
@@ -568,6 +581,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         acad = takeIntake(((w.seed ^ 0x5f356495) >>> 0), w.season, acad, allHandles(up.world));   // first class arrives
         academies.set(account, acad);
         await store.saveWorld(id, up.world);
+        await persistAccount(account);
         const after = (await store.loadWorld(id))!;
         return json(res, 200, academyView(acad, after.clubs.find(c => c.id === mine.id)!.balance, h => scoutLevelOf(account, h)));
       } catch (e) { return json(res, 200, { error: (e as Error).message }); }
@@ -583,6 +597,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         const g = graduateProspect(w, mine.id, acadOf(account), w.patch, b.ref ?? '');
         academies.set(account, g.academy);
         await store.saveWorld(id, g.world);
+        await persistAccount(account);
         const after = (await store.loadWorld(id))!;
         const c = after.clubs.find(x => x.id === mine.id)!;
         return json(res, 200, { ok: true, academy: academyView(g.academy, c.balance, h => scoutLevelOf(account, h)), squad: squadView(after, c) });
@@ -595,6 +610,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!mine) return json(res, 404, { error: 'you own no club' });
       const b = (await readBody(req)) as { ref?: string };
       academies.set(account, cutProspect(acadOf(account), b.ref ?? ''));
+      await persistAccount(account);
       const w = (await store.loadWorld(id))!;
       return json(res, 200, academyView(acadOf(account), w.clubs.find(c => c.id === mine.id)!.balance, h => scoutLevelOf(account, h)));
     }
@@ -613,6 +629,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (cost > mine.balance) return json(res, 200, { ok: false, reason: 'insufficient funds', cost, level, ceiling: scoutedRange(p, true, level) });
       await store.saveWorld(id, chargeScout((await store.loadWorld(id))!, mine.id, cost));
       addReport(account, p.handle, level + 1);
+      await persistAccount(account);
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ok: true, level: level + 1, cost, ceiling: scoutedRange(p, true, level + 1), nextCost: level + 1 < SCOUT_MAX ? scoutCost(level + 1) : null, balance: after.clubs.find(c => c.id === mine.id)!.balance });
     }

@@ -41,6 +41,14 @@ export interface WorldStore {
   tickDone(id: string, season: number, day: number, kind: TickKind): Promise<boolean>;
   recordTick(row: TickRow): Promise<void>;
   ticks(id: string): Promise<TickRow[]>;
+  // ── per-account durable state (the academy pipeline, scout reports, inboxes) ──
+  // A human's PRIVATE per-world state, keyed by (worldId, accountId) — kept out of the
+  // shared `WorldState` snapshot so it doesn't bloat the world or leak between owners.
+  // Stored as one jsonb blob per (world, account); the server owns the shape.
+  loadAccountData(id: string, account: string): Promise<Record<string, unknown> | null>;
+  saveAccountData(id: string, account: string, data: Record<string, unknown>): Promise<void>;
+  /** Every owner's account-data for a world (so the tick can develop all academies). */
+  listAccountData(id: string): Promise<{ account: string; data: Record<string, unknown> }[]>;
 }
 
 /** A fixture row built from a resolved `MatchResult` (club indices are the world's
@@ -92,4 +100,18 @@ export class MemoryStore implements WorldStore {
     this.tickRows.get(row.worldId)!.push(row);
   }
   async ticks(id: string): Promise<TickRow[]> { return [...(this.tickRows.get(id) ?? [])]; }
+
+  private accountData = new Map<string, Record<string, unknown>>();   // `${id}:${account}` → blob
+  async loadAccountData(id: string, account: string): Promise<Record<string, unknown> | null> {
+    const d = this.accountData.get(`${id}:${account}`);
+    return d ? structuredClone(d) : null;   // copy out, like a row read
+  }
+  async saveAccountData(id: string, account: string, data: Record<string, unknown>): Promise<void> {
+    this.accountData.set(`${id}:${account}`, structuredClone(data));
+  }
+  async listAccountData(id: string): Promise<{ account: string; data: Record<string, unknown> }[]> {
+    const out: { account: string; data: Record<string, unknown> }[] = [];
+    for (const [k, data] of this.accountData) { const [wid, account] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)]; if (wid === id) out.push({ account, data: structuredClone(data) }); }
+    return out;
+  }
 }

@@ -66,6 +66,22 @@ export class PgStore implements WorldStore {
     const { rows } = await this.db.query('select world_id, season, day, kind, fixtures from ace_tick_log where world_id = $1 order by season, day', [id]);
     return rows.map(r => ({ worldId: r.world_id as string, season: r.season as number, day: r.day as number, kind: r.kind as TickKind, fixtures: r.fixtures as number }));
   }
+
+  async loadAccountData(id: string, account: string): Promise<Record<string, unknown> | null> {
+    const { rows } = await this.db.query('select data from ace_account_data where world_id = $1 and account_id = $2', [id, account]);
+    return rows[0] ? (rows[0].data as Record<string, unknown>) : null;
+  }
+  async saveAccountData(id: string, account: string, data: Record<string, unknown>): Promise<void> {
+    // upsert: one blob per (world, account) — re-saving overwrites (the PK is the key)
+    await this.db.query(
+      'insert into ace_account_data (world_id, account_id, data) values ($1, $2, $3) on conflict (world_id, account_id) do update set data = excluded.data',
+      [id, account, JSON.stringify(data)],
+    );
+  }
+  async listAccountData(id: string): Promise<{ account: string; data: Record<string, unknown> }[]> {
+    const { rows } = await this.db.query('select account_id, data from ace_account_data where world_id = $1 order by account_id', [id]);
+    return rows.map(r => ({ account: r.account_id as string, data: r.data as Record<string, unknown> }));
+  }
 }
 
 /** An `AccountStore` over Postgres (accounts span worlds → its own tables). The email
