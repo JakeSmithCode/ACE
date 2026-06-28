@@ -39,7 +39,7 @@ export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; 
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
-export interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
+export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -103,17 +103,19 @@ export class AceServer {
   /** Mark one message (id), a whole thread (threadId), or all read. */
   markMailRead(token: string, opts?: { id?: number; threadId?: number }): Promise<{ ok: boolean; unread: number }> { return this.post('/mail/read', opts ?? {}, token); }
 
-  // ── live league chat (real-time, SSE) ──
-  /** Subscribe to the live league chat — `onBacklog` fires once with recent history,
-   *  `onMessage` fires for each new message. Returns an unsubscribe fn. */
-  chatStream(onBacklog: (msgs: ChatMsg[]) => void, onMessage: (m: ChatMsg) => void): () => void {
-    const es = new EventSource(`${this.base}/chat/stream`);
+  // ── live chat (real-time, SSE) — rooms ('global' | 'div:<tier>:<group>') + presence ──
+  /** Subscribe to a chat room. `onBacklog` fires once with recent history, `onMessage`
+   *  per new message, `onPresence` with the online club tags (a `token` identifies you
+   *  for presence). Returns an unsubscribe fn. */
+  chatStream(room: string, token: string | null, onBacklog: (msgs: ChatMsg[]) => void, onMessage: (m: ChatMsg) => void, onPresence: (tags: string[]) => void): () => void {
+    const es = new EventSource(`${this.base}/chat/stream/${encodeURIComponent(room)}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
     es.addEventListener('backlog', e => { try { onBacklog(JSON.parse((e as MessageEvent).data) as ChatMsg[]); } catch { /* ignore */ } });
+    es.addEventListener('presence', e => { try { onPresence(JSON.parse((e as MessageEvent).data) as string[]); } catch { /* ignore */ } });
     es.onmessage = e => { try { onMessage(JSON.parse(e.data) as ChatMsg); } catch { /* keepalive */ } };
     return () => es.close();
   }
-  /** Post a message to the league channel. */
-  sendChat(token: string, text: string): Promise<{ ok: boolean; error?: string }> { return this.post('/chat/send', { text }, token); }
+  /** Post a message to a room ('global' or your own division room). */
+  sendChat(token: string, room: string, text: string): Promise<{ ok: boolean; error?: string }> { return this.post('/chat/send', { room, text }, token); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

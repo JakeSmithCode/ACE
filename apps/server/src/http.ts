@@ -168,13 +168,20 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   }
   for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
   for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
-  // live league chat — a real-time channel for online owners (SSE fan-out). A bounded
-  // backlog + a set of connected streams that every new message is pushed to.
-  interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
-  const chatLog: ChatMsg[] = [];
+  // live chat — real-time channels (SSE fan-out), one ROOM per channel: 'global' (the
+  // whole league) + a per-division room `div:<tier>:<group>`, so owners get a community
+  // alongside the league-wide chat. Each room has a bounded backlog + its own subscriber
+  // set; a connection carries the owner's club `tag` for PRESENCE (who's online).
+  interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
+  interface ChatConn { res: ServerResponse; tag: string | null }
+  const chatLogs = new Map<string, ChatMsg[]>();
+  const chatRooms = new Map<string, Set<ChatConn>>();
   let chatSeq = 0;
-  const chatSubs = new Set<ServerResponse>();
-  const chatBroadcast = (m: ChatMsg) => { const data = `data: ${JSON.stringify(m)}\n\n`; for (const r of chatSubs) { try { r.write(data); } catch { chatSubs.delete(r); } } };
+  const roomConns = (room: string) => { let s = chatRooms.get(room); if (!s) { s = new Set(); chatRooms.set(room, s); } return s; };
+  const presenceOf = (room: string) => [...new Set([...roomConns(room)].map(c => c.tag).filter((t): t is string => !!t))].sort();
+  const chatWrite = (conns: Iterable<ChatConn>, payload: string) => { for (const c of conns) { try { c.res.write(payload); } catch { /* dead socket pruned on close */ } } };
+  const chatBroadcast = (m: ChatMsg) => chatWrite(roomConns(m.room), `data: ${JSON.stringify(m)}\n\n`);
+  const broadcastPresence = (room: string) => chatWrite(roomConns(room), `event: presence\ndata: ${JSON.stringify(presenceOf(room))}\n\n`);
   const ord = (n: number) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
   const tierName = (t: number) => RANK_TIERS[t] ?? `Tier ${t + 1}`;
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
@@ -529,25 +536,38 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       await persistAccount(account);
       return json(res, 200, { ok: true, unread: (mailboxes.get(account) ?? []).filter(m => !m.read).length });
     }
-    // GET /chat/stream  → SSE: the live league chat (backlog event, then each new message)
-    if (path[0] === 'chat' && path[1] === 'stream') {
+    // GET /chat/stream/:room  → SSE for a room ('global' | 'div:<tier>:<group>'): a
+    // backlog event, a presence event (online club tags), then live messages. A `?token=`
+    // query identifies the connection for presence (EventSource can't set headers).
+    if (path[0] === 'chat' && path[1] === 'stream' && path.length >= 3) {
+      const room = decodeURIComponent(path.slice(2).join('/'));
+      const qtoken = new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? '';
+      const acct = qtoken ? auth.verify(qtoken) : null;
+      const mineC = acct ? await myClub(store, id, acct) : null;
+      const conn: ChatConn = { res, tag: mineC?.tag ?? null };
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'access-control-allow-origin': '*' });
-      res.write(`event: backlog\ndata: ${JSON.stringify(chatLog.slice(-60))}\n\n`);
-      chatSubs.add(res);
-      req.on('close', () => chatSubs.delete(res));
+      res.write(`event: backlog\ndata: ${JSON.stringify((chatLogs.get(room) ?? []).slice(-60))}\n\n`);
+      roomConns(room).add(conn);
+      res.write(`event: presence\ndata: ${JSON.stringify(presenceOf(room))}\n\n`);
+      if (conn.tag) broadcastPresence(room);                              // announce my arrival to the room
+      req.on('close', () => { roomConns(room).delete(conn); if (conn.tag) broadcastPresence(room); });
       return;
     }
-    // POST /chat/send  → post a message to the league channel (broadcast to all streams)
+    // POST /chat/send  → post to a room ('global' or your OWN division room).
     if (path[0] === 'chat' && path[1] === 'send' && req.method === 'POST') {
       if (!account) return json(res, 401, { error: 'no account' });
       const mine = await myClub(store, id, account);
       if (!mine) return json(res, 404, { error: 'you own no club' });
-      const b = (await readBody(req)) as { text?: string };
+      const b = (await readBody(req)) as { room?: string; text?: string };
+      const room = b.room || 'global';
       const text = (b.text ?? '').trim().slice(0, 300);
       if (!text) return json(res, 400, { error: 'empty message' });
-      const m: ChatMsg = { id: ++chatSeq, fromTag: mine.tag, fromName: mine.name, text, at: clock() };
-      chatLog.push(m);
-      if (chatLog.length > 200) chatLog.shift();
+      if (room !== 'global' && room !== `div:${mine.tier}:${mine.group}`) return json(res, 403, { error: 'you can only post to global or your own division' });
+      const m: ChatMsg = { id: ++chatSeq, room, fromTag: mine.tag, fromName: mine.name, text, at: clock() };
+      const log = chatLogs.get(room) ?? [];
+      log.push(m);
+      if (log.length > 200) log.shift();
+      chatLogs.set(room, log);
       chatBroadcast(m);
       return json(res, 200, { ok: true });
     }

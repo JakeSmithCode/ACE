@@ -352,22 +352,34 @@ async function doReply(threadId: number) {
   try { const r = await server.value.replyMail(token.value, last.id, txt); if (r.ok) await loadMail(); else replyText.value = txt; } catch { replyText.value = txt; }
 }
 
-// live league chat (real-time SSE) — subscribe while the panel is open
+// live chat (real-time SSE) — rooms ('global' + your division) + presence (who's online)
 const chatMsgs = ref<import('./serverApi').ChatMsg[]>([]);
 const chatOpen = ref(false);
 const chatInput = ref('');
+const chatRoom = ref('global');
+const chatOnline = ref<string[]>([]);
 let chatStop: (() => void) | null = null;
+const myDivRoom = computed(() => (myClub.value ? `div:${myClub.value.tier}:${(myClub.value as { group?: number }).group ?? 0}` : ''));
+function subscribeChat() {
+  if (!server.value) return;
+  chatStop?.(); chatMsgs.value = []; chatOnline.value = [];
+  chatStop = server.value.chatStream(
+    chatRoom.value, token.value,
+    msgs => (chatMsgs.value = msgs),
+    m => (chatMsgs.value = [...chatMsgs.value, m].slice(-120)),
+    tags => (chatOnline.value = tags),
+  );
+}
 function toggleChat() {
   chatOpen.value = !chatOpen.value;
-  if (chatOpen.value && server.value) {
-    chatStop?.();
-    chatStop = server.value.chatStream(msgs => (chatMsgs.value = msgs), m => (chatMsgs.value = [...chatMsgs.value, m].slice(-120)));
-  } else { chatStop?.(); chatStop = null; }
+  if (chatOpen.value) subscribeChat();
+  else { chatStop?.(); chatStop = null; }
 }
+function switchRoom(room: string) { if (room === chatRoom.value) return; chatRoom.value = room; if (chatOpen.value) subscribeChat(); }
 async function sendChat() {
   if (!server.value || !token.value || !chatInput.value.trim()) return;
   const t = chatInput.value; chatInput.value = '';
-  try { await server.value.sendChat(token.value, t); } catch { chatInput.value = t; }
+  try { await server.value.sendChat(token.value, chatRoom.value, t); } catch { chatInput.value = t; }
 }
 
 // the world's best players — a cross-club prestige board (who's the best, and where)
@@ -506,7 +518,12 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
           <Teleport to="body">
             <div v-if="chatOpen" class="lv-notifpanel lv-chatpanel">
-              <div class="lv-notifhead"><span class="lv-kicker">League chat <i class="lv-chatlive">● live</i></span><button class="lv-notifx" @click="toggleChat">✕</button></div>
+              <div class="lv-notifhead"><span class="lv-kicker">Live chat <i class="lv-chatlive">● live</i></span><button class="lv-notifx" @click="toggleChat">✕</button></div>
+              <div class="lv-chatrooms">
+                <button :class="{ on: chatRoom === 'global' }" @click="switchRoom('global')">🌐 Global</button>
+                <button v-if="myDivRoom" :class="{ on: chatRoom === myDivRoom }" @click="switchRoom(myDivRoom)">⬡ {{ tierName(myClub!.tier) }}</button>
+                <span class="lv-chatonline" :title="chatOnline.join(', ')"><i class="lv-onlinedot"></i>{{ chatOnline.length }} online</span>
+              </div>
               <div class="lv-chatlog">
                 <div v-for="m in chatMsgs" :key="m.id" class="lv-chatmsg" :class="{ me: myClub && m.fromTag === myClub.tag }">
                   <span class="lv-chatfrom" :style="{ color: `hsl(${hue(m.fromTag)} 60% 62%)` }">{{ m.fromTag }}</span>
@@ -515,7 +532,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                 <div v-if="!chatMsgs.length" class="lv-empty">no messages yet — say hello 👋</div>
               </div>
               <div class="lv-chatsend">
-                <input v-model="chatInput" class="lv-mailin" placeholder="message the league…" maxlength="300" @keyup.enter="sendChat" />
+                <input v-model="chatInput" class="lv-mailin" :placeholder="chatRoom === 'global' ? 'message the league…' : 'message your division…'" maxlength="300" @keyup.enter="sendChat" />
                 <button class="lv-go sm" :disabled="!chatInput.trim()" @click="sendChat">send</button>
               </div>
             </div>
