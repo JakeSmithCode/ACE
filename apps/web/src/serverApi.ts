@@ -31,7 +31,7 @@ export interface ClubPage { tag: string; name: string; tier: number; group: numb
 
 export interface LeaderRow { rank: number; handle: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
-export interface NewsItem { kind: 'transfer' | 'champion' | 'season'; text: string; season: number; day: number }
+export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 
 export interface IntlSide { region: string; tag: string }

@@ -122,8 +122,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const honors: { season: number; champion: string }[] = [];
   // the world news feed (DESIGN §9 — the world feels alive): a rolling log of what's
   // happening — signings, champions. Newest pushed last; the API returns it reversed.
-  const news: { kind: 'transfer' | 'champion' | 'season'; text: string; season: number; day: number }[] = [];
-  const pushNews = (kind: 'transfer' | 'champion' | 'season', text: string, season: number, day: number) => {
+  const news: { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }[] = [];
+  const pushNews = (kind: 'transfer' | 'champion' | 'season' | 'award', text: string, season: number, day: number) => {
     news.push({ kind, text, season, day });
     if (news.length > 60) news.shift();   // keep it bounded
   };
@@ -181,9 +181,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     };
     const w = (await store.loadWorld(id))!;
     if (w.day < seasonLength(w)) { await tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: await churnMarket() }; }
+    // capture the finishing season's MVP (top fragger) before the world rolls over —
+    // the season's resolved timelines are still current here; tie it into the legacy feed.
+    const mvpAcc = new Map<string, PlayerStat>();
+    for (const f of await store.fixtures(id, w.season)) { if (fixtureStatus(f, clock()) !== 'resolved') continue; const tl = timelines.get(key(f)); if (tl) tallyTimeline(tl, mvpAcc); }
+    const mvp = [...mvpAcc.values()].sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
+    if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     pushNews('season', `Season ${roll.season + 1} begins`, roll.season + 1, 0);
     await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
     await tickDay((await store.loadWorld(id))!);

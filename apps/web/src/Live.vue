@@ -269,7 +269,7 @@ async function loadHonors() { if (server.value) try { hof.value = await server.v
 
 // the world news feed — a live ticker of transfers + champions (the world feels alive)
 const newsFeed = ref<NewsItem[]>([]);
-const newsIcon: Record<string, string> = { transfer: '⇄', champion: '🏆', season: '◇' };
+const newsIcon: Record<string, string> = { transfer: '⇄', champion: '🏆', season: '◇', award: '★' };
 async function loadNews() { if (server.value) try { newsFeed.value = (await server.value.news()).news; } catch { /* transient */ } }
 
 // the world's best players — a cross-club prestige board (who's the best, and where)
