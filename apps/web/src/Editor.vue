@@ -90,6 +90,12 @@ function resim() {
 }
 function schedule() { clearTimeout(pending); pending = window.setTimeout(resim, 120); }
 
+// tactical presets (a playbook) — save the current setup, load one back, all on team 0
+const presetName = ref('');
+function savePreset() { w.saveTacticPreset(presetName.value); presetName.value = ''; }
+function loadPreset(i: number) { w.loadTacticPreset(i); bump.n++; schedule(); }
+function delPreset(i: number) { w.deleteTacticPreset(i); }
+
 onMounted(async () => { await w.ensureNav(); resim(); });
 onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
 </script>
@@ -101,6 +107,16 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
       <input type="number" v-model.number="seed" @change="schedule" />
       <button @click="seed = Math.floor(Math.random() * 100000); schedule()">⟲ random</button>
       <div class="ed-score">{{ score[0] }} – {{ score[1] }}<span class="ed-busy" v-if="busy">simulating…</span></div>
+    </div>
+    <div class="ed-presets">
+      <label>PLAYBOOK</label>
+      <span v-for="(pr, i) in w.tacticPresets.value" :key="i" class="ed-preset">
+        <button class="ed-preload" @click="loadPreset(i)" :title="`load &quot;${pr.name}&quot; onto your club`">{{ pr.name }}</button>
+        <button class="ed-predel" @click="delPreset(i)" title="delete">✕</button>
+      </span>
+      <span v-if="!w.tacticPresets.value.length" class="ed-prehint">save your tactical setups to swap them in a click</span>
+      <input class="ed-prename" v-model="presetName" placeholder="name…" maxlength="18" @keyup.enter="savePreset" />
+      <button class="ed-presave" @click="savePreset">＋ save current</button>
     </div>
     <div class="ed-teams" :data-bump="bump.n">
       <div v-for="i in [0, 1]" :key="i" class="ed-team" :class="i === 0 ? 'att' : 'def'">

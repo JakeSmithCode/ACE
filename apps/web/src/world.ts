@@ -185,6 +185,18 @@ function setCaptain(id: string) {
   if (!clubs.value[myClub.value].team.players.some(p => p.id === id)) return;
   captainId.value = captainId.value === id ? null : id;
 }
+
+// ── Tactical presets (a playbook — save & swap named setups) ──────────────────────────
+// Snapshot your current authored tactics (dials + plays) under a name, then load it back
+// in a click — a quick-swap playbook (an aggressive A-exec, a default, an anti-eco hold).
+const tacticPresets = ref<{ name: string; tactics: Tactics }[]>([]);
+function saveTacticPreset(name: string) {
+  const n = (name || '').trim() || `Setup ${tacticPresets.value.length + 1}`;
+  tacticPresets.value = [...tacticPresets.value, { name: n, tactics: clone(myTactics.value) }].slice(-8);
+}
+function loadTacticPreset(i: number) { const pre = tacticPresets.value[i]; if (pre) myTactics.value = clone(pre.tactics); }
+function deleteTacticPreset(i: number) { tacticPresets.value = tacticPresets.value.filter((_, j) => j !== i); }
+
 const squadMorale = () => {
   const five = clubs.value[myClub.value]?.team.players ?? [];
   return five.length ? Math.round(five.reduce((s, p) => s + moraleOf(p.id), 0) / five.length) : MORALE_BASE;
@@ -802,7 +814,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -823,7 +835,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
   refreshMarket();
 }
 
@@ -1172,6 +1184,7 @@ function snapshot() {
     lastAwards: lastAwards.value, awardsHistory: awardsHistory.value,
     boardConfidence: boardConfidence.value, sacked: sacked.value,
     sponsor: sponsor.value, lastSponsorPay: lastSponsorPay.value, camp: camp.value, captainId: captainId.value,
+    tacticPresets: tacticPresets.value,
   };
 }
 function save() {
@@ -1211,6 +1224,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   lastSponsorPay.value = (o as { lastSponsorPay?: typeof lastSponsorPay.value }).lastSponsorPay ?? null;
   camp.value = (o as { camp?: Camp | null }).camp ?? null;
   captainId.value = (o as { captainId?: string | null }).captainId ?? null;
+  tacticPresets.value = (o as { tacticPresets?: { name: string; tactics: Tactics }[] }).tacticPresets ?? [];
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1227,7 +1241,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1253,6 +1267,7 @@ export function useWorld() {
     sponsor, sponsorOffersList, lastSponsorPay, goalTextOf, signSponsor,
     camp, setCamp, canPickCamp, CAMP_META,
     captainId, captainOf, isCaptain, setCaptain, leadership,
+    tacticPresets, saveTacticPreset, loadTacticPreset, deleteTacticPreset,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

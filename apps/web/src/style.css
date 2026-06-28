@@ -199,7 +199,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-seed input{width:96px;background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:6px 8px;font-family:var(--display);font-size:16px}
 .ace-editor .ed-seed button{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.08em;padding:5px;cursor:pointer}
 .ace-editor .ed-score{font-family:var(--display);font-weight:700;font-size:24px;font-variant-numeric:tabular-nums;margin-top:2px}
-.ace-editor .ed-teams{display:flex;gap:24px;flex:1;flex-wrap:wrap}
+.ace-editor .ed-presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%;padding:9px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);order:5}
+.ace-editor .ed-presets label{font-family:var(--label);font-size:10px;letter-spacing:.12em;color:var(--muted-2)}
+.ed-preset{display:inline-flex;align-items:stretch;border:1px solid rgba(34,211,238,.3);clip-path:var(--bevel);overflow:hidden}
+.ed-preload{background:rgba(34,211,238,.08);border:none;color:var(--brand);font-family:var(--label);font-size:11px;letter-spacing:.02em;padding:5px 10px;cursor:pointer}
+.ed-preload:hover{background:rgba(34,211,238,.18)}
+.ed-predel{background:transparent;border:none;border-left:1px solid rgba(34,211,238,.2);color:var(--muted-2);font-size:10px;padding:0 7px;cursor:pointer}
+.ed-predel:hover{color:var(--def)}
+.ed-prehint{font-size:11px;color:var(--muted-2);font-style:italic}
+.ed-prename{width:120px;background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:5px 8px;font-family:var(--body);font-size:12px;margin-left:auto}
+.ed-presave{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:6px 11px;cursor:pointer}
+.ed-presave:hover{border-color:var(--brand);color:var(--brand)}
+.ace-editor .ed-teams{display:flex;gap:24px;flex:1;flex-wrap:wrap;order:6}
 .ace-editor .ed-team{flex:1;min-width:300px}
 .ace-editor .ed-tag{font-family:var(--display);font-weight:700;font-size:15px;margin-bottom:8px}
 .ace-editor .ed-team.att .ed-tag{color:var(--att)}.ace-editor .ed-team.def .ed-tag{color:var(--def)}
