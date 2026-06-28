@@ -115,6 +115,17 @@ onUnmounted(() => { viewer?.destroy(); });
 
 <template>
   <div class="hq">
+    <!-- sacked — the board has lost patience; start a fresh career -->
+    <Teleport to="body">
+      <div v-if="w.sacked.value" class="hq-sacked">
+        <div class="hq-sackcard">
+          <div class="hq-sackh">⚠ You've been sacked</div>
+          <p>The board ran out of patience after a run of missed objectives. Your time at <b>{{ nameOf(myClub) }}</b> is over.</p>
+          <p class="hq-sacksub">A clean slate awaits — take charge of a new club and build again.</p>
+          <button class="hq-go" @click="w.newWorld()">Start a new career ▶</button>
+        </div>
+      </div>
+    </Teleport>
     <!-- season control bar -->
     <div class="hq-bar">
       <div class="hq-season">
@@ -329,6 +340,10 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-objnow">Currently <b>{{ objectiveRank }}<sup>{{ ['st','nd','rd'][objectiveRank-1] || 'th' }}</sup></b> of {{ DIV_SIZE }} · board bonus <b class="pos">{{ fmt(objective.bonus) }}</b> if met</div>
             <div v-if="objectiveOutcome" class="hq-objlast" :class="objectiveOutcome.met ? 'met' : 'miss'">
               Last season: {{ objectiveOutcome.met ? `✓ ${objectiveOutcome.label} achieved — board bonus paid` : `✗ ${objectiveOutcome.label} missed (${objectiveOutcome.finish}${['st','nd','rd'][objectiveOutcome.finish-1] || 'th'})` }}
+            </div>
+            <div class="hq-conf">
+              <div class="hq-conflbl">Board confidence <span class="hq-confstatus" :class="'cf-' + w.confidenceStatus.value.key">{{ w.confidenceStatus.value.label }}</span></div>
+              <div class="hq-confbar" :class="'cf-' + w.confidenceStatus.value.key"><i :style="{ width: w.boardConfidence.value + '%' }"></i></div>
             </div>
           </div>
         </div>

@@ -480,6 +480,22 @@ const objectiveOutcome = ref<{ met: boolean; label: string; bonus: number; finis
 // live progress: your current division rank vs the target (met = on/ahead of pace).
 const objectiveRank = computed(() => rankOf(myClub.value));
 const objectiveMet = computed(() => objectiveRank.value > 0 && objectiveRank.value <= objective.value.needRank);
+
+// ── Manager job security (the objective arc becomes a survival narrative) ─────────────
+// The board's confidence in you (0..100) moves each season with how you met the brief:
+// smash it and they back you, bomb it and the pressure mounts. Sustained failure → sacked
+// (a forgiving curve, not a mugging — it takes a few disasters from the neutral start).
+const boardConfidence = ref(60);
+const sacked = ref(false);
+type ConfStatus = { key: 'secure' | 'stable' | 'shaky' | 'brink'; label: string };
+const confidenceStatus = computed<ConfStatus>(() => {
+  const c = boardConfidence.value;
+  if (c >= 75) return { key: 'secure', label: 'the board backs you fully' };
+  if (c >= 45) return { key: 'stable', label: 'the board is satisfied' };
+  if (c >= 20) return { key: 'shaky', label: 'under pressure — results needed' };
+  return { key: 'brink', label: 'on the brink — your job is at risk' };
+});
+
 const nextFixture = computed(() => done.value ? null
   : mySchedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
 const nextOpponent = computed(() => {
@@ -629,6 +645,12 @@ function advanceSeason() {
   const objMet = objFinish > 0 && objFinish <= objective.value.needRank;
   const objBonus = objMet ? objective.value.bonus : 0;
   objectiveOutcome.value = { met: objMet, label: objective.value.label, bonus: objBonus, finish: objFinish };
+  // board confidence: how you met the brief moves it — exceed it and they back you, miss it
+  // and pressure mounts. reqGap > 0 = you beat the required finish; < 0 = you fell short.
+  const reqGap = objective.value.needRank - objFinish;
+  const confDelta = objMet ? 8 + Math.min(12, reqGap * 3) : -10 + Math.max(-15, reqGap * 3);
+  boardConfidence.value = Math.max(0, Math.min(100, boardConfidence.value + confDelta));
+  if (boardConfidence.value <= 0) sacked.value = true;   // the board has seen enough
   // end-of-season awards for your division (uses the season's division + the start baseline,
   // both still live here — promoteRelegate + the new snapRosters baseline come after)
   const aw = seasonAwards();
@@ -717,7 +739,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = [];
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -738,7 +760,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = [];
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false;
   refreshMarket();
 }
 
@@ -1085,6 +1107,7 @@ function snapshot() {
     fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()], staff: staff.value,
     morale: [...morale.value.entries()], rivalId: rivalId.value, derbyRecord: derbyRecord.value,
     lastAwards: lastAwards.value, awardsHistory: awardsHistory.value,
+    boardConfidence: boardConfidence.value, sacked: sacked.value,
   };
 }
 function save() {
@@ -1118,6 +1141,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   derbyRecord.value = (o as { derbyRecord?: { w: number; l: number } }).derbyRecord ?? { w: 0, l: 0 };
   lastAwards.value = (o as { lastAwards?: SeasonAwards | null }).lastAwards ?? null;
   awardsHistory.value = (o as { awardsHistory?: SeasonAwards[] }).awardsHistory ?? [];
+  boardConfidence.value = (o as { boardConfidence?: number }).boardConfidence ?? 60;
+  sacked.value = (o as { sacked?: boolean }).sacked ?? false;
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1134,7 +1159,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1156,6 +1181,7 @@ export function useWorld() {
     staff, staffMkt, staffEff, staffWages, hiredStaff, hireStaff, fireStaff, STAFF_ROLES,
     moraleOf, squadMorale, teamTalk, setTalk, talkPreview, talkFit, TALK_META,
     rivalId, derbyRecord, isRival, nextIsDerby, lastDerby, lastAwards, awardsHistory,
+    boardConfidence, sacked, confidenceStatus,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
