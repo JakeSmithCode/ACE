@@ -18,7 +18,8 @@
     "server:live": "tsx apps/server/src/http-demo.ts",
     "server:serve": "tsx apps/server/src/serve.ts",
     "typecheck": "turbo run typecheck",
-    "server:pg": "tsx apps/server/src/pg-demo.ts"
+    "server:pg": "tsx apps/server/src/pg-demo.ts",
+    "server:pgsmoke": "bash infra/pg-smoke.sh"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

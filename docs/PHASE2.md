@@ -381,9 +381,16 @@ not a sim rewrite.
    without a live DB** by `pnpm run server:pg`: PgStore run over an in-memory `Queryable`
    fake (the exact statements `pg.ts` issues) ticks **3 seasons byte-identical to
    MemoryStore**, idempotency is rejected by the PK, and the PgAccountStore auth flow
-   (register/login/rotate/single-use-refresh) matches. The only residual is real-Postgres
-   SQL parsing — `infra/docker-compose` spins one up for the integration test, and the
-   tick worker/HTTP layer run against it unchanged (they already await).*
+   (register/login/rotate/single-use-refresh) matches. **The real-Postgres residual is now
+   closed** — `pnpm run server:pgsmoke` (`infra/pg-smoke.sh`) spins up a throwaway
+   PostgreSQL 16 cluster (no docker — the server binaries are present; it `initdb`s a temp
+   cluster as the `postgres` user on a unix socket), applies the real migrations
+   (`0002_worldstore.sql` + `0003_email_verify.sql`), and runs the **exact statements**
+   PgStore/PgAccountStore issue against the live engine: the jsonb `WorldState` round-trips,
+   fixture rows insert/query, the `tick_log` idempotency PK rejects a duplicate, `unique(email)`
+   is enforced, and the email-verify flow (unverified → token lookup → verified, token cleared)
+   works. So the SQL is verified on a real engine, not just the FakeQueryable — the tick
+   worker/HTTP layer run against it unchanged (they already await).*
 3. **Self-owned auth** (register/verify/login/refresh). ✅ *Done — `auth.ts` +
    `accounts.ts`, **zero-dep** (node `crypto`: scrypt password hash, a hand-rolled
    HS256 JWT access token, an opaque rotating refresh token stored hashed). The
