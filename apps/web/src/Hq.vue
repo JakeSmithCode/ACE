@@ -51,6 +51,9 @@ const wave = computed(() => w.marketWave.value);
 const headliner = computed(() => wave.value[0]);
 // the most notable injury from the last match-day (a roster event to manage)
 const injury = computed(() => w.lastInjury.value);
+// team talk: pick a tone before the next match — the right one reads the room
+const talkTones = ['calm', 'rally', 'demand'] as const;
+const readLabel = (f: string) => f === 'great' ? '✓ reads the room' : f === 'poor' ? '✗ wrong tone' : '~ a safe call';
 
 const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'staff' | 'rankings'>('season');
 
@@ -333,6 +336,13 @@ onUnmounted(() => { viewer?.destroy(); });
             <span class="hq-nextlbl">NEXT</span>
             <span class="hq-vs">{{ nextFixture.home === myClub ? 'vs' : '@' }} <b>{{ tagOf(oppOf(nextFixture)) }}</b> {{ nameOf(oppOf(nextFixture)) }}</span>
             <button class="hq-go sm" @click="w.resolveDay()">play ▶</button>
+          </div>
+          <div v-if="nextFixture" class="hq-talk">
+            <span class="hq-talklbl">Team talk <i>squad mood {{ w.squadMorale() }}</i></span>
+            <div class="hq-talkrow">
+              <button v-for="t in talkTones" :key="t" class="hq-talkbtn" :class="{ on: w.teamTalk.value === t }" @click="w.setTalk(t)">{{ w.TALK_META[t].icon }} {{ w.TALK_META[t].label }}</button>
+            </div>
+            <div v-if="w.talkPreview.value" class="hq-talkread" :class="w.talkPreview.value.fit">{{ readLabel(w.talkPreview.value.fit) }} — applied to your next match</div>
           </div>
           <div v-for="(r, i) in [...myResults].reverse()" :key="i" class="hq-result" :class="{ win: r.winner === myClub }">
             <span class="hq-rw">{{ r.winner === myClub ? 'W' : 'L' }}</span>

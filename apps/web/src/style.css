@@ -440,6 +440,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-fatpct{font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--muted-2);font-variant-numeric:tabular-nums}
 .rs-fatpct.tired{color:var(--gold)}
 .rs-inj{font-family:var(--label);font-size:9.5px;letter-spacing:.04em;color:var(--def);background:rgba(255,92,110,.12);border:1px solid rgba(255,92,110,.35);padding:2px 6px;clip-path:var(--bevel)}
+.rs-mood{font-family:var(--label);font-size:9px;letter-spacing:.03em;margin-left:2px}
+.rs-mood.hi{color:var(--win)}.rs-mood.mid{color:var(--muted)}.rs-mood.lo{color:var(--def)}
+/* team talk (season fixtures panel) */
+.hq-talk{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.hq-talklbl{font-family:var(--label);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline}
+.hq-talklbl i{font-style:normal;font-size:10px;color:var(--muted-2);text-transform:none;letter-spacing:0}
+.hq-talkrow{display:flex;gap:6px;margin-top:7px}
+.hq-talkbtn{flex:1;background:#0b1520;border:1px solid var(--line);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.02em;padding:6px 4px;cursor:pointer;clip-path:var(--bevel)}
+.hq-talkbtn:hover{border-color:var(--line-2);color:var(--text)}
+.hq-talkbtn.on{background:rgba(34,211,238,.12);border-color:rgba(34,211,238,.45);color:var(--brand)}
+.hq-talkread{display:block;margin-top:7px;font-size:11px;font-weight:600}
+.hq-talkread.great{color:var(--win)}.hq-talkread.ok{color:var(--muted)}.hq-talkread.poor{color:var(--def)}
 .rs-abar{position:relative;height:5px;background:var(--bg-3);overflow:hidden}
 .rs-abar i{position:absolute;left:0;top:0;height:100%;background:var(--brand);opacity:.6}
 .rs-abar i.ghost{opacity:.2}      /* faint headroom to the scouted per-skill ceiling */

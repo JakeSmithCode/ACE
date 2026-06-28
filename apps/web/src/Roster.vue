@@ -34,6 +34,9 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
 // touch slower elsewhere — a tradeoff). Click the focused skill again to clear it.
 const focusOf = (p: Player) => w.focusOf(p.id);
 const toggleFocus = (p: Player, k: keyof Attributes) => w.setFocus(p.id, focusOf(p) === k ? null : k);
+// morale mood chip: a player's match-day mood (minutes/results/team talks move it)
+const moodClass = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? 'hi' : m >= 50 ? 'mid' : 'lo'; };
+const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '◔ high' : m >= 50 ? '◔ ok' : '◔ low'; };
 </script>
 
 <template>
@@ -54,6 +57,7 @@ const toggleFocus = (p: Player, k: keyof Attributes) => w.setFocus(p.id, focusOf
             <span class="rs-fatbar" :title="`match fatigue ${w.fatigueOf(p.id)}% — rotate him out to recover; high fatigue dulls performance and risks injury`"><i :class="{ hi: w.fatigueOf(p.id) >= 60 }" :style="{ width: w.fatigueOf(p.id) + '%' }"></i></span>
             <span class="rs-fatpct" :class="{ tired: w.isTired(p.id) }">{{ w.fatigueOf(p.id) }}%</span>
           </template>
+          <span class="rs-mood" :class="moodClass(p)" :title="`morale ${Math.round(w.moraleOf(p.id))} — minutes, results and team talks move it; high morale lifts match form`">{{ moodIcon(p) }}</span>
         </div>
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>

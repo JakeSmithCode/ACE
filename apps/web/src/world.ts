@@ -151,6 +151,47 @@ function fitnessFactor(id: string, fielded: Player[]): number {
   const hurt = isInjured(id) && fielded.some(p => p.id === id) ? 1 - HURT_PEN : 1;   // only if he had to play
   return fat * hurt;
 }
+
+// ── Morale + team talks (the human-management layer) ─────────────────────────────────
+// Each player carries a MOOD (0..100) that drifts from playing time, results, fatigue and
+// the psychologist's touch; high morale lifts match performance a little, low morale drags.
+// Before each match the manager gives a TEAM TALK — `calm` / `rally` / `demand` — and the
+// RIGHT tone for the situation (are you favourite or underdog, is the room up or flat?)
+// gives a one-match edge + a morale bump; the wrong one backfires. Read the room. All
+// store-only and engine-invisible (scaled attrs in buildInput), so seed 42 is byte-identical.
+const morale = ref<Map<string, number>>(new Map());
+const MORALE_BASE = 65, MORALE_PEN = 0.08;               // mood centre + match swing at the extremes
+const moraleOf = (id: string) => morale.value.get(id) ?? MORALE_BASE;
+const moraleFactor = (id: string) => 1 + ((moraleOf(id) - 60) / 100) * MORALE_PEN;   // ~±3% across the band
+const squadMorale = () => {
+  const five = clubs.value[myClub.value]?.team.players ?? [];
+  return five.length ? Math.round(five.reduce((s, p) => s + moraleOf(p.id), 0) / five.length) : MORALE_BASE;
+};
+
+type Talk = 'calm' | 'rally' | 'demand';
+const teamTalk = ref<Talk | null>(null);                 // the manager's chosen tone for the next match (one-shot)
+const TALK_META: Record<Talk, { label: string; icon: string }> = {
+  calm: { label: 'Stay calm', icon: '○' }, rally: { label: 'Rally them', icon: '▲' }, demand: { label: 'Demand more', icon: '✦' },
+};
+/** Read the room: how well a tone fits the situation (favourite vs underdog by strength,
+ *  and the squad's current mood). Returns a one-match attr edge + a morale nudge. */
+function talkFit(tone: Talk): { fit: 'great' | 'ok' | 'poor'; edge: number; mood: number } {
+  const mine = clubs.value[myClub.value]?.strength ?? 0.5;
+  const opp = clubs.value[nextOpponent.value]?.strength ?? 0.5;
+  const fav = mine - opp;                  // + = you're the favourite
+  const m = squadMorale();
+  let score = 0;                           // −1 poor .. +1 great, by tone × context
+  if (tone === 'calm') score = (fav > 0.03 ? 0.6 : -0.3) + (m >= 65 ? 0.4 : -0.4);       // keep a confident favourite loose
+  if (tone === 'rally') score = (fav < 0.03 ? 0.6 : 0.1) + (m >= 40 && m < 80 ? 0.3 : -0.2);  // lift an underdog / a flat room
+  if (tone === 'demand') score = (m >= 60 ? 0.5 : -0.6) + (fav > -0.02 ? 0.3 : -0.3);    // push a good room; piling on a low one backfires
+  const fit = score >= 0.6 ? 'great' : score <= -0.2 ? 'poor' : 'ok';
+  const edge = fit === 'great' ? 0.03 : fit === 'poor' ? -0.025 : 0.005;
+  const mood = fit === 'great' ? 5 : fit === 'poor' ? -5 : 1;
+  return { fit, edge, mood };
+}
+const talkPreview = computed(() => teamTalk.value ? talkFit(teamTalk.value) : null);
+const talkFactor = () => (teamTalk.value ? 1 + talkFit(teamTalk.value).edge : 1);   // team-wide one-match edge
+function setTalk(t: Talk | null) { teamTalk.value = teamTalk.value === t ? null : t; }
 /** Post-match: heal existing injuries a day, fatigue the five who played + recover the
  *  rest, and roll new injuries (risk scales with the fatigue they played at). Seeded so
  *  a replayed match-day is identical; never touches the world/engine stream. */
@@ -179,6 +220,24 @@ function updateFitness(fielded: Set<string>, rng: Rng) {
   }
   fatigue.value = fat; injuries.value = inj;
   lastInjury.value = worst ? { handle: worst.handle, days: worst.days } : null;
+}
+/** Post-match mood drift: the result lifts/drops the whole squad, minutes reward starters
+ *  and frustrate the benched, an injury stings, the psychologist lifts everyone — then the
+ *  one-shot team-talk nudge is folded in and the talk is cleared. No rng (pure drift). */
+function updateMorale(fielded: Set<string>, won: boolean | null) {
+  const talkMood = teamTalk.value ? talkFit(teamTalk.value).mood : 0;
+  const psych = staffEff.value.morale;
+  const next = new Map(morale.value);
+  for (const p of myRoster.value) {
+    let m = next.get(p.id) ?? MORALE_BASE;
+    m += won === true ? 6 : won === false ? -5 : 0;              // the result moves the room
+    m += fielded.has(p.id) ? 1.5 : -2.5;                         // minutes: starters happy, reserves restless
+    if (isInjured(p.id)) m -= 3;                                 // being hurt stings
+    m += psych + talkMood + (MORALE_BASE - m) * 0.06;            // psych lift + team talk + slow mean-reversion
+    next.set(p.id, Math.max(0, Math.min(100, m)));
+  }
+  morale.value = next;
+  teamTalk.value = null;                                         // the talk was a one-shot for this match
 }
 
 // contract helpers for the UI: what you PAY a player (locked wage), what he'd
@@ -410,13 +469,14 @@ function buildInput(fx: { home: number; away: number }, seed: number, map: MapId
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
   // your fielded five carry their match-night fitness (fatigue dulls, an injury played
   // through hits harder); the engine just sees the scaled attrs — pure store concern.
+  const talk = talkFactor();   // a team-wide one-match edge from the team talk (1 = neutral)
   const fit = (i: number, team: Team): Team => {
     if (i !== myClub.value) return team;
     return { ...team, players: team.players.map(p => {
-      const f = fitnessFactor(p.id, team.players);
-      if (f >= 1) return p;
+      const f = fitnessFactor(p.id, team.players) * moraleFactor(p.id) * talk;   // fitness × mood × team talk
+      if (f === 1) return p;
       const attr = { ...p.attr };
-      for (const k of Object.keys(attr) as (keyof Attributes)[]) attr[k] = Math.round(attr[k] * f);
+      for (const k of Object.keys(attr) as (keyof Attributes)[]) attr[k] = Math.max(1, Math.min(99, Math.round(attr[k] * f)));
       return { ...p, attr };
     }) };
   };
@@ -463,6 +523,9 @@ function resolveDay() {
   // fitness: fatigue the five who played, recover the rest, roll injuries (own seeded rng)
   const fr = new Rng((seasonSeed.value ^ (season.value * 0xC2B2AE35) ^ (dayIdx.value * 0x9e3779b9) ^ 0xF17) >>> 0);
   updateFitness(fiveIds, fr);
+  // morale: the result + minutes + team talk move the room (the talk is one-shot)
+  const myRes = fresh.find(r => r.home === myClub.value || r.away === myClub.value);
+  updateMorale(fiveIds, myRes ? myRes.winner === myClub.value : null);
   dayIdx.value++;
   syncLineup();        // re-derive your five + strength from the developed roster (injured now excluded)
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -537,7 +600,7 @@ function advanceSeason() {
   syncLineup();
   season.value++;
   objective.value = computeObjective();   // the board sets a fresh target for the new season + division
-  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;   // the off-season heals everyone
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;   // the off-season heals everyone
   runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
@@ -586,7 +649,7 @@ function selectClub(i: number) {
   playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
-  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -606,7 +669,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
-  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
   refreshMarket();
 }
 
@@ -951,6 +1014,7 @@ function snapshot() {
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
     focuses: [...focuses.value.entries()],
     fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()], staff: staff.value,
+    morale: [...morale.value.entries()],
   };
 }
 function save() {
@@ -979,6 +1043,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   fatigue.value = new Map((o as { fatigue?: [string, number][] }).fatigue ?? []);
   injuries.value = new Map((o as { injuries?: [string, number][] }).injuries ?? []);
   staff.value = (o as { staff?: StaffHires }).staff ?? {};
+  morale.value = new Map((o as { morale?: [string, number][] }).morale ?? []);
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -994,7 +1059,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1014,6 +1079,7 @@ export function useWorld() {
     scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX, focusOf, setFocus,
     fatigueOf, injuryOf, isInjured, isTired, lastInjury,
     staff, staffMkt, staffEff, staffWages, hiredStaff, hireStaff, fireStaff, STAFF_ROLES,
+    moraleOf, squadMorale, teamTalk, setTalk, talkPreview, talkFit, TALK_META,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
