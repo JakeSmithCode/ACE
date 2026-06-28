@@ -487,7 +487,12 @@ not a sim rewrite.
    (champion $250k … appearance $25k, `DEFAULT_INTL_PRIZE`) into its shard's balance,
    pure + opt-in so the no-circuit CLIs + seed 42 are untouched (the s1 champion banks
    +$250k → a deep run reshapes a club's transfer budget and pulls money into a strong
-   region). Prestige counters (intl titles) are the remaining polish.*
+   region). **Prestige counters are in** — the Masters champion club accrues an
+   `intlTitles` (additive/opt-in on `WorldClub`, credited inside `awardInternational`
+   at the same off-season seam as the payout, surviving the off-season); `pnpm run
+   server` reports it ("club titles : CHINA·CBT×1 …") and the web club page shows 🌐×N.
+   Byte-identical (the field is undefined on generated worlds), so seed 42 + the
+   world/season CLIs are untouched.*
 9. **Tick-night realtime** (match center MVP) + **public club page**. ✅ *Done — the
    web **Match Center** (`apps/web/src/Live.vue`) is the async-PvP client: it connects
    to a live server, streams the day's Premier matches over SSE with running scores +
