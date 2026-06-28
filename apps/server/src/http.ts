@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -302,6 +302,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const w = (await store.loadWorld(id))!;
       const role = new URL(req.url ?? '/', 'http://x').searchParams.get('role') || undefined;
       return json(res, 200, { players: topPlayers(w, 25, role) });
+    }
+    // GET /powerrankings  → the world's strongest clubs by squad power (+ lifecycle stage)
+    if (path[0] === 'powerrankings' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      return json(res, 200, { clubs: topClubs(w, 25) });
     }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {

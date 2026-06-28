@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -272,6 +272,14 @@ const ROLE_TABS = [{ k: '', l: 'All' }, { k: 'duelist', l: 'Duelist' }, { k: 'in
 async function loadLeaders() { if (server.value) try { leaders.value = (await server.value.leaderboard(leaderRole.value || undefined)).players; } catch { /* transient */ } }
 async function setLeaderRole(r: string) { leaderRole.value = r; await loadLeaders(); }
 async function toggleLeaders() { leadersOpen.value = !leadersOpen.value; if (leadersOpen.value && !leaders.value.length) await loadLeaders(); }
+
+// club power rankings — squad strength + lifecycle stage (read the league: who's a
+// fading dynasty, who's a rising threat — a different axis from this season's standings)
+const powerClubs = ref<ClubRankRow[]>([]);
+const powerOpen = ref(false);
+const PHASE_LABEL: Record<string, string> = { rebuilding: 'rebuild', rising: 'rising', prime: 'prime', aging: 'aging' };
+async function loadPower() { if (server.value) try { powerClubs.value = (await server.value.powerRankings()).clubs; } catch { /* transient */ } }
+async function togglePower() { powerOpen.value = !powerOpen.value; if (powerOpen.value && !powerClubs.value.length) await loadPower(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
 interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number }
@@ -628,6 +636,30 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               <span class="lv-ldclub"><i class="hq-dot" :style="{ background: `hsl(${hue(p.clubTag)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(p.clubTag)">{{ p.clubTag }}</span> · {{ tierName(p.tier) }}<i v-if="p.owned" class="lv-youtag sm">OWNED</i></span>
             </div>
             <div v-if="!leaders.length" class="lv-empty">loading…</div>
+          </div>
+        </template>
+      </div>
+
+      <!-- club power rankings — squad strength + lifecycle (read the league) -->
+      <div class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="togglePower">🏛 Club power rankings <i class="lv-disc" :class="{ open: powerOpen }">▾</i></button>
+          <span class="lv-note">squad strength + lifecycle stage — a fading dynasty vs a rising threat</span>
+        </div>
+        <template v-if="powerOpen">
+          <div class="lv-ldboard">
+            <div v-for="c in powerClubs" :key="c.tag" class="lv-pwrow" :class="{ mine: mine(c.tag) }">
+              <span class="lv-ldrank" :class="{ top: c.rank <= 3 }">{{ c.rank }}</span>
+              <i class="hq-dot" :style="{ background: `hsl(${hue(c.tag)} 65% 55%)` }"></i>
+              <b class="lv-cname clickable" @click="openClub(c.tag)">{{ c.tag }}</b>
+              <span class="lv-pwname">{{ c.name }}<i v-if="mine(c.tag)" class="lv-youtag sm">YOU</i></span>
+              <span class="lv-pwtier">{{ tierName(c.tier) }}</span>
+              <span class="lv-phase" :class="'ph-' + c.phase">{{ PHASE_LABEL[c.phase] }}</span>
+              <span class="lv-pwinfra" :title="`infrastructure ${c.infra}/5`"><i v-for="n in 5" :key="n" :class="{ on: n <= c.infra }">▰</i></span>
+              <span class="lv-pwtitles">{{ c.titles ? '🏆'.repeat(Math.min(3, c.titles)) + (c.titles > 3 ? `×${c.titles}` : '') : '' }}</span>
+              <span class="lv-pwpower">{{ c.power }} <i>PWR</i></span>
+            </div>
+            <div v-if="!powerClubs.length" class="lv-empty">loading…</div>
           </div>
         </template>
       </div>

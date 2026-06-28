@@ -966,3 +966,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rk-platinum{color:#4fb8c8}.rk-gold{color:#e6b84f}.rk-silver{color:#9fb0bf}.rk-bronze{color:#b5773f}.rk-iron{color:#7a8290}
 .lv-ldclub{font-size:11px;color:var(--muted-2);display:flex;align-items:center;gap:6px;letter-spacing:.02em}
 .lv-youtag.sm{font-size:8px;padding:1px 4px}
+/* club power rankings */
+.lv-pwrow{display:grid;grid-template-columns:34px 12px 56px 1fr 92px 72px 92px 60px 84px;align-items:center;gap:10px;padding:6px 6px;border-bottom:1px solid var(--line)}
+.lv-pwrow:hover{background:rgba(255,255,255,.02)}
+.lv-pwrow.mine{background:rgba(90,160,210,.07)}
+.lv-pwname{font-size:11px;color:var(--muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-pwtier{font-family:var(--label);font-size:10px;color:var(--muted-2);letter-spacing:.02em}
+.lv-phase{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;text-align:center;padding:3px 0;border-radius:5px;border:1px solid currentColor;opacity:.9}
+.ph-rebuilding{color:#c87f4f}.ph-rising{color:#5fd38a}.ph-prime{color:#5b9bd5}.ph-aging{color:#c25b6e}
+.lv-pwinfra{display:inline-flex;gap:2px}
+.lv-pwinfra i{color:var(--line);font-size:9px}.lv-pwinfra i.on{color:#7f9fc8}
+.lv-pwtitles{font-size:11px;text-align:center}
+.lv-pwpower{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.lv-pwpower i{font-size:9px;color:var(--muted-2);font-style:normal;font-weight:400}

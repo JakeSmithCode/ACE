@@ -30,6 +30,7 @@ export interface AcademyView { level: number; max: number; cost: number | null; 
 export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView }
 
 export interface LeaderRow { rank: number; handle: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
+export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -64,6 +65,8 @@ export class AceServer {
   leaderboard(role?: string): Promise<{ players: LeaderRow[] }> {
     return fetch(`${this.base}/leaderboard${role ? `?role=${role}` : ''}`).then(r => j<{ players: LeaderRow[] }>(r));
   }
+  /** The world's strongest clubs by squad power (+ lifecycle stage + infra). */
+  powerRankings(): Promise<{ clubs: ClubRankRow[] }> { return fetch(`${this.base}/powerrankings`).then(r => j<{ clubs: ClubRankRow[] }>(r)); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }
