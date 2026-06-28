@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -263,6 +263,15 @@ async function refreshTable() { if (server.value && world.value) try { table.val
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
+
+// the world's best players — a cross-club prestige board (who's the best, and where)
+const leaders = ref<LeaderRow[]>([]);
+const leaderRole = ref<string>('');
+const leadersOpen = ref(false);
+const ROLE_TABS = [{ k: '', l: 'All' }, { k: 'duelist', l: 'Duelist' }, { k: 'initiator', l: 'Initiator' }, { k: 'controller', l: 'Controller' }, { k: 'sentinel', l: 'Sentinel' }];
+async function loadLeaders() { if (server.value) try { leaders.value = (await server.value.leaderboard(leaderRole.value || undefined)).players; } catch { /* transient */ } }
+async function setLeaderRole(r: string) { leaderRole.value = r; await loadLeaders(); }
+async function toggleLeaders() { leadersOpen.value = !leadersOpen.value; if (leadersOpen.value && !leaders.value.length) await loadLeaders(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
 interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number }
@@ -597,6 +606,30 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           </template>
           <div v-else class="lv-hofempty">No champions crowned yet.<br />Advance a full season to make history.</div>
         </div>
+      </div>
+
+      <!-- the world's best players — a cross-club prestige board (solo rank ≠ division) -->
+      <div class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="toggleLeaders">★ World top players <i class="lv-disc" :class="{ open: leadersOpen }">▾</i></button>
+          <span class="lv-note">individual skill — a Radiant on a small club is a gem to scout</span>
+        </div>
+        <template v-if="leadersOpen">
+          <div class="lv-roletabs">
+            <button v-for="t in ROLE_TABS" :key="t.k" :class="{ on: leaderRole === t.k }" @click="setLeaderRole(t.k)">{{ t.l }}</button>
+          </div>
+          <div class="lv-ldboard">
+            <div v-for="p in leaders" :key="p.handle" class="lv-ldrow">
+              <span class="lv-ldrank" :class="{ top: p.rank <= 3 }">{{ p.rank }}</span>
+              <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
+              <b class="lv-ldhandle">{{ p.handle }}</b>
+              <span class="lv-ldovr">{{ p.overall }} <i>OVR</i></span>
+              <span class="lv-ldsolo" :class="'rk-' + p.soloTier.toLowerCase()">{{ p.soloLabel }}</span>
+              <span class="lv-ldclub"><i class="hq-dot" :style="{ background: `hsl(${hue(p.clubTag)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(p.clubTag)">{{ p.clubTag }}</span> · {{ tierName(p.tier) }}<i v-if="p.owned" class="lv-youtag sm">OWNED</i></span>
+            </div>
+            <div v-if="!leaders.length" class="lv-empty">loading…</div>
+          </div>
+        </template>
       </div>
     </template>
 

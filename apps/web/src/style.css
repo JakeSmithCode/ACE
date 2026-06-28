@@ -944,3 +944,25 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-attrbar .tick{position:absolute;top:-1px;width:2px;height:8px;background:#7fe3a4;border-radius:1px;transform:translateX(-1px)}
 .lv-attrv{font-family:var(--label);font-size:10px;color:var(--text);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .lv-attrv em{color:#5fd38a;font-style:normal;margin-left:4px;font-size:9px}
+/* the world top-players leaderboard (prestige board) */
+.lv-leaders{margin-top:14px;background:var(--panel,rgba(255,255,255,.02));border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.lv-kicker.btn{background:none;border:none;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;padding:0;display:inline-flex;align-items:center;gap:6px}
+.lv-kicker.btn .lv-disc{font-size:8px;transition:transform .14s}
+.lv-kicker.btn .lv-disc.open{transform:rotate(180deg);color:var(--brand)}
+.lv-roletabs{display:flex;gap:6px;margin:10px 0 8px}
+.lv-roletabs button{font-family:var(--label);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-2);background:transparent;border:1px solid var(--line);border-radius:6px;padding:4px 11px;cursor:pointer;transition:all .12s}
+.lv-roletabs button:hover{color:var(--text)}
+.lv-roletabs button.on{color:var(--brand);border-color:var(--brand);background:rgba(90,160,210,.1)}
+.lv-ldboard{display:grid;gap:1px}
+.lv-ldrow{display:grid;grid-template-columns:34px 40px 1fr 78px 104px 1.4fr;align-items:center;gap:11px;padding:6px 6px;border-bottom:1px solid var(--line)}
+.lv-ldrow:hover{background:rgba(255,255,255,.02)}
+.lv-ldrank{font-family:var(--label);font-size:13px;color:var(--muted-2);text-align:center;font-variant-numeric:tabular-nums}
+.lv-ldrank.top{color:#e6c66a;font-weight:700}
+.lv-ldhandle{font-size:14px;letter-spacing:.01em}
+.lv-ldovr{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.lv-ldovr i{font-size:9px;color:var(--muted-2);font-style:normal;font-weight:400}
+.lv-ldsolo{font-family:var(--label);font-size:10px;letter-spacing:.03em;text-align:center;padding:3px 0;border-radius:5px;border:1px solid currentColor;opacity:.92}
+.rk-radiant{color:#ffe08a}.rk-immortal{color:#e0567c}.rk-ascendant{color:#3fc488}.rk-diamond{color:#9a7ce0}
+.rk-platinum{color:#4fb8c8}.rk-gold{color:#e6b84f}.rk-silver{color:#9fb0bf}.rk-bronze{color:#b5773f}.rk-iron{color:#7a8290}
+.lv-ldclub{font-size:11px;color:var(--muted-2);display:flex;align-items:center;gap:6px;letter-spacing:.02em}
+.lv-youtag.sm{font-size:8px;padding:1px 4px}

@@ -29,6 +29,8 @@ export interface Prospect { id: string; handle: string; role: string; age: numbe
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView }
 
+export interface LeaderRow { rank: number; handle: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
+
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
   seed: number;
@@ -58,6 +60,10 @@ export class AceServer {
   }
   /** A club's public page (identity, division, the fielded five) — read-only. */
   club(slug: string): Promise<ClubPage> { return fetch(`${this.base}/clubs/${slug}`).then(r => j<ClubPage>(r)); }
+  /** The world's best players (cross-club prestige board), optionally by role. */
+  leaderboard(role?: string): Promise<{ players: LeaderRow[] }> {
+    return fetch(`${this.base}/leaderboard${role ? `?role=${role}` : ''}`).then(r => j<{ players: LeaderRow[] }>(r));
+  }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

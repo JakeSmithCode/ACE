@@ -23,3 +23,4 @@ export * from './meta.js';
 export * from './transfers.js';
 export * from './worldMarket.js';
 export * from './worldAcademy.js';
+export * from './leaderboard.js';

@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -296,6 +296,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const w = (await store.loadWorld(id))!;
       const allTime = w.clubs.filter(c => c.titles > 0).map(c => ({ tag: c.tag, name: c.name, titles: c.titles })).sort((a, b) => b.titles - a.titles || a.tag.localeCompare(b.tag));
       return json(res, 200, { honors: [...honors].reverse(), allTime });
+    }
+    // GET /leaderboard  → the world's best players (cross-club prestige board), optional ?role=
+    if (path[0] === 'leaderboard' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      const role = new URL(req.url ?? '/', 'http://x').searchParams.get('role') || undefined;
+      return json(res, 200, { players: topPlayers(w, 25, role) });
     }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {
