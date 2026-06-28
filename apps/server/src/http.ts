@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, clubTeam, soloRank, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -41,8 +41,11 @@ const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve
  *  whether a human owns it. Read-only, always available (no embargo on a club). */
 const publicClub = (w: WorldState, c: WorldClub) => ({
   tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles,
-  owned: c.owner != null, rating: Math.round(c.strength * 100),
-  five: planFive(c).map(p => ({ handle: p.handle, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl })),
+  owned: c.owner != null, rating: Math.round(c.strength * 100), phase: clubPhase(clubTeam(c)),
+  five: planFive(c).map(p => {
+    const ovr = Math.round(overall(p)), sr = soloRank(ovr);
+    return { handle: p.handle, role: p.role, overall: ovr, igl: !!p.igl, solo: sr.label, soloTier: sr.tier };
+  }),
 });
 
 /** Embargo-aware standings (§8.5): derived from RESOLVED fixtures only, so the

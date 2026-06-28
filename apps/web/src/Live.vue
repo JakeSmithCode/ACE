@@ -727,14 +727,15 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <i class="lv-badge id" :style="{ background: `hsl(${hue(clubModal.tag)} 60% 24%)`, borderColor: `hsl(${hue(clubModal.tag)} 65% 55%)` }">{{ clubModal.tag }}</i>
           <div class="lv-clubmeta">
             <b class="lv-clubname">{{ clubModal.name }}</b>
-            <span class="lv-clubsub">Tier {{ clubModal.tier + 1 }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template></span>
+            <span class="lv-clubsub">{{ tierName(clubModal.tier) }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template></span>
           </div>
+          <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
         </div>
         <div class="lv-clubfive">
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
-            <b>{{ p.handle }}</b>
-            <i v-if="p.igl" class="lv-igltag">IGL</i>
+            <span class="lv-fivehandle"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i></span>
+            <span v-if="p.solo" class="lv-ldsolo" :class="'rk-' + (p.soloTier || '').toLowerCase()">{{ p.solo }}</span>
             <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>
           </div>
         </div>
