@@ -53,6 +53,8 @@ const headliner = computed(() => wave.value[0]);
 const injury = computed(() => w.lastInjury.value);
 // a derby result from the last match-day (vs your rival)
 const derby = computed(() => w.lastDerby.value);
+// last season's division awards (shown at the rollover)
+const awards = computed(() => w.lastAwards.value);
 // team talk: pick a tone before the next match — the right one reads the room
 const talkTones = ['calm', 'rally', 'demand'] as const;
 const readLabel = (f: string) => f === 'great' ? '✓ reads the room' : f === 'poor' ? '✗ wrong tone' : '~ a safe call';
@@ -205,6 +207,13 @@ onUnmounted(() => { viewer?.destroy(); });
         <template v-if="headliner"> — headlined by <b>{{ headliner.handle }}</b> <i class="rs-role" :class="headliner.role">{{ roleName(headliner.role) }}</i> {{ headliner.overall }} OVR</template>
       </span>
       <span class="hq-retleague">a strained club can't keep its earners — grab them in the Market</span>
+    </div>
+    <!-- end-of-season awards — your division's MVP, young gun, and your most-improved -->
+    <div v-if="awards && !playoffs && dayIdx < total" class="hq-awards">
+      <span class="hq-awh">🏅 {{ awards.division }} awards · season {{ awards.season }}</span>
+      <span class="hq-aw" :class="{ mine: awards.mvp.mine }"><i>MVP</i> <b>{{ awards.mvp.handle }}</b> <em>{{ awards.mvp.tag }}</em> {{ awards.mvp.overall }} OVR</span>
+      <span class="hq-aw" :class="{ mine: awards.young.mine }"><i>Young Gun</i> <b>{{ awards.young.handle }}</b> <em>{{ awards.young.tag }}</em> {{ awards.young.overall }} OVR</span>
+      <span v-if="awards.improved" class="hq-aw mine"><i>Most Improved</i> <b>{{ awards.improved.handle }}</b> <em>{{ awards.improved.note }}</em></span>
     </div>
     <!-- derby result — you just played your rival -->
     <div v-if="derby && dayIdx < total" class="hq-retbanner derby" :class="{ won: derby.won }">

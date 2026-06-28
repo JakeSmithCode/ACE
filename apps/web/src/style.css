@@ -737,6 +737,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-retbanner.derby .hq-reth{color:var(--def)}
 .hq-retbanner.derby.won{border-left-color:var(--win)}
 .hq-retbanner.derby.won .hq-reth{color:var(--win)}
+/* end-of-season awards banner */
+.hq-awards{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;margin-bottom:16px;padding:10px 14px;background:linear-gradient(180deg,#16140c,#0e0c08);border:1px solid var(--line);border-left:2px solid var(--gold)}
+.hq-awh{font-family:var(--label);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold)}
+.hq-aw{font-size:12px;color:var(--muted);display:flex;align-items:baseline;gap:6px}
+.hq-aw i{font-family:var(--label);font-size:9px;font-style:normal;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
+.hq-aw b{font-family:var(--display);font-size:15px;color:var(--text);letter-spacing:.01em}
+.hq-aw em{font-style:normal;font-size:10px;color:var(--muted-2)}
+.hq-aw.mine b{color:var(--gold)}
+.hq-aw.mine em{color:var(--gold)}
 /* rivalry line on the club card */
 .hq-rival{margin-top:8px;font-family:var(--label);font-size:11px;letter-spacing:.02em;color:var(--muted);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .hq-rivaltag{color:var(--def);font-family:var(--display);font-size:14px;letter-spacing:.02em}

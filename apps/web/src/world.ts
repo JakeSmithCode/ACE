@@ -211,6 +211,37 @@ function pickRival(): number | null {
 }
 const ensureRival = () => { if (rivalId.value == null) rivalId.value = pickRival(); };
 const isRival = (i: number) => rivalId.value != null && i === rivalId.value;
+
+// ── End-of-season awards (legacy — celebrate the development model) ───────────────────
+// Computed at the season rollover for YOUR division: an MVP (best player), a Young Player
+// (best U22), and YOUR most-improved (biggest OVR gain vs the season-start baseline — the
+// payoff for developing a prospect). Stored as a history for the legacy feed. Engine-blind.
+type Award = { handle: string; tag: string; overall: number; role: string; mine: boolean; note?: string };
+type SeasonAwards = { season: number; division: string; mvp: Award; young: Award; improved: Award | null };
+const lastAwards = ref<SeasonAwards | null>(null);
+const awardsHistory = ref<SeasonAwards[]>([]);
+function seasonAwards(): SeasonAwards | null {
+  const d = division.value[myClub.value];
+  const pool: { p: Player; ci: number }[] = [];
+  clubs.value.forEach((c, ci) => { if (division.value[ci] === d) c.team.players.forEach(p => pool.push({ p, ci })); });
+  if (!pool.length) return null;
+  const mk = (x: { p: Player; ci: number }, note?: string): Award =>
+    ({ handle: x.p.handle, tag: clubs.value[x.ci].team.tag, overall: overall(x.p), role: x.p.role, mine: x.ci === myClub.value, note });
+  const byOvr = [...pool].sort((a, b) => overall(b.p) - overall(a.p) || (a.p.id < b.p.id ? -1 : 1));
+  const mvp = mk(byOvr[0]);
+  const youngs = pool.filter(x => x.p.age <= 21).sort((a, b) => overall(b.p) - overall(a.p) || (a.p.id < b.p.id ? -1 : 1));
+  const young = mk(youngs[0] ?? byOvr[0]);
+  // your most-improved: biggest rounded OVR gain vs the season-start snapshot
+  let best: { p: Player; gain: number } | null = null;
+  for (const p of myRoster.value) {
+    const base = prevById.value.get(p.id);
+    if (!base) continue;
+    const gain = overall(p) - overall(base);
+    if (gain > 0 && (!best || gain > best.gain)) best = { p, gain };
+  }
+  const improved = best ? { handle: best.p.handle, tag: clubs.value[myClub.value].team.tag, overall: overall(best.p), role: best.p.role, mine: true, note: `+${best.gain} OVR` } : null;
+  return { season: season.value, division: DIV_NAMES[d], mvp, young, improved };
+}
 /** Post-match: heal existing injuries a day, fatigue the five who played + recover the
  *  rest, and roll new injuries (risk scales with the fatigue they played at). Seeded so
  *  a replayed match-day is identical; never touches the world/engine stream. */
@@ -598,6 +629,11 @@ function advanceSeason() {
   const objMet = objFinish > 0 && objFinish <= objective.value.needRank;
   const objBonus = objMet ? objective.value.bonus : 0;
   objectiveOutcome.value = { met: objMet, label: objective.value.label, bonus: objBonus, finish: objFinish };
+  // end-of-season awards for your division (uses the season's division + the start baseline,
+  // both still live here — promoteRelegate + the new snapRosters baseline come after)
+  const aw = seasonAwards();
+  lastAwards.value = aw;
+  if (aw) awardsHistory.value = [aw, ...awardsHistory.value].slice(0, 30);
   balances.value = balances.value.map((b, i) =>
     i === myClub.value ? b + ledger.value!.net + objBonus : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
@@ -681,7 +717,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival();
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = [];
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -702,7 +738,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival();
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = [];
   refreshMarket();
 }
 
@@ -1048,6 +1084,7 @@ function snapshot() {
     focuses: [...focuses.value.entries()],
     fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()], staff: staff.value,
     morale: [...morale.value.entries()], rivalId: rivalId.value, derbyRecord: derbyRecord.value,
+    lastAwards: lastAwards.value, awardsHistory: awardsHistory.value,
   };
 }
 function save() {
@@ -1079,6 +1116,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   morale.value = new Map((o as { morale?: [string, number][] }).morale ?? []);
   rivalId.value = (o as { rivalId?: number | null }).rivalId ?? null;
   derbyRecord.value = (o as { derbyRecord?: { w: number; l: number } }).derbyRecord ?? { w: 0, l: 0 };
+  lastAwards.value = (o as { lastAwards?: SeasonAwards | null }).lastAwards ?? null;
+  awardsHistory.value = (o as { awardsHistory?: SeasonAwards[] }).awardsHistory ?? [];
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1095,7 +1134,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1116,7 +1155,7 @@ export function useWorld() {
     fatigueOf, injuryOf, isInjured, isTired, lastInjury,
     staff, staffMkt, staffEff, staffWages, hiredStaff, hireStaff, fireStaff, STAFF_ROLES,
     moraleOf, squadMorale, teamTalk, setTalk, talkPreview, talkFit, TALK_META,
-    rivalId, derbyRecord, isRival, nextIsDerby, lastDerby,
+    rivalId, derbyRecord, isRival, nextIsDerby, lastDerby, lastAwards, awardsHistory,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
