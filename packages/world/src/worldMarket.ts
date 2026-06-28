@@ -147,10 +147,17 @@ export function resolveAiMarket(w: WorldState, available: Player[], max = 2): { 
   return { world: nw, signings };
 }
 
-/** The owner's full squad for the wire (so the UI can list reserves to sell). */
-export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
+/** The owner's full squad for the wire (so the UI can list reserves to sell). `age`
+ *  + the owned-confidence `ceiling` band make development legible: a young player
+ *  whose ceiling sits well above his OVR has room to grow (play him / hold him), a
+ *  veteran sitting on his ceiling is done improving (flip him). `room` is that gap
+ *  (ceiling-top − OVR), the at-a-glance "upside left" read. Owned → tighter bands
+ *  (your staff watch them daily) but the residual is real plasticity. */
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number }
 export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
   const five = new Set(startingFive(c.roster).map(p => p.id));
-  return c.roster.map(p => ({ id: p.id, handle: p.handle, role: p.role, overall: Math.round(overall(p)), value: playerValue(p, w.patch), starter: five.has(p.id) }))
-    .sort((a, b) => Number(b.starter) - Number(a.starter) || b.overall - a.overall);
+  return c.roster.map(p => {
+    const ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, 0);
+    return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), ceiling, room: Math.max(0, ceiling[1] - ovr) };
+  }).sort((a, b) => Number(b.starter) - Number(a.starter) || b.overall - a.overall);
 }

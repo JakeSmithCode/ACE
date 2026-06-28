@@ -344,7 +344,12 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <div v-for="sp in myClub.squad" :key="sp.id" class="lv-mktrow squad">
               <span class="rs-role" :class="sp.role">{{ sp.role.slice(0, 3).toUpperCase() }}</span>
               <b class="lv-mkthandle">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i></b>
+              <span class="lv-mktage">age {{ sp.age }}</span>
               <span class="lv-mktovr">{{ sp.overall }} <i>OVR</i></span>
+              <span class="lv-roomcell" :title="`scouted ceiling ${sp.ceiling[0]}–${sp.ceiling[1]} · ${sp.room} OVR of upside left`">
+                <span class="lv-mktceil">↗ {{ sp.ceiling[1] }}</span>
+                <span class="lv-room" :class="{ grow: sp.room >= 5, done: sp.room === 0 }">{{ sp.room >= 5 ? `▲ +${sp.room}` : sp.room > 0 ? `+${sp.room}` : 'peaked' }}</span>
+              </span>
               <span class="lv-mktval">{{ kfmt(sp.value) }}</span>
               <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>

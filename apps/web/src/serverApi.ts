@@ -20,7 +20,7 @@ export interface Session { accountId: string; accessToken: string; refreshToken:
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
-export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
