@@ -18,8 +18,9 @@ import {
   defaultFacilities, facilityBoost, facilityCost, facilityUpkeep, FACILITY_MAX,
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
   defaultAcademy, academyIntake, academyCost, academyUpkeep, academyWageBill, intakeSize, ACADEMY_MAX,
+  staffMarket, staffEffect, withStaffBoost, staffWageBill, STAFF_ROLES,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
-  type Facilities, type FacilityId, type Academy,
+  type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
 
 const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
@@ -103,6 +104,7 @@ const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned 
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
 const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boost YOUR roster's development)
 const academy = ref<Academy>(defaultAcademy());           // your youth pipeline (homegrown prospects)
+const staff = ref<StaffHires>({});                        // your hired backroom staff (coach/analyst/psych)
 // last off-season's retirements (league-wide; `mine` flags your own) — for the banner
 const retirements = ref<{ handle: string; age: number; role: string; overall: number; club: number; mine: boolean }[]>([]);
 // your players who walked free last off-season (contract expired, not renewed)
@@ -161,14 +163,15 @@ function updateFitness(fielded: Set<string>, rng: Rng) {
     const played = fielded.has(p.id);
     const cur = fat.get(p.id) ?? 0;
     if (played) {
-      // injury risk is read at the fatigue he PLAYED at (pre-increment); one draw per starter
-      if (!inj.has(p.id) && rng.chance(INJ_BASE + INJ_FAT * (cur / FAT_MAX))) {
+      // injury risk is read at the fatigue he PLAYED at (pre-increment); one draw per starter.
+      // a sports psychologist cuts both the injury rate and how hard the day fatigues.
+      if (!inj.has(p.id) && rng.chance((INJ_BASE + INJ_FAT * (cur / FAT_MAX)) * staffEff.value.injuryMul)) {
         const days = rng.int(2, 4);
         inj.set(p.id, days); fat.set(p.id, 20);           // sidelined; rests while out
         const o = overall(p);
         if (!worst || o > worst.ovr) worst = { handle: p.handle, days, ovr: o };
       } else {
-        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN));
+        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN * staffEff.value.fatigueMul));
       }
     } else {
       fat.set(p.id, Math.max(0, cur - FAT_RECOVER));      // bench/rest recovers
@@ -191,7 +194,8 @@ const balance = computed(() => balances.value[myClub.value]);
 // (and sells for) what you've revealed; an unscouted/rival player stays fogged
 const value = (p: Player) => playerValue(p, patch.value, scoutLevelOf(p.id));
 // scout the next level on a player you own (roster or academy) — cost rises per level
-const scoutCost = (id: string) => 1500 + scoutLevelOf(id) * 1500;     // 1.5k / 3k / 4.5k per level
+// base 1.5k / 3k / 4.5k per level, less a performance analyst's discount (cheaper reports)
+const scoutCost = (id: string) => Math.round((1500 + scoutLevelOf(id) * 1500) * (1 - staffEff.value.scoutDiscount));
 const canScout = (id: string) => scoutLevelOf(id) < SCOUT_MAX && balance.value >= scoutCost(id);
 function scoutPlayer(id: string) {
   if (!canScout(id)) return;
@@ -219,6 +223,22 @@ function upgradeFacility(id: FacilityId) {
   const cost = facCost(id);
   balances.value = balances.value.map((b, i) => i === myClub.value ? b - cost : b);
   facilities.value = { ...facilities.value, [id]: facilities.value[id] + 1 };
+}
+
+// --- backroom staff: hire a coach / analyst / psychologist from a seasonal shortlist.
+// Each boosts a distinct system (dev / scouting+fitness) and draws a recurring wage —
+// a personnel bet that competes with transfers and facility upkeep on the books.
+const staffEff = computed(() => staffEffect(staff.value));
+const staffMkt = computed(() => staffMarket(seasonSeed.value, season.value));
+const staffWages = computed(() => staffWageBill(staff.value));
+// your full development boost = the HQ rooms × a coach's growth + an analyst's ceiling
+const myDevBoost = computed(() => withStaffBoost(facilityBoost(facilities.value), staffEff.value));
+const hiredStaff = (role: StaffRole) => staff.value[role] ?? null;
+function hireStaff(m: StaffMember) {        // hiring is a contract: no fee, but a season wage
+  staff.value = { ...staff.value, [m.role]: m };
+}
+function fireStaff(role: StaffRole) {
+  const s = { ...staff.value }; delete s[role]; staff.value = s;
 }
 
 // --- the academy (the youth pipeline): build the wing, take an annual intake of
@@ -427,7 +447,7 @@ function resolveDay() {
   // reserves grow less and rust — so playing a prospect develops him
   const fiveIds = new Set(clubs.value[myClub.value].team.players.map(p => p.id));
   const dr = new Rng((seasonSeed.value ^ (season.value * 0x2545f491) ^ (dayIdx.value * 0x9e3779b9)) >>> 0);
-  const boost = facilityBoost(facilities.value);   // your HQ accelerates your squad's development
+  const boost = myDevBoost.value;   // your HQ rooms × the head coach's growth + analyst's ceiling
   // develop + gel: a player on the roster builds chemistry (~+1 tenure/season,
   // spread across match-days) so a new signing gels into the five over time
   myRoster.value = myRoster.value.map(p => {
@@ -477,7 +497,7 @@ function advanceSeason() {
   // wages are market-linked (meta) for every club; YOUR bill also carries the cheap
   // academy prospects + the recurring HQ/academy UPKEEP (a built HQ costs to run)
   const myWages = squadWageBill(myRoster.value, patch.value) + academyWageBill(academy.value.prospects);
-  const myUpkeep = facilityUpkeep(facilities.value) + academyUpkeep(academy.value.level);
+  const myUpkeep = facilityUpkeep(facilities.value) + academyUpkeep(academy.value.level) + staffWages.value;   // rooms + academy + backroom staff
   ledger.value = { season: season.value, ...settle(myClub.value, myWages + myUpkeep), wages: myWages, upkeep: myUpkeep };
   // did you meet the board's objective? a bonus if so (never a fine — pressure, not a mugging).
   const objFinish = rankIn(myClub.value);
@@ -501,7 +521,7 @@ function advanceSeason() {
   // overwritten by syncLineup from myRoster anyway). Reloads reset to 0 below.
   clubs.value = clubs.value.map((c, i) => i === myClub.value ? c
     : { ...c, team: { ...c.team, players: c.team.players.map(p => ({ ...p, tenure: (p.tenure ?? 0) + 1 })) } });
-  const myBoost = facilityBoost(facilities.value);
+  const myBoost = myDevBoost.value;   // HQ rooms × coach growth + analyst ceiling
   myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost, focusOf(p.id)));  // bootcamp share + HQ boost
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
   if (academy.value.prospects.length) {
@@ -563,7 +583,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
+  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
@@ -584,7 +604,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
-  facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
+  staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
   refreshMarket();
@@ -930,7 +950,7 @@ function snapshot() {
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
     focuses: [...focuses.value.entries()],
-    fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()],
+    fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()], staff: staff.value,
   };
 }
 function save() {
@@ -958,6 +978,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   focuses.value = new Map((o as { focuses?: [string, keyof Attributes][] }).focuses ?? []);
   fatigue.value = new Map((o as { fatigue?: [string, number][] }).fatigue ?? []);
   injuries.value = new Map((o as { injuries?: [string, number][] }).injuries ?? []);
+  staff.value = (o as { staff?: StaffHires }).staff ?? {};
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -973,7 +994,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -992,6 +1013,7 @@ export function useWorld() {
     bidFor, isContested, askingOf, chemOf, teamCohesion,
     scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX, focusOf, setFocus,
     fatigueOf, injuryOf, isInjured, isTired, lastInjury,
+    staff, staffMkt, staffEff, staffWages, hiredStaff, hireStaff, fireStaff, STAFF_ROLES,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

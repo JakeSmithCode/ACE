@@ -636,6 +636,27 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .fc-up i{font-style:normal;font-family:var(--display);font-size:13px}
 .fc-up:hover:not(:disabled){filter:brightness(1.08)}
 .fc-up:disabled{background:transparent;color:var(--muted-2);border-color:var(--line);cursor:default}
+/* staff: role slots + hireable shortlist */
+.sf-role{padding:14px 2px;border-bottom:1px solid var(--line)}
+.sf-rolehead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:9px}
+.sf-roletitle{font-family:var(--display);font-weight:700;font-size:17px;color:var(--text)}
+.sf-roleblurb{font-family:var(--body);font-size:11px;color:var(--muted-2);margin-left:10px;font-weight:400}
+.sf-current{display:flex;align-items:center;gap:10px}
+.sf-curname{font-family:var(--label);font-size:12px;color:var(--text)}
+.sf-curstars{color:var(--gold);font-size:12px;letter-spacing:1px}
+.sf-curwage{font-family:var(--label);font-size:10px;color:var(--def);font-variant-numeric:tabular-nums}
+.sf-fire{background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.35);color:var(--def);font-family:var(--label);font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;cursor:pointer}
+.sf-vacant{font-family:var(--label);font-size:10px;color:var(--muted-2);letter-spacing:.04em}
+.sf-shortlist{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sf-cand{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#0b1520;border:1px solid var(--line);clip-path:var(--bevel)}
+.sf-cand.hired{border-color:rgba(34,211,238,.4);background:rgba(34,211,238,.06)}
+.sf-candname{font-family:var(--label);font-size:11px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-candstars{color:var(--gold);font-size:11px;letter-spacing:.5px}
+.sf-candstars.r1,.sf-candstars.r2{color:var(--muted-2)}
+.sf-candwage{font-family:var(--label);font-size:9.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sf-hire{flex:none;background:var(--brand);border:1px solid var(--brand);color:var(--bg);font-family:var(--label);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;padding:4px 9px;cursor:pointer}
+.sf-hire:hover:not(:disabled){filter:brightness(1.08)}
+.sf-hire:disabled{background:transparent;color:var(--brand);border-color:rgba(34,211,238,.4);cursor:default}
 /* academy: prospect board (reuses rs-* badges) */
 .ac-board{margin-top:6px}
 .ac-row{display:flex;align-items:center;gap:16px;padding:11px 4px;border-bottom:1px solid var(--line)}

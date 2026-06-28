@@ -11,6 +11,7 @@ import Roster from './Roster.vue';
 import Market from './Market.vue';
 import Facilities from './Facilities.vue';
 import Academy from './Academy.vue';
+import Staff from './Staff.vue';
 import Rankings from './Rankings.vue';
 import { useWorld } from './world';
 
@@ -51,7 +52,7 @@ const headliner = computed(() => wave.value[0]);
 // the most notable injury from the last match-day (a roster event to manage)
 const injury = computed(() => w.lastInjury.value);
 
-const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'rankings'>('season');
+const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'staff' | 'rankings'>('season');
 
 const club = (i: number) => clubs.value[i];
 const tagOf = (i: number) => club(i).team.tag;
@@ -120,6 +121,7 @@ onUnmounted(() => { viewer?.destroy(); });
         <button :class="{ on: hqTab === 'market' }" @click="hqTab = 'market'">Market</button>
         <button :class="{ on: hqTab === 'hq' }" @click="hqTab = 'hq'">Facilities</button>
         <button :class="{ on: hqTab === 'academy' }" @click="hqTab = 'academy'">Academy</button>
+        <button :class="{ on: hqTab === 'staff' }" @click="hqTab = 'staff'">Staff</button>
         <button :class="{ on: hqTab === 'rankings' }" @click="hqTab = 'rankings'">Rankings</button>
       </div>
       <div class="hq-actions">
@@ -136,6 +138,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <Market v-if="hqTab === 'market'" />
     <Facilities v-else-if="hqTab === 'hq'" />
     <Academy v-else-if="hqTab === 'academy'" />
+    <Staff v-else-if="hqTab === 'staff'" />
     <Rankings v-else-if="hqTab === 'rankings'" />
 
     <!-- SQUAD & COMP -->
