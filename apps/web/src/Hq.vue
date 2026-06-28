@@ -48,6 +48,8 @@ const walkedFree = computed(() => w.contractDepartures.value);
 // the AI free-agency wave — players released onto the board this off-season
 const wave = computed(() => w.marketWave.value);
 const headliner = computed(() => wave.value[0]);
+// the most notable injury from the last match-day (a roster event to manage)
+const injury = computed(() => w.lastInjury.value);
 
 const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'rankings'>('season');
 
@@ -195,6 +197,11 @@ onUnmounted(() => { viewer?.destroy(); });
         <template v-if="headliner"> — headlined by <b>{{ headliner.handle }}</b> <i class="rs-role" :class="headliner.role">{{ roleName(headliner.role) }}</i> {{ headliner.overall }} OVR</template>
       </span>
       <span class="hq-retleague">a strained club can't keep its earners — grab them in the Market</span>
+    </div>
+    <!-- injury — a player picked one up last match-day (rotate depth in) -->
+    <div v-if="injury && dayIdx < total" class="hq-retbanner injury">
+      <span class="hq-reth">⚕ Injury</span>
+      <span class="hq-retmine"><b>{{ injury.handle }}</b> <span class="hq-retbye">out {{ injury.days }} match-day{{ injury.days > 1 ? 's' : '' }} — a reserve covers (manage minutes in the Squad)</span></span>
     </div>
     <!-- playoff bracket (top 4, best of 3) — appears once the regular season ends -->
     <div v-if="playoffs" class="hq-panel hq-bracket">

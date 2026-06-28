@@ -48,6 +48,13 @@ const toggleFocus = (p: Player, k: keyof Attributes) => w.setFocus(p.id, focusOf
         </div>
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
         <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
+        <div class="rs-fit">
+          <span v-if="w.isInjured(p.id)" class="rs-inj" :title="`injured — out for ${w.injuryOf(p.id)} more match-day(s); a reserve covers, or he plays through hurt`">⚕ OUT {{ w.injuryOf(p.id) }}d</span>
+          <template v-else>
+            <span class="rs-fatbar" :title="`match fatigue ${w.fatigueOf(p.id)}% — rotate him out to recover; high fatigue dulls performance and risks injury`"><i :class="{ hi: w.fatigueOf(p.id) >= 60 }" :style="{ width: w.fatigueOf(p.id) + '%' }"></i></span>
+            <span class="rs-fatpct" :class="{ tired: w.isTired(p.id) }">{{ w.fatigueOf(p.id) }}%</span>
+          </template>
+        </div>
       </div>
       <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>
       <div class="rs-pot">

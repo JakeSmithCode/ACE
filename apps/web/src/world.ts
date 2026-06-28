@@ -4,7 +4,7 @@
 // run. Your club gets two manager overlays the AI clubs don't: an authored comp
 // and authored tactics, both injected into your fixtures.
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tactics } from '@ace/shared';
+import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tactics, Team } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
@@ -125,6 +125,59 @@ function setFocus(id: string, attr: keyof Attributes | null) {
   focuses.value = m;
 }
 
+// ── Fitness: fatigue + injuries (depth finally matters on match night) ───────────────
+// A starter accumulates FATIGUE playing every match-day; a rested/benched player recovers.
+// High fatigue dulls match performance AND raises injury risk — so you rotate depth in to
+// keep your stars fresh. An INJURY sidelines a player for a few match-days (he can't be
+// fielded, so a reserve covers); with no cover he plays through HURT at a heavy penalty.
+// Pure store state, seeded — the match engine never sees it, so seed 42 is byte-identical.
+const fatigue = ref<Map<string, number>>(new Map());     // 0..100 per player id
+const injuries = ref<Map<string, number>>(new Map());    // match-days remaining out (>0 = injured)
+const lastInjury = ref<{ handle: string; days: number } | null>(null);   // for a banner
+const FAT_GAIN = 26, FAT_RECOVER = 12, FAT_MAX = 100;    // played +gain, everyone −recover each day
+const FAT_PEN = 0.10;                                    // attr loss at full fatigue (×0.90)
+const INJ_BASE = 0.012, INJ_FAT = 0.05;                  // injury chance = base + fatigue·fat
+const HURT_PEN = 0.20;                                   // playing through an injury (no cover)
+const fatigueOf = (id: string) => fatigue.value.get(id) ?? 0;
+const injuryOf = (id: string) => injuries.value.get(id) ?? 0;
+const isInjured = (id: string) => injuryOf(id) > 0;
+const isTired = (id: string) => fatigueOf(id) >= 60;
+/** Match-night attr multiplier for one of YOUR players — fatigue dulls, a forced-to-play
+ *  injury hits harder. 1.0 = fresh. Applied in buildInput (engine sees plain attrs). */
+function fitnessFactor(id: string, fielded: Player[]): number {
+  const fat = 1 - FAT_PEN * (fatigueOf(id) / FAT_MAX);
+  const hurt = isInjured(id) && fielded.some(p => p.id === id) ? 1 - HURT_PEN : 1;   // only if he had to play
+  return fat * hurt;
+}
+/** Post-match: heal existing injuries a day, fatigue the five who played + recover the
+ *  rest, and roll new injuries (risk scales with the fatigue they played at). Seeded so
+ *  a replayed match-day is identical; never touches the world/engine stream. */
+function updateFitness(fielded: Set<string>, rng: Rng) {
+  const fat = new Map(fatigue.value);
+  const inj = new Map(injuries.value);
+  for (const [id, n] of [...inj]) { if (n - 1 > 0) inj.set(id, n - 1); else inj.delete(id); }   // heal a match-day
+  let worst: { handle: string; days: number; ovr: number } | null = null;
+  for (const p of myRoster.value) {
+    const played = fielded.has(p.id);
+    const cur = fat.get(p.id) ?? 0;
+    if (played) {
+      // injury risk is read at the fatigue he PLAYED at (pre-increment); one draw per starter
+      if (!inj.has(p.id) && rng.chance(INJ_BASE + INJ_FAT * (cur / FAT_MAX))) {
+        const days = rng.int(2, 4);
+        inj.set(p.id, days); fat.set(p.id, 20);           // sidelined; rests while out
+        const o = overall(p);
+        if (!worst || o > worst.ovr) worst = { handle: p.handle, days, ovr: o };
+      } else {
+        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN));
+      }
+    } else {
+      fat.set(p.id, Math.max(0, cur - FAT_RECOVER));      // bench/rest recovers
+    }
+  }
+  fatigue.value = fat; injuries.value = inj;
+  lastInjury.value = worst ? { handle: worst.handle, days: worst.days } : null;
+}
+
 // contract helpers for the UI: what you PAY a player (locked wage), what he'd
 // DEMAND to re-sign (current market), and his deal's years left
 const wageOf = (p: Player) => contractWage(p, patch.value);
@@ -235,11 +288,13 @@ function startingFive(roster: Player[]): Player[] {
   (['duelist', 'initiator', 'controller', 'sentinel'] as const).forEach(role => {
     const need = ROLE_NEED[role];
     const inRole = roster.filter(p => p.role === role);
-    const playable = inRole.filter(p => !forcedBench.value.has(p.id));
+    // injured players sit out like a benched one; if depth can't cover, the fallback
+    // below pulls them back (they play through hurt — fitnessFactor penalises it).
+    const playable = inRole.filter(p => !forcedBench.value.has(p.id) && !isInjured(p.id));
     const forced = playable.filter(p => forcedStart.value.has(p.id)).sort((a, b) => overall(b) - overall(a));
     const auto = playable.filter(p => !forcedStart.value.has(p.id)).sort((a, b) => overall(b) - overall(a));
     const picked = [...forced, ...auto].slice(0, need);
-    if (picked.length < need) {   // benched too many — never field fewer than five
+    if (picked.length < need) {   // too few healthy — never field fewer than five (injured play through)
       const spare = inRole.filter(p => !picked.includes(p)).sort((a, b) => overall(b) - overall(a));
       picked.push(...spare.slice(0, need - picked.length));
     }
@@ -333,9 +388,21 @@ function buildInput(fx: { home: number; away: number }, seed: number, map: MapId
     return t;
   };
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
+  // your fielded five carry their match-night fitness (fatigue dulls, an injury played
+  // through hits harder); the engine just sees the scaled attrs — pure store concern.
+  const fit = (i: number, team: Team): Team => {
+    if (i !== myClub.value) return team;
+    return { ...team, players: team.players.map(p => {
+      const f = fitnessFactor(p.id, team.players);
+      if (f >= 1) return p;
+      const attr = { ...p.attr };
+      for (const k of Object.keys(attr) as (keyof Attributes)[]) attr[k] = Math.round(attr[k] * f);
+      return { ...p, attr };
+    }) };
+  };
   return buildMatchInput({
     seed, map, patch: patch.value,
-    home: withAffinity(clubs.value[fx.home].team, map), away: withAffinity(clubs.value[fx.away].team, map),
+    home: fit(fx.home, withAffinity(clubs.value[fx.home].team, map)), away: fit(fx.away, withAffinity(clubs.value[fx.away].team, map)),
     tactics: [tac(fx.home), tac(fx.away)], comp: [cmp(fx.home), cmp(fx.away)],
   });
 }
@@ -373,8 +440,11 @@ function resolveDay() {
     const ar = new Rng((seasonSeed.value ^ (season.value * 0x85ebca6b) ^ (dayIdx.value * 0x27d4eb2f) ^ 0xACAD) >>> 0);
     academy.value = { ...academy.value, prospects: academy.value.prospects.map(p => developInSeason(p, 'academy', total.value, ar, boost)) };
   }
+  // fitness: fatigue the five who played, recover the rest, roll injuries (own seeded rng)
+  const fr = new Rng((seasonSeed.value ^ (season.value * 0xC2B2AE35) ^ (dayIdx.value * 0x9e3779b9) ^ 0xF17) >>> 0);
+  updateFitness(fiveIds, fr);
   dayIdx.value++;
-  syncLineup();        // re-derive your five + strength from the developed roster
+  syncLineup();        // re-derive your five + strength from the developed roster (injured now excluded)
   resolveListings();   // the market is always live — your listed players may sell each match-day
   resolveAiMarket();   // ...and AI clubs sign players on their own — gems get snapped up
 }
@@ -447,6 +517,7 @@ function advanceSeason() {
   syncLineup();
   season.value++;
   objective.value = computeObjective();   // the board sets a fresh target for the new season + division
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;   // the off-season heals everyone
   runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
@@ -495,6 +566,7 @@ function selectClub(i: number) {
   playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -514,6 +586,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
   facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
+  fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null;
   refreshMarket();
 }
 
@@ -857,6 +930,7 @@ function snapshot() {
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
     focuses: [...focuses.value.entries()],
+    fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()],
   };
 }
 function save() {
@@ -882,6 +956,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   prevById.value = new Map(o.prevById);
   objectiveOutcome.value = (o as { objectiveOutcome?: typeof objectiveOutcome.value }).objectiveOutcome ?? null;
   focuses.value = new Map((o as { focuses?: [string, keyof Attributes][] }).focuses ?? []);
+  fatigue.value = new Map((o as { fatigue?: [string, number][] }).fatigue ?? []);
+  injuries.value = new Map((o as { injuries?: [string, number][] }).injuries ?? []);
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -897,7 +973,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted, focuses],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -915,6 +991,7 @@ export function useWorld() {
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
     scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX, focusOf, setFocus,
+    fatigueOf, injuryOf, isInjured, isTired, lastInjury,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
