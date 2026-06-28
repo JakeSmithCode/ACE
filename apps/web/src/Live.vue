@@ -953,6 +953,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <div class="lv-clubmeta">
             <b class="lv-clubname">{{ clubModal.name }}</b>
             <span class="lv-clubsub">{{ tierName(clubModal.tier) }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template><template v-if="clubModal.intlTitles"> · <span class="lv-intl" title="international (Masters) titles">🌐×{{ clubModal.intlTitles }}</span></template></span>
+            <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>
           </div>
           <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
         </div>

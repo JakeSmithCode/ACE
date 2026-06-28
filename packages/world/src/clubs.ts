@@ -4,6 +4,7 @@
 import type { Team, Player, Role, Attributes, Tactics } from '@ace/shared';
 import { Rng } from '@ace/engine';
 import { CLUB_IDENTITIES, HANDLES, HANDLE_PRE, HANDLE_SUF, CLUB_ADJ, CLUB_NOUN } from './names.js';
+import { aiTactics } from './ai.js';
 
 const shuffle = <T,>(a: T[], rng: Rng): T[] => { for (let i = a.length - 1; i > 0; i--) { const j = rng.int(0, i); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -146,23 +147,13 @@ export function makeClub(rng: Rng, identity: { name: string; tag: string }, stre
   return { id: identity.tag.toLowerCase(), tag: identity.tag, name: identity.name, players };
 }
 
-/** A club's house tactics — varied around the defaults so AI orgs feel distinct
- *  (one rushes B, one plays slow A defaults), but always sane. */
-export function makeTactics(rng: Rng, team: Team): Tactics {
-  const entry = [...team.players].sort((a, b) => b.attr.entry - a.attr.entry)[0].id;
-  // ~30% of clubs run a dedicated lurker (their second duelist)
-  const lurk = rng.chance(0.3) ? team.players.find(p => p.role === 'duelist' && p.id !== entry)?.id : undefined;
-  return {
-    attack: {
-      siteBias: +rng.range(-0.5, 0.5).toFixed(2),
-      tempo: +rng.range(0.25, 0.8).toFixed(2),
-      entry, lurk,
-    },
-    defense: {
-      read: +rng.range(-0.4, 0.4).toFixed(2),
-      aggression: +rng.range(0.2, 0.7).toFixed(2),
-    },
-  };
+/** A club's house tactics. Phase 5: the AI now plays to a coherent IDENTITY derived from
+ *  its squad (`aiTactics`) instead of random dials — a roster of fraggers plays fast and
+ *  aggressive, a cerebral one patient and utility-led — so AI orgs are distinct AND
+ *  scoutable. Pure (no rng): an AI club's style is a stable function of its roster + id,
+ *  and the engine still just receives a `MatchInput.tactics`, so seed 42 is untouched. */
+export function makeTactics(_rng: Rng, team: Team): Tactics {
+  return aiTactics(team);
 }
 
 export interface Club { team: Team; tactics: Tactics; strength: number }
