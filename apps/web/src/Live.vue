@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -226,6 +226,7 @@ async function connect() {
     server.value = s; status.value = 'live';
     await refreshMe();
     await loadHonors();
+    await loadNews();
     openStream();
     // a shared deep-link (?watch=season/day/slot) → auto-open that replay
     const wp = new URL(location.href).searchParams.get('watch');
@@ -257,12 +258,18 @@ async function advance() {
     if (board.value.length) await loadBoard();   // the board churns (AI signed some) — refresh it
     if (r.rivalSignings) { wireNote.value = `${r.rivalSignings} free agent${r.rivalSignings > 1 ? 's' : ''} signed by rival clubs`; setTimeout(() => (wireNote.value = ''), 4000); }
     if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); await loadHonors(); }
+    await loadNews();
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
+
+// the world news feed — a live ticker of transfers + champions (the world feels alive)
+const newsFeed = ref<NewsItem[]>([]);
+const newsIcon: Record<string, string> = { transfer: '⇄', champion: '🏆', season: '◇' };
+async function loadNews() { if (server.value) try { newsFeed.value = (await server.value.news()).news; } catch { /* transient */ } }
 
 // the world's best players — a cross-club prestige board (who's the best, and where)
 const leaders = ref<LeaderRow[]>([]);
@@ -551,6 +558,16 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <span class="lv-trophy">🏆</span>
         <span class="lv-champtxt"><b>{{ champBanner.champion }}</b> won Season {{ champBanner.season }} — <i>Season {{ champBanner.season + 1 }} begins</i></span>
         <button class="lv-champx" @click="champBanner = null">✕</button>
+      </div>
+
+      <!-- the world news ticker — transfers + champions (the world feels alive) -->
+      <div v-if="newsFeed.length" class="lv-newsbar">
+        <span class="lv-newslabel">📰 World news</span>
+        <div class="lv-newsscroll">
+          <span v-for="(n, i) in newsFeed.slice(0, 14)" :key="i" class="lv-newsitem" :class="n.kind">
+            <i class="lv-newsico">{{ newsIcon[n.kind] }}</i>{{ n.text }}<em class="lv-newsage">S{{ n.season }}</em>
+          </span>
+        </div>
       </div>
 
       <!-- the day's live matches -->

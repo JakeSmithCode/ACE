@@ -97,6 +97,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const acadSalt = (account: string) => { let h = 2166136261 >>> 0; for (let i = 0; i < account.length; i++) h = Math.imul(h ^ account.charCodeAt(i), 16777619) >>> 0; return h >>> 0; };
   // the legacy engine (DESIGN §9.2): the world remembers its champions, season by season
   const honors: { season: number; champion: string }[] = [];
+  // the world news feed (DESIGN §9 — the world feels alive): a rolling log of what's
+  // happening — signings, champions. Newest pushed last; the API returns it reversed.
+  const news: { kind: 'transfer' | 'champion' | 'season'; text: string; season: number; day: number }[] = [];
+  const pushNews = (kind: 'transfer' | 'champion' | 'season', text: string, season: number, day: number) => {
+    news.push({ kind, text, season, day });
+    if (news.length > 60) news.shift();   // keep it bounded
+  };
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
   // the live broadcast cursor — which match-day is on air + when it kicked off. Mutable
   // so the season can PROGRESS: `advance` ticks the next day and moves the cursor.
@@ -126,8 +133,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // the living market: a couple of AI clubs sign the best free agents each tick
     const churnMarket = async (): Promise<number> => {
       const avail = (await getBoard()).filter(p => !sold.has(p.handle));
-      const { world: nw, signings } = resolveAiMarket((await store.loadWorld(id))!, avail, 2);
-      if (signings.length) { await store.saveWorld(id, nw); signings.forEach(s => sold.add(s.handle)); }
+      const w0 = (await store.loadWorld(id))!;
+      const { world: nw, signings } = resolveAiMarket(w0, avail, 2);
+      if (signings.length) {
+        await store.saveWorld(id, nw);
+        signings.forEach(s => { sold.add(s.handle); pushNews('transfer', `${s.club} signed ${s.handle} ($${(s.fee / 1000).toFixed(1)}k)`, w0.season, liveDay); });
+      }
       return signings.length;
     };
     // each owner's academy ticks at the season boundary: a full season of prospect
@@ -149,7 +160,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (w.day < seasonLength(w)) { await tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: await churnMarket() }; }
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
-    if (roll.champion) honors.push({ season: roll.season, champion: roll.champion });   // remember the champion
+    if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
+    pushNews('season', `Season ${roll.season + 1} begins`, roll.season + 1, 0);
     await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
     await tickDay((await store.loadWorld(id))!);
     return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
@@ -307,6 +319,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'powerrankings' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       return json(res, 200, { clubs: topClubs(w, 25) });
+    }
+    // GET /news  → the world news feed (transfers + champions, newest first)
+    if (path[0] === 'news' && path.length === 1) {
+      return json(res, 200, { news: [...news].reverse().slice(0, 40) });
     }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {
