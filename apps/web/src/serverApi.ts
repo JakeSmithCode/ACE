@@ -17,7 +17,8 @@ export interface LiveFixture {
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number] }
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number }
+export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
 export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
@@ -90,6 +91,9 @@ export class AceServer {
   bid(handle: string, amount: number, token: string): Promise<BidResult> { return this.post('/market/bid', { handle, amount }, token); }
   /** Sell a rostered player to the richest willing AI club (market fee). */
   sell(ref: string, token: string): Promise<SaleResult> { return this.post('/market/sell', { ref }, token); }
+  /** Commission a paid scouting report on a board free agent — charges your club and
+   *  tightens the ceiling band for your eyes (private knowledge, the price stays fogged). */
+  scout(handle: string, token: string): Promise<ScoutResult> { return this.post('/market/scout', { handle }, token); }
   /** Advance the season a match-day (owner action — the scheduler does this in prod).
    *  At the season boundary it rolls over: `rollover` + the new `season` + `champion`. */
   advance(token: string): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number }> { return this.post('/advance', {}, token); }

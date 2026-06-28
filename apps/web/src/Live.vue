@@ -11,6 +11,7 @@ import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer } from './serverApi';
+const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -96,6 +97,23 @@ async function bid(e: MarketEntry) {
     else if (r.reason === 'below asking price') msg(`below asking (${kfmt(r.leadBid!)})`);
     else msg(r.reason ?? 'rejected');
   } catch (err) { msg((err as Error).message); } finally { marketBusy.value = false; }
+}
+// commission a paid scouting report — tightens this prospect's ceiling band for your
+// eyes (private knowledge; the asking price stays consensus-fogged). The edge: pay to
+// learn the consensus is mispricing a gem, then bid at the unchanged asking.
+async function scout(e: MarketEntry) {
+  if (!server.value || !token.value) return; marketBusy.value = true;
+  const m = (s: string) => (bidMsg.value = { ...bidMsg.value, [e.handle]: s });
+  m('');
+  try {
+    const r = await server.value.scout(e.handle, token.value);
+    if (r.ok) {
+      // patch the row in place so the band tightens without a full reload (keeps the bid input)
+      board.value = board.value.map(x => x.handle === e.handle ? { ...x, ceiling: r.ceiling, scoutLevel: r.level } : x);
+      m(`✓ scouted — ceil ${r.ceiling[0]}–${r.ceiling[1]} (−${kfmt(r.cost!)})`);
+      await refreshMe();
+    } else m(r.reason === 'insufficient funds' ? `need ${kfmt(r.cost!)} to scout` : (r.reason ?? 'rejected'));
+  } catch (err) { m((err as Error).message); } finally { marketBusy.value = false; }
 }
 const sellMsg = ref<Record<string, string>>({});
 async function sell(sp: SquadPlayer) {
@@ -308,7 +326,11 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <b class="lv-mkthandle">{{ e.handle }}</b>
             <span class="lv-mktage">age {{ e.age }}</span>
             <span class="lv-mktovr">{{ e.overall }} <i>OVR</i></span>
-            <span class="lv-mktceil" :class="{ wide: e.ceiling[1] - e.ceiling[0] >= 8 }" :title="`scouted potential ceiling (fogged) — wider band = more upside but more risk`">↗ {{ e.ceiling[0] }}–{{ e.ceiling[1] }}</span>
+            <span class="lv-ceilcell">
+              <span class="lv-mktceil" :class="{ wide: e.ceiling[1] - e.ceiling[0] >= 8 }" :title="`scouted potential ceiling — wider band = more upside but more risk. Scout to tighten it (private knowledge).`">↗ {{ e.ceiling[0] }}–{{ e.ceiling[1] }}</span>
+              <span class="lv-scoutpips" :title="`scouting reports: ${e.scoutLevel}/${SCOUT_MAX}`"><i v-for="n in SCOUT_MAX" :key="n" :class="{ on: n <= e.scoutLevel }">•</i></span>
+              <button v-if="e.scoutLevel < SCOUT_MAX" class="lv-scoutbtn" :disabled="marketBusy" title="commission a scouting report (clears the fog on his ceiling)" @click="scout(e)">scout</button>
+            </span>
             <span class="lv-mktval">{{ kfmt(e.value) }}<i v-if="e.contested" class="lv-hot" title="contested by AI clubs">🔥</i></span>
             <input type="number" class="lv-mktbid" v-model.number="bidAmt[e.handle]" step="500" min="0" />
             <button class="lv-go sm" :disabled="marketBusy" @click="bid(e)">bid</button>

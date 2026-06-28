@@ -65,9 +65,25 @@ export function applySigning(w: WorldState, clubId: string, player: Player, cost
  *  ceiling — wide for a young/unresolved prospect (high upside, murky), tight for a
  *  settled veteran. The price already reflects the consensus, so the band is exactly
  *  the bet you're taking on top of it. */
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number] }
-export function marketEntry(w: WorldState, p: Player): MarketEntry {
-  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p), ceiling: scoutedRange(p, false, 0) };
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number }
+export function marketEntry(w: WorldState, p: Player, scoutLevel = 0): MarketEntry {
+  // `value` is the market CONSENSUS (fogged at level 0 — the asking price you must
+  // clear). A paid report tightens only the `ceiling` band for YOUR eyes, never the
+  // price — so scouting is private information: learn the consensus is mispricing a
+  // gem, then sign him at the unchanged asking. That edge is the whole point.
+  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p), ceiling: scoutedRange(p, false, scoutLevel), scoutLevel };
+}
+
+/** What a scouting report costs at the current level — 1.5k / 3k / 4.5k (matches the
+ *  single-player store). Each level buys confidence and tightens the ceiling band. */
+export const scoutCost = (level: number) => 1500 + level * 1500;
+
+/** Charge a club's balance for a scouting report (pure). The knowledge itself is the
+ *  owner's private session state — only the money is world state. */
+export function chargeScout(w: WorldState, clubId: string, cost: number): WorldState {
+  const i = w.clubs.findIndex(c => c.id === clubId);
+  if (i < 0) throw new Error(`no such club ${clubId}`);
+  return { ...w, clubs: w.clubs.map((c, j) => (j === i ? { ...c, balance: c.balance - cost } : c)) };
 }
 
 /** The richest AI club (not the seller) that genuinely wants `player` as an upgrade

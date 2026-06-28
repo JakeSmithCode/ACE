@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -71,6 +71,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
   const sold = new Set<string>();
+  // scouting reports: per-account private knowledge (account → handle → level 0..MAX).
+  // Knowledge is the owner's session state; only the money it costs is world state.
+  const scoutReports = new Map<string, Map<string, number>>();
+  const scoutLevelOf = (account: string | null, handle: string) => (account && scoutReports.get(account)?.get(handle)) || 0;
   // the legacy engine (DESIGN §9.2): the world remembers its champions, season by season
   const honors: { season: number; champion: string }[] = [];
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
@@ -191,10 +195,34 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const w = (await store.loadWorld(id))!;
       return json(res, 200, { tier: +path[2], group: +path[3], table: standingsView(w, await store.fixtures(id, +path[1]), +path[2], +path[3], now) });
     }
-    // GET /market  → the free-agent board (value + contested flag, current world)
+    // GET /market  → the free-agent board (value + contested flag, current world).
+    // If a Bearer account is present, each entry's ceiling band reflects THAT owner's
+    // commissioned scouting reports (private knowledge — the consensus value is fogged).
     if (path[0] === 'market' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
       const w = (await store.loadWorld(id))!;
-      return json(res, 200, { board: (await getBoard()).filter(p => !sold.has(p.handle)).map(p => marketEntry(w, p)) });
+      return json(res, 200, { board: (await getBoard()).filter(p => !sold.has(p.handle)).map(p => marketEntry(w, p, scoutLevelOf(account, p.handle))) });
+    }
+    // POST /market/scout  → commission a scouting report on a board free agent (the
+    // paid investment, DESIGN §4.1/§5.3). Charges your club, raises your private
+    // confidence one level, and returns the tightened ceiling band — so you can bid
+    // on the gem the consensus is mispricing. Capped at SCOUT_MAX.
+    if (path[0] === 'market' && path[1] === 'scout' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { handle?: string };
+      const player = (await getBoard()).find(p => p.handle === b.handle && !sold.has(p.handle));
+      if (!player) return json(res, 404, { error: 'not on the board' });
+      const level = scoutLevelOf(account, player.handle);
+      if (level >= SCOUT_MAX) return json(res, 200, { ok: false, reason: 'fully scouted', level, ceiling: scoutedRange(player, false, level) });
+      const cost = scoutCost(level);
+      if (cost > mine.balance) return json(res, 200, { ok: false, reason: 'insufficient funds', cost, level, ceiling: scoutedRange(player, false, level) });
+      await store.saveWorld(id, chargeScout((await store.loadWorld(id))!, mine.id, cost));
+      const reports = scoutReports.get(account) ?? new Map<string, number>();
+      reports.set(player.handle, level + 1);
+      scoutReports.set(account, reports);
+      const after = (await store.loadWorld(id))!;
+      return json(res, 200, { ok: true, level: level + 1, cost, ceiling: scoutedRange(player, false, level + 1), nextCost: level + 1 < SCOUT_MAX ? scoutCost(level + 1) : null, balance: after.clubs.find(c => c.id === mine.id)!.balance });
     }
     // POST /market/bid  → bid on a free agent (the war); signs if you clear the field
     if (path[0] === 'market' && path[1] === 'bid' && req.method === 'POST') {
