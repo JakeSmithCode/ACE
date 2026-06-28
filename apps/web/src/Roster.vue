@@ -52,7 +52,11 @@ const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '
             :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>
         </div>
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
-        <div v-if="traitOf(p.id)" class="rs-trait" :class="'tr-' + traitOf(p.id)!.key" :title="traitOf(p.id)!.blurb">✦ {{ traitOf(p.id)!.label }}</div>
+        <div class="rs-tags">
+          <span v-if="traitOf(p.id)" class="rs-trait" :class="'tr-' + traitOf(p.id)!.key" :title="traitOf(p.id)!.blurb">✦ {{ traitOf(p.id)!.label }}</span>
+          <span v-if="w.isMentor(p)" class="rs-mentor" title="a senior leader — develops your young players faster">🎓 mentor</span>
+          <span v-else-if="w.isMentee(p)" class="rs-mentee" title="being mentored by a senior leader — developing faster">↑ mentored</span>
+        </div>
         <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
         <div class="rs-fit">
           <span v-if="w.isInjured(p.id)" class="rs-inj" :title="`injured — out for ${w.injuryOf(p.id)} more match-day(s); a reserve covers, or he plays through hurt`">⚕ OUT {{ w.injuryOf(p.id) }}d</span>

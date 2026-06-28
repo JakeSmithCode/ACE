@@ -451,7 +451,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .rs-fatpct{font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--muted-2);font-variant-numeric:tabular-nums}
 .rs-fatpct.tired{color:var(--gold)}
 .rs-inj{font-family:var(--label);font-size:9.5px;letter-spacing:.04em;color:var(--def);background:rgba(255,92,110,.12);border:1px solid rgba(255,92,110,.35);padding:2px 6px;clip-path:var(--bevel)}
-.rs-trait{margin-top:4px;font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--brand);display:inline-block}
+.rs-tags{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.rs-mentor{font-family:var(--label);font-size:9px;letter-spacing:.03em;color:var(--gold)}
+.rs-mentee{font-family:var(--label);font-size:9px;letter-spacing:.03em;color:var(--win)}
+.rs-trait{font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--brand);display:inline-block}
 .rs-trait.tr-bigGame{color:var(--gold)}
 .rs-trait.tr-leader{color:var(--win)}
 .rs-trait.tr-hothead{color:var(--def)}

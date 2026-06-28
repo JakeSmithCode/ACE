@@ -203,6 +203,17 @@ const squadMorale = () => {
   return five.length ? Math.round(five.reduce((s, p) => s + moraleOf(p.id), 0) / five.length) : MORALE_BASE;
 };
 
+// ── Mentoring (a veteran leader develops the kids faster) ─────────────────────────────
+// A senior pro with leadership in your squad accelerates your YOUNG players' growth —
+// pairing a wise vet with a raw prospect is a real roster-building lever (ties the Leader
+// trait + the development model + the academy pipeline together). myRoster-only, applied
+// to the dev boost, so it's engine-blind and the world/season CLIs are untouched.
+const MENTOR_MUL = 1.3;
+const isMentor = (p: Player) => p.age >= 26 && (traitKeyOf(p.id) === 'leader' || (p.attr.gameSense + p.attr.clutch) / 2 >= 75);
+const mentors = computed(() => myRoster.value.filter(isMentor));
+const hasMentor = computed(() => mentors.value.length > 0);
+const isMentee = (p: Player) => hasMentor.value && p.age <= 21 && !isMentor(p);
+
 type Talk = 'calm' | 'rally' | 'demand';
 const teamTalk = ref<Talk | null>(null);                 // the manager's chosen tone for the next match (one-shot)
 const TALK_META: Record<Talk, { label: string; icon: string }> = {
@@ -654,8 +665,10 @@ function resolveDay() {
   const boost = myDevBoost.value;   // your HQ rooms × the head coach's growth + analyst's ceiling
   // develop + gel: a player on the roster builds chemistry (~+1 tenure/season,
   // spread across match-days) so a new signing gels into the five over time
+  const mentored = hasMentor.value;
   myRoster.value = myRoster.value.map(p => {
-    const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, boost, focusOf(p.id));
+    const pb = mentored && isMentee(p) ? { ...boost, growth: boost.growth * MENTOR_MUL } : boost;   // a vet leader develops the kids faster
+    const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, pb, focusOf(p.id));
     const chem = camp.value === 'chemistry' ? CAMP_CHEM : 1;   // a team-building camp gels the squad faster
     return { ...d, tenure: (d.tenure ?? 0) + chem / total.value };
   });
@@ -759,7 +772,11 @@ function advanceSeason() {
   clubs.value = clubs.value.map((c, i) => i === myClub.value ? c
     : { ...c, team: { ...c.team, players: c.team.players.map(p => ({ ...p, tenure: (p.tenure ?? 0) + 1 })) } });
   const myBoost = myDevBoost.value;   // HQ rooms × coach growth + analyst ceiling
-  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost, focusOf(p.id)));  // bootcamp share + HQ boost
+  const mentoredOff = hasMentor.value;
+  myRoster.value = myRoster.value.map(p => {
+    const pb = mentoredOff && isMentee(p) ? { ...myBoost, growth: myBoost.growth * MENTOR_MUL } : myBoost;
+    return developPlayer(p, rng, 1 - SEASON_SHARE, pb, focusOf(p.id));   // bootcamp share + HQ boost (+ mentoring for the kids)
+  });
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
   if (academy.value.prospects.length) {
     const ar = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9) ^ 0xACAD) >>> 0);
@@ -1278,6 +1295,7 @@ export function useWorld() {
     sponsor, sponsorOffersList, lastSponsorPay, goalTextOf, signSponsor,
     camp, setCamp, canPickCamp, CAMP_META,
     captainId, captainOf, isCaptain, setCaptain, leadership,
+    isMentor, isMentee, hasMentor, mentors,
     tacticPresets, saveTacticPreset, loadTacticPreset, deleteTacticPreset,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
