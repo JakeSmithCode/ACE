@@ -65,7 +65,7 @@ async function doAuth() {
     await refreshMe();
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); } }
+async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); } }
 async function doClaim() {
   if (!server.value || !token.value || !claimTag.value) return; busy.value = true; authErr.value = '';
   try { myClub.value = await server.value.claim(claimTag.value, token.value); await refreshMe(); }  // refresh → /me carries the plan
@@ -246,7 +246,7 @@ async function connect() {
     if (wp) { const [ws, wd, wsl] = wp.split('/').map(Number); if (![ws, wd, wsl].some(isNaN)) void watchAt(ws, wd, wsl); }
     // standings only move at reveal — refresh them every few seconds while watching
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); }, 4000);
+    pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); if (!mailOpen.value) loadMail(); }, 4000);
   } catch (e) { status.value = 'error'; errMsg.value = (e as Error).message; }
 }
 function openStream() {
@@ -299,6 +299,33 @@ async function toggleNotifs() {
   if (notifOpen.value && server.value && token.value && notifUnread.value) {
     try { await server.value.markNotifsRead(token.value); notifUnread.value = 0; notifList.value = notifList.value.map(n => ({ ...n, read: true })); } catch { /* transient */ }
   }
+}
+
+// owner-to-owner mail (human-to-human)
+const mailList = ref<import('./serverApi').MailMsg[]>([]);
+const mailUnread = ref(0);
+const mailOpen = ref(false);
+const mailRecips = ref<{ tag: string; name: string }[]>([]);
+const mailTo = ref(''); const mailSubject = ref(''); const mailBody = ref(''); const mailMsg = ref('');
+async function loadMail() {
+  if (!server.value || !token.value) return;
+  try { const r = await server.value.mail(token.value); mailList.value = r.items; mailUnread.value = r.unread; } catch { /* transient */ }
+}
+async function toggleMail() {
+  mailOpen.value = !mailOpen.value;
+  if (mailOpen.value && server.value && token.value) {
+    try { mailRecips.value = (await server.value.mailRecipients(token.value)).recipients; } catch { /* transient */ }
+    if (mailUnread.value) { try { await server.value.markMailRead(token.value); mailUnread.value = 0; mailList.value = mailList.value.map(m => ({ ...m, read: true })); } catch { /* transient */ } }
+  }
+}
+async function sendMail() {
+  if (!server.value || !token.value || !mailTo.value || !mailBody.value.trim()) return;
+  mailMsg.value = '';
+  try {
+    const r = await server.value.sendMail(token.value, mailTo.value, mailSubject.value, mailBody.value);
+    if (r.ok) { mailMsg.value = `✓ sent to ${mailTo.value}`; mailSubject.value = ''; mailBody.value = ''; }
+    else mailMsg.value = r.error ?? 'failed';
+  } catch (e) { mailMsg.value = (e as Error).message; }
 }
 
 // the world's best players — a cross-club prestige board (who's the best, and where)
@@ -429,6 +456,34 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
           </div>
+          <div class="lv-bellwrap">
+            <button class="lv-bell" :class="{ on: mailOpen }" @click="toggleMail" title="mail">✉<span v-if="mailUnread" class="lv-bellbadge">{{ mailUnread > 9 ? '9+' : mailUnread }}</span></button>
+          </div>
+          <Teleport to="body">
+            <div v-if="mailOpen" class="lv-notifpanel lv-mailpanel">
+              <div class="lv-notifhead"><span class="lv-kicker">Mail</span><button class="lv-notifx" @click="mailOpen = false">✕</button></div>
+              <div class="lv-mailcompose">
+                <select v-model="mailTo" class="lv-mailsel">
+                  <option value="">to… (another owner)</option>
+                  <option v-for="r in mailRecips" :key="r.tag" :value="r.tag">{{ r.tag }} · {{ r.name }}</option>
+                </select>
+                <input v-model="mailSubject" class="lv-mailin" placeholder="subject" maxlength="80" />
+                <textarea v-model="mailBody" class="lv-mailbody" placeholder="message…" maxlength="1000" rows="2"></textarea>
+                <div class="lv-mailsendrow">
+                  <button class="lv-go sm" :disabled="!mailTo || !mailBody.trim()" @click="sendMail">send</button>
+                  <span v-if="mailMsg" class="lv-mailmsg" :class="{ ok: mailMsg.startsWith('✓') }">{{ mailMsg }}</span>
+                  <span v-if="!mailRecips.length" class="lv-mailhint">no other owners online — invite a friend to claim a club</span>
+                </div>
+              </div>
+              <div class="lv-notiflist">
+                <div v-for="m in mailList" :key="m.id" class="lv-mailrow" :class="{ unread: !m.read }">
+                  <div class="lv-mailmeta"><b>{{ m.fromTag }}</b><span class="lv-mailsubj">{{ m.subject }}</span><span class="lv-notifage">S{{ m.season }}</span></div>
+                  <div class="lv-mailtext">{{ m.body }}</div>
+                </div>
+                <div v-if="!mailList.length" class="lv-empty">your inbox is empty</div>
+              </div>
+            </div>
+          </Teleport>
           <Teleport to="body">
             <div v-if="notifOpen" class="lv-notifpanel">
               <div class="lv-notifhead"><span class="lv-kicker">Notifications</span><button class="lv-notifx" @click="notifOpen = false">✕</button></div>

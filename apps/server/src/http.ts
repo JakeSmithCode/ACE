@@ -141,6 +141,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     notifs.set(account, list);
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
+  // owner-to-owner mail (human-to-human, DESIGN §16 social) — an async inbox keyed by
+  // recipient account. You send from your club's identity to another human-owned club.
+  interface MailMsg { id: number; fromAccount: string; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
+  const mailboxes = new Map<string, MailMsg[]>();
+  let mailSeq = 0;
   const ord = (n: number) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
   const tierName = (t: number) => RANK_TIERS[t] ?? `Tier ${t + 1}`;
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
@@ -437,6 +442,46 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const b = (await readBody(req)) as { id?: number };
       notifs.set(account, (notifs.get(account) ?? []).map(n => (b.id == null || n.id === b.id ? { ...n, read: true } : n)));
       return json(res, 200, { ok: true, unread: (notifs.get(account) ?? []).filter(n => !n.read).length });
+    }
+    // GET /mail  → your owner-to-owner inbox (received messages) + unread count
+    if (path[0] === 'mail' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const box = mailboxes.get(account) ?? [];
+      return json(res, 200, { items: box, unread: box.filter(m => !m.read).length });
+    }
+    // GET /mail/recipients  → the other human-owned clubs you can message
+    if (path[0] === 'mail' && path[1] === 'recipients' && (req.method ?? 'GET') === 'GET') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const w = (await store.loadWorld(id))!;
+      const list = ownedClubs(w).filter(c => c.owner && c.owner !== account).map(c => ({ tag: c.tag, name: c.name }));
+      return json(res, 200, { recipients: list });
+    }
+    // POST /mail/send  → send a message from your club to another human-owned club
+    if (path[0] === 'mail' && path[1] === 'send' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { toTag?: string; subject?: string; body?: string };
+      const w = (await store.loadWorld(id))!;
+      const target = w.clubs.find(c => c.tag.toLowerCase() === (b.toTag ?? '').toLowerCase());
+      if (!target) return json(res, 404, { error: 'no such club' });
+      if (target.id === mine.id) return json(res, 400, { error: 'you cannot mail yourself' });
+      if (!target.owner) return json(res, 400, { error: `${target.tag} is AI-run — no human to read it` });
+      if (!(b.body ?? '').trim()) return json(res, 400, { error: 'an empty message' });
+      const msg: MailMsg = { id: ++mailSeq, fromAccount: account, fromTag: mine.tag, fromName: mine.name, toTag: target.tag, subject: (b.subject ?? '').slice(0, 80) || '(no subject)', body: (b.body ?? '').slice(0, 1000), season: w.season, day: liveDay, read: false, at: clock() };
+      const box = mailboxes.get(target.owner) ?? [];
+      box.unshift(msg);
+      if (box.length > 100) box.length = 100;
+      mailboxes.set(target.owner, box);
+      notify(target.owner, 'system', `✉ New message from ${mine.tag}: ${msg.subject}`, w.season, liveDay);
+      return json(res, 200, { ok: true });
+    }
+    // POST /mail/read  → mark one (by id) or all read
+    if (path[0] === 'mail' && path[1] === 'read' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const b = (await readBody(req)) as { id?: number };
+      mailboxes.set(account, (mailboxes.get(account) ?? []).map(m => (b.id == null || m.id === b.id ? { ...m, read: true } : m)));
+      return json(res, 200, { ok: true, unread: (mailboxes.get(account) ?? []).filter(m => !m.read).length });
     }
     // GET /news  → the world news feed (transfers + champions, newest first)
     if (path[0] === 'news' && path.length === 1) {

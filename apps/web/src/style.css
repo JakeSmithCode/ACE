@@ -1038,5 +1038,21 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-notiftext{color:var(--text)}
 .lv-notifrow.unread .lv-notiftext{font-weight:500}
 .lv-notifage{font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7;white-space:nowrap;margin-top:2px}
+/* mail panel (owner-to-owner) */
+.lv-mailpanel{right:28px}
+.lv-mailcompose{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.lv-mailsel,.lv-mailin,.lv-mailbody{background:#0a0f16;border:1px solid var(--line);border-radius:6px;color:var(--text);font-family:inherit;font-size:12px;padding:6px 8px}
+.lv-mailbody{resize:vertical;min-height:38px}
+.lv-mailsendrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.lv-mailmsg{font-family:var(--label);font-size:10px;color:#e2768a}
+.lv-mailmsg.ok{color:#5fd38a}
+.lv-mailhint{font-size:10px;color:var(--muted-2);opacity:.7}
+.lv-mailrow{padding:9px 11px;border-radius:7px;font-size:12.5px}
+.lv-mailrow:hover{background:rgba(255,255,255,.025)}
+.lv-mailrow.unread{background:rgba(90,160,210,.07)}
+.lv-mailmeta{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.lv-mailmeta b{font-size:13px}
+.lv-mailsubj{color:var(--muted-2);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv-mailtext{color:var(--text);line-height:1.35;white-space:pre-wrap;word-break:break-word}
 .lv-newsitem.season{color:var(--muted-2)}
 .lv-newsage{font-style:normal;font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7}

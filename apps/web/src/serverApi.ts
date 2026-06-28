@@ -38,6 +38,7 @@ export interface ClubRankRow { rank: number; tag: string; name: string; tier: nu
 export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
+export interface MailMsg { id: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -84,6 +85,20 @@ export class AceServer {
   }
   /** Mark one notification (by id) or all (omit) read. */
   markNotifsRead(token: string, id?: number): Promise<{ ok: boolean; unread: number }> { return this.post('/notifications/read', id == null ? {} : { id }, token); }
+
+  // ── owner-to-owner mail (human-to-human) ──
+  /** Your mail inbox + unread count. */
+  mail(token: string): Promise<{ items: MailMsg[]; unread: number }> {
+    return fetch(`${this.base}/mail`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ items: MailMsg[]; unread: number }>(r));
+  }
+  /** The other human-owned clubs you can message. */
+  mailRecipients(token: string): Promise<{ recipients: { tag: string; name: string }[] }> {
+    return fetch(`${this.base}/mail/recipients`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ recipients: { tag: string; name: string }[] }>(r));
+  }
+  /** Send a message from your club to another human-owned club. */
+  sendMail(token: string, toTag: string, subject: string, body: string): Promise<{ ok: boolean; error?: string }> { return this.post('/mail/send', { toTag, subject, body }, token); }
+  /** Mark one mail (by id) or all read. */
+  markMailRead(token: string, id?: number): Promise<{ ok: boolean; unread: number }> { return this.post('/mail/read', id == null ? {} : { id }, token); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }
