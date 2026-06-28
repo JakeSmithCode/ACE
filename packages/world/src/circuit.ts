@@ -121,8 +121,12 @@ export function awardInternational(worlds: WorldState[], result: IntlResult, pri
   result.placement.forEach((e, rank) => {
     payout.set(`${e.region}|${e.club}`, rank === 0 ? prize.champion : rank === 1 ? prize.finalist : rank < 4 ? prize.semifinal : prize.appearance);
   });
+  const champKey = `${result.champion.region}|${result.champion.club}`;   // the Masters winner earns a title (prestige)
   return worlds.map(w => {
     if (![...payout.keys()].some(k => k.startsWith(`${w.region}|`))) return w;
-    return { ...w, clubs: w.clubs.map((c, i) => { const add = payout.get(`${w.region}|${i}`) ?? 0; return add ? { ...c, balance: c.balance + add } : c; }) };
+    return { ...w, clubs: w.clubs.map((c, i) => {
+      const k = `${w.region}|${i}`, add = payout.get(k) ?? 0, title = k === champKey ? 1 : 0;
+      return add || title ? { ...c, balance: c.balance + add, ...(title ? { intlTitles: (c.intlTitles ?? 0) + 1 } : {}) } : c;
+    }) };
   });
 }

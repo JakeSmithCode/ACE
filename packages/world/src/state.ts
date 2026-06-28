@@ -38,6 +38,7 @@ export interface WorldClub {
   strength: number; balance: number; titles: number;
   owner: string | null;
   lineup?: string[];   // an owner's explicit five (player ids); undefined → best five
+  intlTitles?: number; // international (Masters) titles won — prestige, additive/opt-in
 }
 
 export interface WorldState {

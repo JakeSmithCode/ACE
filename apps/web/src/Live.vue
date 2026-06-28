@@ -770,7 +770,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <i class="lv-badge id" :style="{ background: `hsl(${hue(clubModal.tag)} 60% 24%)`, borderColor: `hsl(${hue(clubModal.tag)} 65% 55%)` }">{{ clubModal.tag }}</i>
           <div class="lv-clubmeta">
             <b class="lv-clubname">{{ clubModal.name }}</b>
-            <span class="lv-clubsub">{{ tierName(clubModal.tier) }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template></span>
+            <span class="lv-clubsub">{{ tierName(clubModal.tier) }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template><template v-if="clubModal.intlTitles"> · <span class="lv-intl" title="international (Masters) titles">🌐×{{ clubModal.intlTitles }}</span></template></span>
           </div>
           <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
         </div>

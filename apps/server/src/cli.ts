@@ -157,7 +157,7 @@ async function main() {
   // a shard is one region's pyramid (its own world row, ticked independently); each
   // season the regions' best meet at an international event (Masters/Champions).
   const REGIONS_DEMO = ['AMER', 'EMEA', 'PACIFIC', 'CHINA'];
-  async function runCircuit(s: number): Promise<{ champs: string[]; intl: IntlResult[]; premierChamps: string[]; prizeBump: number }> {
+  async function runCircuit(s: number): Promise<{ champs: string[]; intl: IntlResult[]; premierChamps: string[]; prizeBump: number; titled: { tag: string; region: string; n: number }[] }> {
     const cs = new MemoryStore();
     const ids = await Promise.all(createCircuit(s, { regions: REGIONS_DEMO, tiers: 3, size: 6, promo: 1 }).map(w => cs.createWorld(w)));
     const intl: IntlResult[] = [], champs: string[] = [];
@@ -171,13 +171,18 @@ async function main() {
       if (yr === 0) { const champW = paid.find(w => w.region === ev.champion.region)!; prizeBump = champW.clubs[ev.champion.club].balance - worlds.find(w => w.region === ev.champion.region)!.clubs[ev.champion.club].balance; }
       await Promise.all(ids.map((id, i) => cs.saveWorld(id, advanceWorld(paid[i]).world)));
     }
-    return { champs, intl, premierChamps, prizeBump };
+    // the prestige ledger: clubs ranked by international (Masters) titles won over the run
+    const finalWorlds = await Promise.all(ids.map(id => load(cs, id)));
+    const titled = finalWorlds.flatMap(w => w.clubs.filter(c => c.intlTitles).map(c => ({ tag: c.tag, region: w.region, n: c.intlTitles! })))
+      .sort((a, b) => b.n - a.n || a.tag.localeCompare(b.tag));
+    return { champs, intl, premierChamps, prizeBump, titled };
   }
   const C = await runCircuit(seed);
   const fieldN = C.intl[0].field.length, bracketN = C.intl[0].placement.length;
   console.log(`\n  shards      : ${REGIONS_DEMO.length} regional pyramids (${REGIONS_DEMO.join(' ')}) — independent world rows; s1 Premier champs ${C.premierChamps.join('  ')}`);
   console.log(`  intl event  : ${fieldN} qualifiers (2/region) → ${bracketN}-team bracket; champions by season ${C.champs.join('  ')}`);
   console.log(`  region cup  : ${Object.entries(regionTitles(C.intl)).map(([r, n]) => `${r}×${n}`).join('  ')}`);
+  console.log(`  club titles : ${C.titled.length ? C.titled.map(c => `${c.region}·${c.tag}×${c.n}`).join('  ') : '—'} (Masters prestige, accrued on the champion club)`);
   console.log(`  prize money : s1 champion banked +$${C.prizeBump.toLocaleString()} (of $${DEFAULT_INTL_PRIZE.champion.toLocaleString()} top prize) → the circuit reshapes budgets ${C.prizeBump === DEFAULT_INTL_PRIZE.champion ? '✓' : '✗'}`);
   const detC = JSON.stringify((await runCircuit(seed)).champs) === JSON.stringify(C.champs);
   const independent = new Set(C.premierChamps).size === REGIONS_DEMO.length;

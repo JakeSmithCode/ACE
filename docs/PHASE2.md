@@ -397,8 +397,16 @@ not a sim rewrite.
    **rotates** (the old refresh is single-use → 401 on replay), and a club is claimed
    via the Bearer token. The KDF salt is the only randomness and it's auth-not-sim,
    so engine/world determinism is untouched; the `clock` is injectable so expiry is
-   testable. Email verification + Stripe `vip_until` are the remaining account fields
-   (steps 9/10).*
+   testable. **Email verification is now in** — an account starts UNVERIFIED and must
+   confirm its email before it can claim a club. `register` mints a single-use token
+   (emailed in production; the slice returns it as `verifyToken` so the dev flow + tests
+   complete without a mail server), `POST /auth/verify` flips `verified` and clears the
+   token, and the claim route 403s an unverified account (the one-owner 409 only fires for
+   a *verified* rival). `accounts.ts` (`byVerifyToken`/`markVerified`/`isVerified`), the
+   `PgAccountStore` columns (`verified`/`verify_token`), and `infra/migrations/0003_email_verify.sql`
+   are in; `server:pg` asserts the flow byte-identical Memory vs Pg, `server:live` proves
+   403→verify→claim + the 409 rival, and the web client auto-verifies inline (the demo
+   stand-in for the email link). Stripe `vip_until` is the remaining account field (step 10).*
 4. **The tick worker** resolving one world end-to-end (matchday → season rollover),
    idempotent. ✅ *Done — `apps/server/src/tick.ts` `runTick` resolves the current
    match-day (via the shared pure `resolveSeasonDay`) or rolls the season over

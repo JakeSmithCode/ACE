@@ -60,7 +60,7 @@ const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve
 /** The public club page (§9) — identity, division, lifecycle, the fielded five, and
  *  whether a human owns it. Read-only, always available (no embargo on a club). */
 const publicClub = (w: WorldState, c: WorldClub) => ({
-  tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles,
+  tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles, intlTitles: c.intlTitles ?? 0,
   owned: c.owner != null, rating: Math.round(c.strength * 100), phase: clubPhase(clubTeam(c)),
   five: planFive(c).map(p => {
     const ovr = Math.round(overall(p)), sr = soloRank(ovr);
