@@ -5,7 +5,13 @@ import Editor from './Editor.vue';
 import Live from './Live.vue';
 import Circuit from './Circuit.vue';
 
-const view = ref<'hq' | 'editor' | 'live' | 'circuit'>('hq');
+// A shared deep-link (?watch= or an explicit ?server=) means the visitor came to watch
+// the live world — open the Match Center, not the default HQ. (Live.vue reads ?watch=
+// once it connects and auto-plays that replay.)
+const params = new URLSearchParams(location.search);
+const view = ref<'hq' | 'editor' | 'live' | 'circuit'>(
+  params.has('watch') || params.has('server') ? 'live' : 'hq',
+);
 </script>
 
 <template>
