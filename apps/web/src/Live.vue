@@ -44,11 +44,24 @@ const authed = computed(() => !!token.value);
 const tierName = (t: number) => RANK_TIERS[t] ?? `T${t}`;
 const mine = (tag: string) => myClub.value?.tag === tag;
 
+const verifyNote = ref('');
 async function doAuth() {
-  if (!server.value) return; busy.value = true; authErr.value = '';
+  if (!server.value) return; busy.value = true; authErr.value = ''; verifyNote.value = '';
   try {
-    const s = authMode.value === 'register' ? await server.value.register(email.value, password.value) : await server.value.login(email.value, password.value);
-    token.value = s.accessToken; authOpen.value = false; password.value = '';
+    if (authMode.value === 'register') {
+      const s = await server.value.register(email.value, password.value);
+      token.value = s.accessToken;
+      // a real account must verify its email before it can claim a club. In production
+      // the user clicks a link we email; this demo surfaces the token and completes it
+      // inline (an honest stand-in — same server gate, no mail server).
+      await server.value.verifyEmail(s.verifyToken);
+      verifyNote.value = '✓ email verified';
+      setTimeout(() => (verifyNote.value = ''), 3000);
+    } else {
+      const s = await server.value.login(email.value, password.value);
+      token.value = s.accessToken;
+    }
+    authOpen.value = false; password.value = '';
     await refreshMe();
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
@@ -401,6 +414,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         </template>
         <template v-else-if="authed">
           <span class="lv-signedin">● signed in</span>
+          <span v-if="verifyNote" class="lv-verifynote">{{ verifyNote }}</span>
           <span class="lv-claimlbl">claim a Premier club</span>
           <select v-model="claimTag" class="lv-claimsel"><option value="">choose…</option><option v-for="s in table" :key="s.club" :value="s.club">{{ s.club }}</option></select>
           <button class="lv-go sm" :disabled="!claimTag || busy" @click="doClaim">claim</button>

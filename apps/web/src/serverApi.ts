@@ -17,6 +17,10 @@ export interface LiveFixture {
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
+/** Register also returns the email-verification token. In production it's emailed (a
+ *  link the user clicks); this dev/demo surface returns it so the client can complete
+ *  verification inline — a real account must be verified before it can claim a club. */
+export interface RegisterResult extends Session { verifyToken: string }
 export interface AttrScout { key: string; cur: number; ceil: number; mech: boolean }
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
@@ -93,8 +97,10 @@ export class AceServer {
       body: JSON.stringify(body),
     }).then(r => j<T>(r));
   }
-  register(email: string, password: string): Promise<Session> { return this.post('/auth/register', { email, password }); }
+  register(email: string, password: string): Promise<RegisterResult> { return this.post('/auth/register', { email, password }); }
   login(email: string, password: string): Promise<Session> { return this.post('/auth/login', { email, password }); }
+  /** Complete email verification with the token from the (emailed) link. */
+  verifyEmail(token: string): Promise<{ verified: boolean; accountId: string }> { return this.post('/auth/verify', { token }); }
   /** Claim an AI club (by tag or id) for the bearer's account. */
   claim(clubTag: string, token: string): Promise<ClubPage> { return this.post(`/clubs/${clubTag}/claim`, {}, token); }
   /** The club this account owns (null if none). */

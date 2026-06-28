@@ -218,13 +218,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
 
     if (path[0] === 'health') return json(res, 200, { ok: true, id, now, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs });
 
-    // ── self-owned auth (§5/§9): register / login / refresh ──────────────────
+    // ── self-owned auth (§5/§9): register / login / refresh / verify ──────────
     if (path[0] === 'auth' && req.method === 'POST') {
-      const b = (await readBody(req)) as { email?: string; password?: string; refreshToken?: string };
+      const b = (await readBody(req)) as { email?: string; password?: string; refreshToken?: string; token?: string };
       try {
         if (path[1] === 'register') return json(res, 201, await auth.register(b.email ?? '', b.password ?? ''));
         if (path[1] === 'login') return json(res, 200, await auth.login(b.email ?? '', b.password ?? ''));
         if (path[1] === 'refresh') return json(res, 200, await auth.refresh(b.refreshToken ?? ''));
+        if (path[1] === 'verify') {
+          const acct = await auth.verifyEmail(b.token ?? '');
+          return acct ? json(res, 200, { verified: true, accountId: acct }) : json(res, 400, { error: 'invalid or expired verification token' });
+        }
       } catch (e) { return json(res, 401, { error: (e as Error).message }); }
       return json(res, 404, { error: 'unknown auth route' });
     }
@@ -473,6 +477,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // POST /clubs/:id/claim  → take over an AI club (x-account)
     if (path[0] === 'clubs' && path.length === 3 && path[2] === 'claim' && req.method === 'POST') {
       if (!account) return json(res, 401, { error: 'no account' });
+      if (!(await auth.isVerified(account))) return json(res, 403, { error: 'verify your email before claiming a club' });
       const w = (await store.loadWorld(id))!;
       const c = w.clubs.find(x => x.tag.toLowerCase() === path[1].toLowerCase() || x.id === path[1]);
       if (!c) return json(res, 404, { error: 'no such club' });

@@ -73,15 +73,15 @@ export class PgStore implements WorldStore {
  *  and rotated (revoked) in place, matching the `MemoryAccountStore` semantics exactly. */
 export class PgAccountStore implements AccountStore {
   constructor(private db: Queryable) {}
-  private acc = (r: Record<string, unknown>): Account => ({ id: r.id as string, email: r.email as string, passwordHash: r.password_hash as string, createdAt: Number(r.created_at) });
+  private acc = (r: Record<string, unknown>): Account => ({ id: r.id as string, email: r.email as string, passwordHash: r.password_hash as string, createdAt: Number(r.created_at), verified: !!r.verified, verifyToken: (r.verify_token as string | null) ?? null });
 
-  async create(email: string, passwordHash: string, now: number): Promise<Account> {
+  async create(email: string, passwordHash: string, now: number, verifyToken: string): Promise<Account> {
     const id = `acct-${randomUUID()}`;
     const norm = email.trim().toLowerCase();
     try {
-      await this.db.query('insert into ace_account (id, email, password_hash, created_at) values ($1, $2, $3, $4)', [id, norm, passwordHash, now]);
+      await this.db.query('insert into ace_account (id, email, password_hash, created_at, verified, verify_token) values ($1, $2, $3, $4, false, $5)', [id, norm, passwordHash, now, verifyToken]);
     } catch { throw new Error('email already registered'); }   // unique(email) violation
-    return { id, email: norm, passwordHash, createdAt: now };
+    return { id, email: norm, passwordHash, createdAt: now, verified: false, verifyToken };
   }
   async byEmail(email: string): Promise<Account | undefined> {
     const { rows } = await this.db.query('select * from ace_account where email = $1', [email.trim().toLowerCase()]);
@@ -90,6 +90,13 @@ export class PgAccountStore implements AccountStore {
   async byId(id: string): Promise<Account | undefined> {
     const { rows } = await this.db.query('select * from ace_account where id = $1', [id]);
     return rows[0] ? this.acc(rows[0]) : undefined;
+  }
+  async byVerifyToken(token: string): Promise<Account | undefined> {
+    const { rows } = await this.db.query('select * from ace_account where verify_token = $1', [token]);
+    return rows[0] ? this.acc(rows[0]) : undefined;
+  }
+  async markVerified(accountId: string): Promise<void> {
+    await this.db.query('update ace_account set verified = true, verify_token = null where id = $1', [accountId]);
   }
   async saveRefresh(accountId: string, hash: string, expiresAt: number): Promise<void> {
     await this.db.query('insert into ace_refresh (token_hash, account_id, expires_at, revoked) values ($1, $2, $3, false)', [hash, accountId, expiresAt]);

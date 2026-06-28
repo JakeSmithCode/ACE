@@ -52,8 +52,16 @@ async function main() {
   const target = w.clubs.find(c => c.tier === 0 && !c.owner)!.tag;
   const acct = (m: string, p: string, body?: unknown) => fetch(`${srv.url}${p}`, { method: m, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const standDuring = await get(`${srv.url}/standings/${SEASON}/0/0`);
+  // an unverified account can't claim — verify the email first (single-use token)
+  const preVerifyClaim = await acct('POST', `/clubs/${target}/claim`);
+  const verifyRes = await (await fetch(`${srv.url}/auth/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: reg.verifyToken }) })).json();
+  console.log(`  email verify  : unverified claim → HTTP ${preVerifyClaim.status} ${preVerifyClaim.status === 403 ? '(gated ✓)' : '(LEAK ✗)'}; verify token → verified ${verifyRes.verified ? '✓' : '✗'}`);
   const claimed = await (await acct('POST', `/clubs/${target}/claim`)).json();
-  const denied = await fetch(`${srv.url}/clubs/${target}/claim`, { method: 'POST', headers: { 'x-account': 'acct-rival' } });
+  // a verified RIVAL account tries to claim the same club → blocked by the one-owner rule
+  // (409), not the verification gate (it's verified) — so this tests ownership, not auth.
+  const rival = await (await fetch(`${srv.url}/auth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'rival@ace.gg', password: 'correct horse' }) })).json();
+  await fetch(`${srv.url}/auth/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: rival.verifyToken }) });
+  const denied = await fetch(`${srv.url}/clubs/${target}/claim`, { method: 'POST', headers: { authorization: `Bearer ${rival.accessToken}`, 'content-type': 'application/json' } });
   await acct('PATCH', '/me/plan', { tactics: { attack: { siteBias: 1, tempo: 1 }, defense: { read: 1, aggression: 0.6 } } });
   const me = await (await acct('GET', '/me')).json();
   const clubPage = await get(`${srv.url}/clubs/${target}`);

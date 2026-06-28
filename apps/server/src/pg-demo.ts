@@ -23,7 +23,7 @@ class FakeQueryable implements Queryable {
   private worlds = new Map<string, string>();
   private fixtures: { world_id: string; season: number; day: number; slot: number; data: string }[] = [];
   private ticks: { world_id: string; season: number; day: number; kind: string; fixtures: number }[] = [];
-  private accounts = new Map<string, { id: string; email: string; password_hash: string; created_at: number }>();
+  private accounts = new Map<string, { id: string; email: string; password_hash: string; created_at: number; verified: boolean; verify_token: string | null }>();
   private refresh = new Map<string, { token_hash: string; account_id: string; expires_at: number; revoked: boolean }>();
 
   async query(text: string, params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> {
@@ -42,9 +42,11 @@ class FakeQueryable implements Queryable {
     if (t.startsWith('insert into ace_tick_log')) { if (this.ticks.some(x => x.world_id === p[0] && x.season === p[1] && x.day === p[2] && x.kind === p[3])) throw new Error('duplicate key (idempotency PK)'); this.ticks.push({ world_id: p[0], season: p[1], day: p[2], kind: p[3], fixtures: p[4] }); return { rows: [] }; }
     if (t.startsWith('select world_id, season, day, kind, fixtures from ace_tick_log')) return { rows: this.ticks.filter(x => x.world_id === p[0]) };
     // ── ace_account / ace_refresh ──
-    if (t.startsWith('insert into ace_account')) { if ([...this.accounts.values()].some(a => a.email === p[1])) throw new Error('unique(email) violation'); this.accounts.set(p[0], { id: p[0], email: p[1], password_hash: p[2], created_at: p[3] }); return { rows: [] }; }
+    if (t.startsWith('insert into ace_account')) { if ([...this.accounts.values()].some(a => a.email === p[1])) throw new Error('unique(email) violation'); this.accounts.set(p[0], { id: p[0], email: p[1], password_hash: p[2], created_at: p[3], verified: false, verify_token: p[4] }); return { rows: [] }; }
     if (t.startsWith('select * from ace_account where email')) { const a = [...this.accounts.values()].find(x => x.email === p[0]); return { rows: a ? [a] : [] }; }
+    if (t.startsWith('select * from ace_account where verify_token')) { const a = [...this.accounts.values()].find(x => x.verify_token != null && x.verify_token === p[0]); return { rows: a ? [a] : [] }; }
     if (t.startsWith('select * from ace_account where id')) { const a = this.accounts.get(p[0]); return { rows: a ? [a] : [] }; }
+    if (t.startsWith('update ace_account set verified')) { const a = this.accounts.get(p[0]); if (a) { a.verified = true; a.verify_token = null; } return { rows: [] }; }
     if (t.startsWith('insert into ace_refresh')) { this.refresh.set(p[0], { token_hash: p[0], account_id: p[1], expires_at: p[2], revoked: false }); return { rows: [] }; }
     if (t.startsWith('select account_id, token_hash, expires_at, revoked from ace_refresh')) { const r = this.refresh.get(p[0]); return { rows: r ? [r] : [] }; }
     if (t.startsWith('update ace_refresh set revoked')) { const r = this.refresh.get(p[0]); if (r) r.revoked = true; return { rows: [] }; }
@@ -78,7 +80,13 @@ async function main() {
     const rot = await auth.refresh(reg.refreshToken);
     let replay = false; try { await auth.refresh(reg.refreshToken); } catch { replay = true; }
     const verified = auth.verify(rot.accessToken) === reg.accountId;
-    console.log(`  auth (${label.padEnd(6)}): register ✓ · dup-email ${dupEmail ? '✓' : '✗'} · login ${login.accessToken ? '✓' : '✗'} · rotate ${rot.accessToken ? '✓' : '✗'} · old-refresh single-use ${replay ? '✓' : '✗'} · verify ${verified ? '✓' : '✗'}`);
+    // email verification: starts unverified, the single-use token flips it, a bad token is rejected
+    const before = await auth.isVerified(reg.accountId);
+    const ok = await auth.verifyEmail(reg.verifyToken);
+    const after = await auth.isVerified(reg.accountId);
+    const badTok = await auth.verifyEmail(reg.verifyToken);   // single-use → already cleared
+    const emailFlow = before === false && ok === reg.accountId && after === true && badTok === null;
+    console.log(`  auth (${label.padEnd(6)}): register ✓ · dup-email ${dupEmail ? '✓' : '✗'} · login ${login.accessToken ? '✓' : '✗'} · rotate ${rot.accessToken ? '✓' : '✗'} · old-refresh single-use ${replay ? '✓' : '✗'} · verify ${verified ? '✓' : '✗'} · email-verify ${emailFlow ? '✓' : '✗'}`);
   }
   console.log(`\n  PgStore is interface-conformant + deterministic. Integration vs real Postgres: infra/docker-compose.\n`);
 }

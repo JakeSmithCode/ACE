@@ -1019,5 +1019,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-newsico{font-style:normal;opacity:.8}
 .lv-newsitem.champion{color:#e6c66a}
 .lv-newsitem.award{color:#7fc8e6}
+.lv-verifynote{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:#5fd38a}
 .lv-newsitem.season{color:var(--muted-2)}
 .lv-newsage{font-style:normal;font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7}
