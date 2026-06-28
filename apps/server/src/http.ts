@@ -152,11 +152,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     notifs.set(account, list);
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
-  // owner-to-owner mail (human-to-human, DESIGN §16 social) — an async inbox keyed by
-  // recipient account. You send from your club's identity to another human-owned club.
-  interface MailMsg { id: number; fromAccount: string; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
+  // owner-to-owner mail (human-to-human, DESIGN §16 social) — real CONVERSATIONS: every
+  // message is delivered to BOTH participants' mailboxes (sender's copy read, recipient's
+  // unread) and tagged with a `threadId` so a reply continues the thread. `mine` is set
+  // per copy (did this mailbox's owner send it). Keyed by account.
+  interface MailMsg { id: number; threadId: number; fromAccount: string; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
   const mailboxes = new Map<string, MailMsg[]>();
   let mailSeq = 0;
+  const pushMail = (account: string, m: MailMsg) => { const box = mailboxes.get(account) ?? []; box.unshift(m); if (box.length > 200) box.length = 200; mailboxes.set(account, box); };
   // live league chat — a real-time channel for online owners (SSE fan-out). A bounded
   // backlog + a set of connected streams that every new message is pushed to.
   interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
@@ -476,31 +479,41 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const list = ownedClubs(w).filter(c => c.owner && c.owner !== account).map(c => ({ tag: c.tag, name: c.name }));
       return json(res, 200, { recipients: list });
     }
-    // POST /mail/send  → send a message from your club to another human-owned club
+    // POST /mail/send  → send a message (or reply) — delivered to BOTH parties, threaded.
+    // A `replyTo` (a message id in your mailbox) continues that thread to its other party.
     if (path[0] === 'mail' && path[1] === 'send' && req.method === 'POST') {
       if (!account) return json(res, 401, { error: 'no account' });
       const mine = await myClub(store, id, account);
       if (!mine) return json(res, 404, { error: 'you own no club' });
-      const b = (await readBody(req)) as { toTag?: string; subject?: string; body?: string };
+      const b = (await readBody(req)) as { toTag?: string; subject?: string; body?: string; replyTo?: number };
+      if (!(b.body ?? '').trim()) return json(res, 400, { error: 'an empty message' });
       const w = (await store.loadWorld(id))!;
-      const target = w.clubs.find(c => c.tag.toLowerCase() === (b.toTag ?? '').toLowerCase());
+      let toTag = b.toTag ?? '', subject = (b.subject ?? '').slice(0, 80) || '(no subject)', threadId = 0;
+      if (b.replyTo != null) {
+        const orig = (mailboxes.get(account) ?? []).find(m => m.id === b.replyTo);
+        if (!orig) return json(res, 404, { error: 'no such message to reply to' });
+        toTag = orig.mine ? orig.toTag : orig.fromTag;                          // the OTHER party in the thread
+        subject = orig.subject.startsWith('Re: ') ? orig.subject : `Re: ${orig.subject}`;
+        threadId = orig.threadId;
+      }
+      const target = w.clubs.find(c => c.tag.toLowerCase() === toTag.toLowerCase());
       if (!target) return json(res, 404, { error: 'no such club' });
       if (target.id === mine.id) return json(res, 400, { error: 'you cannot mail yourself' });
       if (!target.owner) return json(res, 400, { error: `${target.tag} is AI-run — no human to read it` });
-      if (!(b.body ?? '').trim()) return json(res, 400, { error: 'an empty message' });
-      const msg: MailMsg = { id: ++mailSeq, fromAccount: account, fromTag: mine.tag, fromName: mine.name, toTag: target.tag, subject: (b.subject ?? '').slice(0, 80) || '(no subject)', body: (b.body ?? '').slice(0, 1000), season: w.season, day: liveDay, read: false, at: clock() };
-      const box = mailboxes.get(target.owner) ?? [];
-      box.unshift(msg);
-      if (box.length > 100) box.length = 100;
-      mailboxes.set(target.owner, box);
-      notify(target.owner, 'system', `✉ New message from ${mine.tag}: ${msg.subject}`, w.season, liveDay);
+      const mid = ++mailSeq;
+      if (!threadId) threadId = mid;                                            // a new conversation roots at this message
+      const base = { id: mid, threadId, fromAccount: account, fromTag: mine.tag, fromName: mine.name, toTag: target.tag, subject, body: (b.body ?? '').slice(0, 1000), season: w.season, day: liveDay, at: clock() };
+      pushMail(target.owner, { ...base, read: false, mine: false });           // recipient: unread, incoming
+      pushMail(account, { ...base, read: true, mine: true });                   // sender: a read copy (sent items)
+      notify(target.owner, 'system', `✉ New message from ${mine.tag}: ${subject}`, w.season, liveDay);
       return json(res, 200, { ok: true });
     }
-    // POST /mail/read  → mark one (by id) or all read
+    // POST /mail/read  → mark one message (id), a whole thread (threadId), or all read
     if (path[0] === 'mail' && path[1] === 'read' && req.method === 'POST') {
       if (!account) return json(res, 401, { error: 'no account' });
-      const b = (await readBody(req)) as { id?: number };
-      mailboxes.set(account, (mailboxes.get(account) ?? []).map(m => (b.id == null || m.id === b.id ? { ...m, read: true } : m)));
+      const b = (await readBody(req)) as { id?: number; threadId?: number };
+      const all = b.id == null && b.threadId == null;
+      mailboxes.set(account, (mailboxes.get(account) ?? []).map(m => (all || m.id === b.id || m.threadId === b.threadId ? { ...m, read: true } : m)));
       return json(res, 200, { ok: true, unread: (mailboxes.get(account) ?? []).filter(m => !m.read).length });
     }
     // GET /chat/stream  → SSE: the live league chat (backlog event, then each new message)

@@ -1054,6 +1054,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-mailmeta b{font-size:13px}
 .lv-mailsubj{color:var(--muted-2);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lv-mailtext{color:var(--text);line-height:1.35;white-space:pre-wrap;word-break:break-word}
+.lv-mailrow{cursor:pointer}
+.lv-mailpreview{color:var(--muted-2);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-mailyou{font-style:normal;color:var(--muted-2);opacity:.8}
+.lv-threadbadge{background:#e2486a;color:#fff;font-family:var(--label);font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;padding:0 3px}
+.lv-threadview{padding:8px 11px 10px;background:rgba(0,0,0,.18);border-radius:7px;margin:2px 0 6px;display:flex;flex-direction:column;gap:6px}
+.lv-threadmsg{display:flex;flex-direction:column;gap:1px;max-width:85%}
+.lv-threadmsg.mine{align-self:flex-end;text-align:right}
+.lv-threadfrom{font-family:var(--label);font-size:9px;color:var(--muted-2);letter-spacing:.04em}
+.lv-threadbody{font-size:12.5px;color:var(--text);background:rgba(255,255,255,.04);border-radius:8px;padding:5px 9px;line-height:1.35;word-break:break-word}
+.lv-threadmsg.mine .lv-threadbody{background:rgba(90,160,210,.16)}
+.lv-threadreply{display:flex;gap:7px;margin-top:4px}
+.lv-threadreply .lv-mailin{flex:1}
 /* live league chat */
 .lv-chatpanel{right:28px;height:60vh}
 .lv-chatlive{font-size:9px;font-style:normal;color:#5fd38a;margin-left:8px;letter-spacing:.05em}

@@ -38,7 +38,7 @@ export interface ClubRankRow { rank: number; tag: string; name: string; tier: nu
 export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
-export interface MailMsg { id: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
+export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
 
 export interface IntlSide { region: string; tag: string }
@@ -96,10 +96,12 @@ export class AceServer {
   mailRecipients(token: string): Promise<{ recipients: { tag: string; name: string }[] }> {
     return fetch(`${this.base}/mail/recipients`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ recipients: { tag: string; name: string }[] }>(r));
   }
-  /** Send a message from your club to another human-owned club. */
+  /** Send a new message to another human-owned club. */
   sendMail(token: string, toTag: string, subject: string, body: string): Promise<{ ok: boolean; error?: string }> { return this.post('/mail/send', { toTag, subject, body }, token); }
-  /** Mark one mail (by id) or all read. */
-  markMailRead(token: string, id?: number): Promise<{ ok: boolean; unread: number }> { return this.post('/mail/read', id == null ? {} : { id }, token); }
+  /** Reply within a thread — the recipient + subject are derived from the message. */
+  replyMail(token: string, replyTo: number, body: string): Promise<{ ok: boolean; error?: string }> { return this.post('/mail/send', { replyTo, body }, token); }
+  /** Mark one message (id), a whole thread (threadId), or all read. */
+  markMailRead(token: string, opts?: { id?: number; threadId?: number }): Promise<{ ok: boolean; unread: number }> { return this.post('/mail/read', opts ?? {}, token); }
 
   // ── live league chat (real-time, SSE) ──
   /** Subscribe to the live league chat — `onBacklog` fires once with recent history,

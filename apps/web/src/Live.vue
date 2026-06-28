@@ -311,11 +311,28 @@ async function loadMail() {
   if (!server.value || !token.value) return;
   try { const r = await server.value.mail(token.value); mailList.value = r.items; mailUnread.value = r.unread; } catch { /* transient */ }
 }
+const openThread = ref<number | null>(null);
+const replyText = ref('');
 async function toggleMail() {
   mailOpen.value = !mailOpen.value;
   if (mailOpen.value && server.value && token.value) {
     try { mailRecips.value = (await server.value.mailRecipients(token.value)).recipients; } catch { /* transient */ }
-    if (mailUnread.value) { try { await server.value.markMailRead(token.value); mailUnread.value = 0; mailList.value = mailList.value.map(m => ({ ...m, read: true })); } catch { /* transient */ } }
+  } else { openThread.value = null; }
+}
+// group the flat message list into conversation threads (newest activity first)
+const mailThreads = computed(() => {
+  const by = new Map<number, typeof mailList.value>();
+  for (const m of mailList.value) { const t = by.get(m.threadId) ?? []; t.push(m); by.set(m.threadId, t); }
+  return [...by.values()].map(msgs => {
+    const sorted = [...msgs].sort((a, b) => a.at - b.at);
+    const last = sorted[sorted.length - 1];
+    return { threadId: last.threadId, other: last.mine ? last.toTag : last.fromTag, subject: sorted[0].subject, last, messages: sorted, unread: msgs.filter(m => !m.read && !m.mine).length };
+  }).sort((a, b) => b.last.at - a.last.at);
+});
+async function openMailThread(threadId: number) {
+  openThread.value = openThread.value === threadId ? null : threadId;
+  if (openThread.value != null && server.value && token.value) {
+    try { await server.value.markMailRead(token.value, { threadId }); mailList.value = mailList.value.map(m => m.threadId === threadId ? { ...m, read: true } : m); mailUnread.value = mailList.value.filter(m => !m.read && !m.mine).length; } catch { /* transient */ }
   }
 }
 async function sendMail() {
@@ -323,9 +340,16 @@ async function sendMail() {
   mailMsg.value = '';
   try {
     const r = await server.value.sendMail(token.value, mailTo.value, mailSubject.value, mailBody.value);
-    if (r.ok) { mailMsg.value = `✓ sent to ${mailTo.value}`; mailSubject.value = ''; mailBody.value = ''; }
+    if (r.ok) { mailMsg.value = `✓ sent to ${mailTo.value}`; mailSubject.value = ''; mailBody.value = ''; await loadMail(); }
     else mailMsg.value = r.error ?? 'failed';
   } catch (e) { mailMsg.value = (e as Error).message; }
+}
+async function doReply(threadId: number) {
+  if (!server.value || !token.value || !replyText.value.trim()) return;
+  const last = mailList.value.filter(m => m.threadId === threadId).sort((a, b) => b.at - a.at)[0];
+  if (!last) return;
+  const txt = replyText.value; replyText.value = '';
+  try { const r = await server.value.replyMail(token.value, last.id, txt); if (r.ok) await loadMail(); else replyText.value = txt; } catch { replyText.value = txt; }
 }
 
 // live league chat (real-time SSE) — subscribe while the panel is open
@@ -513,11 +537,28 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                 </div>
               </div>
               <div class="lv-notiflist">
-                <div v-for="m in mailList" :key="m.id" class="lv-mailrow" :class="{ unread: !m.read }">
-                  <div class="lv-mailmeta"><b>{{ m.fromTag }}</b><span class="lv-mailsubj">{{ m.subject }}</span><span class="lv-notifage">S{{ m.season }}</span></div>
-                  <div class="lv-mailtext">{{ m.body }}</div>
+                <div v-for="t in mailThreads" :key="t.threadId" class="lv-mailthread">
+                  <div class="lv-mailrow" :class="{ unread: t.unread > 0 }" @click="openMailThread(t.threadId)">
+                    <div class="lv-mailmeta">
+                      <b>{{ t.other }}</b>
+                      <span class="lv-mailsubj">{{ t.subject }}</span>
+                      <span v-if="t.unread" class="lv-threadbadge">{{ t.unread }}</span>
+                      <span class="lv-notifage">{{ t.messages.length }} msg</span>
+                    </div>
+                    <div class="lv-mailtext lv-mailpreview"><i v-if="t.last.mine" class="lv-mailyou">You:</i> {{ t.last.body }}</div>
+                  </div>
+                  <div v-if="openThread === t.threadId" class="lv-threadview">
+                    <div v-for="m in t.messages" :key="m.id" class="lv-threadmsg" :class="{ mine: m.mine }">
+                      <span class="lv-threadfrom">{{ m.mine ? 'You' : m.fromTag }}</span>
+                      <span class="lv-threadbody">{{ m.body }}</span>
+                    </div>
+                    <div class="lv-threadreply">
+                      <input v-model="replyText" class="lv-mailin" placeholder="reply…" maxlength="1000" @keyup.enter="doReply(t.threadId)" />
+                      <button class="lv-go sm" :disabled="!replyText.trim()" @click="doReply(t.threadId)">reply</button>
+                    </div>
+                  </div>
                 </div>
-                <div v-if="!mailList.length" class="lv-empty">your inbox is empty</div>
+                <div v-if="!mailThreads.length" class="lv-empty">your inbox is empty</div>
               </div>
             </div>
           </Teleport>
