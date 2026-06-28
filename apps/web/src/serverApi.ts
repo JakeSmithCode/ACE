@@ -81,7 +81,7 @@ export class AceServer {
   sell(ref: string, token: string): Promise<SaleResult> { return this.post('/market/sell', { ref }, token); }
   /** Advance the season a match-day (owner action — the scheduler does this in prod).
    *  At the season boundary it rolls over: `rollover` + the new `season` + `champion`. */
-  advance(token: string): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string }> { return this.post('/advance', {}, token); }
+  advance(token: string): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number }> { return this.post('/advance', {}, token); }
 
   /** Author your club's plan — the tactics that drive your matches on the next tick. */
   setPlan(tactics: Tactics, token: string): Promise<ClubPlan> {

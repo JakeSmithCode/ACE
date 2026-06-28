@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -90,15 +90,22 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
    *  At the season boundary it rolls the season over (playoffs → settle → develop →
    *  patch → promote/relegate) and puts the NEW season's day 0 on air — so the season
    *  cycle completes: a champion is crowned and a fresh season begins. */
-  const advance = (): { broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string } => {
+  const advance = (): { broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number } => {
     const tickDay = (w: WorldState) => {
       liveKickoff = clock();
       runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
       liveDay = w.day;
       cacheDay(w.season, w.day);
     };
+    // the living market: a couple of AI clubs sign the best free agents each tick
+    const churnMarket = (): number => {
+      const avail = getBoard().filter(p => !sold.has(p.handle));
+      const { world: nw, signings } = resolveAiMarket(store.loadWorld(id)!, avail, 2);
+      if (signings.length) { store.saveWorld(id, nw); signings.forEach(s => sold.add(s.handle)); }
+      return signings.length;
+    };
     const w = store.loadWorld(id)!;
-    if (w.day < seasonLength(w)) { tickDay(w); return { broadcastDay: liveDay, done: false }; }
+    if (w.day < seasonLength(w)) { tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: churnMarket() }; }
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
     tickDay(store.loadWorld(id)!);

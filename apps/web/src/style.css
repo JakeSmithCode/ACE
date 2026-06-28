@@ -856,3 +856,4 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-champtxt i{font-style:normal;color:var(--muted)}
 .lv-champx{margin-left:auto;background:none;border:none;color:var(--muted-2);font-size:14px;cursor:pointer}
 .lv-champx:hover{color:var(--text)}
+.lv-wire{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--gold);animation:lv-pulse 2s ease-in-out 2}

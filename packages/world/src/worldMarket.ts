@@ -105,6 +105,27 @@ export function applySale(w: WorldState, sellerClubId: string, ref: string, buye
     j === buyerIdx ? { ...c, roster: [...c.roster, moved], balance: c.balance - fee } : c) };
 }
 
+/** The living market: each advance, a few motivated AI clubs sign the best free agent
+ *  they want — so the board churns and the gems get snapped up (the urgency that makes
+ *  the economy bite: spot a player and bid before a rival takes him). Bounded + pure;
+ *  recomputes balances per signing so it's correct. Returns the new world + who signed. */
+export function resolveAiMarket(w: WorldState, available: Player[], max = 2): { world: WorldState; signings: { club: string; handle: string; fee: number }[] } {
+  let nw = w;
+  let pool = [...available];
+  const signings: { club: string; handle: string; fee: number }[] = [];
+  for (let i = 0; i < w.clubs.length && signings.length < max; i++) {
+    if (nw.clubs[i].owner) continue;                         // humans bid for themselves
+    const clubs = asClubs(nw), balances = nw.clubs.map(c => c.balance);
+    const want = pool.filter(p => aiWantsToBuy(clubs, balances, i, p)).sort((a, b) => playerValue(b, nw.patch) - playerValue(a, nw.patch))[0];
+    if (!want) continue;
+    const fee = playerValue(want, nw.patch);
+    nw = applySigning(nw, nw.clubs[i].id, want, fee);
+    signings.push({ club: nw.clubs[i].tag, handle: want.handle, fee });
+    pool = pool.filter(p => p.handle !== want.handle);
+  }
+  return { world: nw, signings };
+}
+
 /** The owner's full squad for the wire (so the UI can list reserves to sell). */
 export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
 export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {

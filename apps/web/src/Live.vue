@@ -140,6 +140,7 @@ function openStream() {
 // advance the season a match-day — your authored tactics drive your next fixtures.
 // at the season boundary it rolls over (playoffs → champion → new season).
 const champBanner = ref<{ season: number; champion: string } | null>(null);
+const wireNote = ref('');
 async function advance() {
   if (!server.value || !token.value) return;
   advancing.value = true;
@@ -149,6 +150,8 @@ async function advance() {
     DAY.value = r.broadcastDay;
     if (world.value) world.value = await server.value.world();
     openStream(); await refreshTable(); await refreshMe();
+    if (board.value.length) await loadBoard();   // the board churns (AI signed some) — refresh it
+    if (r.rivalSignings) { wireNote.value = `${r.rivalSignings} free agent${r.rivalSignings > 1 ? 's' : ''} signed by rival clubs`; setTimeout(() => (wireNote.value = ''), 4000); }
     if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); }
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
@@ -267,6 +270,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <div class="lv-mkth">
           <span class="lv-kicker">Free agents</span>
           <span class="lv-mktsub">a bid must clear the asking price <b>and</b> beat the top rival club — a 🔥 contested player goes above value</span>
+          <span v-if="wireNote" class="lv-wire">⇄ {{ wireNote }}</span>
         </div>
         <div class="lv-mktboard">
           <div v-for="e in board" :key="e.handle" class="lv-mktrow">
