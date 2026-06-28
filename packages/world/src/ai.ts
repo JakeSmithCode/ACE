@@ -66,3 +66,20 @@ export function aiTactics(team: Team): Tactics {
     },
   };
 }
+
+/** Matchup-aware tactics — a SMART AI manager scouts the opponent and pre-commits its
+ *  defensive read toward where that opponent's roster *likes* to hit. It reads the
+ *  opponent's roster-fixed BASE siteBias (`aiTactics(opp).attack.siteBias`), NOT their full
+ *  matchup tactics, so it's non-circular (a fixed point, not a chase) — the manager is
+ *  scouting tendencies, exactly the kind of pre-round read a human authors. A control-leaning
+ *  manager (lower `aggression`) trusts the read harder; an aggressive one weights its own
+ *  instinct more (it would rather make a play than sit on a read). Pure + deterministic, so
+ *  the world CLIs stay reproducible; the engine never sees it, so seed 42 is untouched. */
+export function aiMatchupTactics(myTeam: Team, oppTeam: Team): Tactics {
+  const base = aiTactics(myTeam);
+  const oppBias = aiTactics(oppTeam).attack.siteBias;          // where the opponent's roster prefers to hit
+  // a patient manager (low aggression) commits to the scouted read; an aggressive one trusts instinct.
+  const trust = clamp(0.75 - base.defense.aggression * 0.5, 0.35, 0.65);
+  const read = clamp(base.defense.read * (1 - trust) + oppBias * trust, -1, 1);
+  return { ...base, defense: { ...base.defense, read: r2(read) } };
+}

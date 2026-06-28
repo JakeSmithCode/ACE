@@ -7,7 +7,14 @@
 import type { MatchInput } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch } from '@ace/engine';
-import { buildMatchInput, clubTeam, fixtureMap, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { buildMatchInput, clubTeam, fixtureMap, aiMatchupTactics, type WorldState, type WorldClub, type Fixture, type MatchResult } from '@ace/world';
+
+/** The tactics a club brings to a fixture: a HUMAN owner's authored plan as-is; an AI club
+ *  scouts its opponent and reads toward where that opponent's roster prefers to hit
+ *  (`aiMatchupTactics`). A human's plan is sacred — only AI clubs get the matchup read. */
+function matchTactics(self: WorldClub, opp: WorldClub) {
+  return self.owner ? self.tactics : aiMatchupTactics(clubTeam(self), clubTeam(opp));
+}
 
 export interface SimResolver {
   /** Resolve a fixture with the engine; signature matches `resolveSeasonDay`'s `resolve`. */
@@ -27,7 +34,7 @@ export function fullSimResolver(w: WorldState, navOf: (map: MatchInput['map']) =
     const input = buildMatchInput({
       seed, map, patch: w.patch,
       home: clubTeam(home), away: clubTeam(away),
-      tactics: [home.tactics, away.tactics], comp: [home.comp, away.comp],
+      tactics: [matchTactics(home, away), matchTactics(away, home)], comp: [home.comp, away.comp],
     });
     snapshots.set(seed, input);
     const [h, a] = simulateMatch(input, navOf(map), forks).finalScore;
