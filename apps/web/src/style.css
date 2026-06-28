@@ -876,3 +876,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-igltag{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid rgba(229,181,103,.5);padding:1px 4px;font-style:normal}
 .lv-fiveovr{font-family:var(--display);font-weight:700;font-size:16px;color:var(--text)}
 .lv-fiveovr i{font-family:var(--label);font-size:9px;font-style:normal;color:var(--muted-2);letter-spacing:.06em}
+/* Match Center — Hall of Fame (legacy engine) */
+.lv-bottom{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.lv-bottom{grid-template-columns:1fr}}
+.lv-hof{background:var(--bg-2);border:1px solid var(--line);border-top:2px solid var(--gold);clip-path:var(--bevel);padding:14px 16px}
+.lv-hofsec{font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);margin:12px 0 7px}
+.lv-hofsec:first-child{margin-top:4px}
+.lv-hofrow{display:grid;grid-template-columns:20px 12px auto 1fr auto;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--line)}
+.lv-hofrank{font-family:var(--label);font-size:11px;color:var(--muted-2)}
+.lv-hofrow b{font-family:var(--display);font-size:15px;letter-spacing:.02em}
+.lv-hofname{font-family:var(--body);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-hoftitles{font-size:11px;letter-spacing:-2px}
+.lv-hoftitles i{font-style:normal;letter-spacing:0;color:var(--gold);font-family:var(--label);font-size:11px;margin-left:2px}
+.lv-hofseason{display:flex;align-items:center;gap:8px;padding:4px 4px;font-size:13px}
+.lv-hofseason .lv-hofsno{font-family:var(--label);font-size:11px;color:var(--brand);min-width:26px}
+.lv-hofseason b{font-family:var(--display);font-size:15px}
+.lv-hofempty{padding:24px 8px;text-align:center;color:var(--muted-2);font-family:var(--label);font-size:12px;letter-spacing:.04em;line-height:1.6}

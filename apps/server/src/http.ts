@@ -71,6 +71,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
   const sold = new Set<string>();
+  // the legacy engine (DESIGN §9.2): the world remembers its champions, season by season
+  const honors: { season: number; champion: string }[] = [];
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
   // the live broadcast cursor — which match-day is on air + when it kicked off. Mutable
   // so the season can PROGRESS: `advance` ticks the next day and moves the cursor.
@@ -108,6 +110,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (w.day < seasonLength(w)) { await tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: await churnMarket() }; }
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
+    if (roll.champion) honors.push({ season: roll.season, champion: roll.champion });   // remember the champion
     await tickDay((await store.loadWorld(id))!);
     return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
   };
@@ -223,6 +226,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const after = (await store.loadWorld(id))!;
       const ci = after.clubs.findIndex(c => c.id === mine.id);
       return json(res, 200, { ...sale, club: publicClub(after, after.clubs[ci]) });
+    }
+    // GET /honors  → the Hall of Fame: season champions + all-time title leaders
+    if (path[0] === 'honors' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      const allTime = w.clubs.filter(c => c.titles > 0).map(c => ({ tag: c.tag, name: c.name, titles: c.titles })).sort((a, b) => b.titles - a.titles || a.tag.localeCompare(b.tag));
+      return json(res, 200, { honors: [...honors].reverse(), allTime });
     }
     // GET /circuit  → the international circuit (Masters bracket; full-sims the final)
     if (path[0] === 'circuit' && path.length === 1) {

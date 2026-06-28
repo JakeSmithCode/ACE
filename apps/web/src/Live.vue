@@ -125,6 +125,7 @@ async function connect() {
     table.value = (await s.standings(world.value.season, 0, 0)).table;
     server.value = s; status.value = 'live';
     await refreshMe();
+    await loadHonors();
     openStream();
     // standings only move at reveal — refresh them every few seconds while watching
     if (pollTimer) clearInterval(pollTimer);
@@ -152,10 +153,13 @@ async function advance() {
     openStream(); await refreshTable(); await refreshMe();
     if (board.value.length) await loadBoard();   // the board churns (AI signed some) — refresh it
     if (r.rivalSignings) { wireNote.value = `${r.rivalSignings} free agent${r.rivalSignings > 1 ? 's' : ''} signed by rival clubs`; setTimeout(() => (wireNote.value = ''), 4000); }
-    if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); }
+    if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); await loadHonors(); }
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
+// the Hall of Fame — the world's champions (the legacy engine)
+const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
+async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
 
 // --- watch a revealed fixture back in the viewer ---------------------------
 const host = ref<HTMLElement | null>(null);
@@ -364,16 +368,38 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <div ref="host" class="ace-host"></div>
       </div>
 
-      <!-- Premier standings (embargo-aware: only resolved games count) -->
-      <div class="lv-table">
-        <div class="lv-tableh"><span class="lv-kicker">Premier standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
-        <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
-        <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
-          <span class="r">{{ rank + 1 }}</span>
-          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
-          <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
-          <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
-          <span class="pts">{{ s.points }}</span>
+      <div class="lv-bottom">
+        <!-- Premier standings (embargo-aware: only resolved games count) -->
+        <div class="lv-table">
+          <div class="lv-tableh"><span class="lv-kicker">Premier standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
+          <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
+          <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
+            <span class="r">{{ rank + 1 }}</span>
+            <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
+            <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
+            <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
+            <span class="pts">{{ s.points }}</span>
+          </div>
+        </div>
+
+        <!-- the Hall of Fame — the world's champions (the legacy engine) -->
+        <div class="lv-hof">
+          <div class="lv-tableh"><span class="lv-kicker">🏆 Hall of Fame</span><span class="lv-note">the world remembers</span></div>
+          <template v-if="hof.allTime.length || hof.honors.length">
+            <div class="lv-hofsec">All-time titles</div>
+            <div v-for="(c, i) in hof.allTime.slice(0, 6)" :key="c.tag" class="lv-hofrow">
+              <span class="lv-hofrank">{{ i + 1 }}</span>
+              <i class="hq-dot" :style="{ background: `hsl(${hue(c.tag)} 65% 55%)` }"></i>
+              <b class="lv-cname clickable" @click="openClub(c.tag)">{{ c.tag }}</b>
+              <span class="lv-hofname">{{ c.name }}</span>
+              <span class="lv-hoftitles">{{ '🏆'.repeat(Math.min(5, c.titles)) }}<i v-if="c.titles > 5">×{{ c.titles }}</i></span>
+            </div>
+            <div v-if="hof.honors.length" class="lv-hofsec">Champions by season</div>
+            <div v-for="h in hof.honors.slice(0, 6)" :key="h.season" class="lv-hofseason">
+              <span class="lv-hofsno">S{{ h.season }}</span><span>🏆</span><b class="lv-cname clickable" @click="openClub(h.champion)">{{ h.champion }}</b>
+            </div>
+          </template>
+          <div v-else class="lv-hofempty">No champions crowned yet.<br />Advance a full season to make history.</div>
         </div>
       </div>
     </template>
