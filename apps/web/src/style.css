@@ -979,3 +979,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-pwtitles{font-size:11px;text-align:center}
 .lv-pwpower{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
 .lv-pwpower i{font-size:9px;color:var(--muted-2);font-style:normal;font-weight:400}
+/* post-match box score + MVP */
+.lv-box{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:14px 4px 4px}
+.lv-boxteam{background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.lv-boxhead{display:flex;align-items:center;gap:8px;padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.lv-boxhead b{font-size:14px}
+.lv-boxsc{margin-left:auto;font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+.lv-boxrow{display:grid;grid-template-columns:1fr 28px 28px 36px 28px;align-items:center;gap:6px;padding:4px 4px;font-variant-numeric:tabular-nums;font-size:13px}
+.lv-boxrow>span:not(.lv-boxp){text-align:center;color:var(--muted-2)}
+.lv-boxthead{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2);border-bottom:1px solid var(--line)}
+.lv-boxthead>span{color:var(--muted-2)!important}
+.lv-boxrow.mvp{background:linear-gradient(90deg,rgba(230,200,106,.1),transparent);border-radius:5px}
+.lv-boxp{display:flex;align-items:center;gap:7px;min-width:0}
+.lv-boxp b{font-size:13px;white-space:nowrap}
+.lv-igl{font-size:8px;font-style:normal;color:#e6c66a;border:1px solid rgba(230,198,106,.4);border-radius:3px;padding:0 3px}
+.lv-mvp{font-size:8.5px;font-style:normal;color:#e6c66a;font-weight:700;letter-spacing:.04em;white-space:nowrap}
+.lv-boxrow .pos{color:#5fd38a!important}.lv-boxrow .neg{color:#e2768a!important}

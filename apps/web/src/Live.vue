@@ -286,6 +286,25 @@ interface Watched { home: { tag: string; name: string }; away: { tag: string; na
 const host = ref<HTMLElement | null>(null);
 const watching = ref<Watched | null>(null);
 const loadingWatch = ref(false);
+
+// the post-match box score — derived client-side from the re-simmed timeline's kill
+// events (the engine keys kills by player handle). Each player's K/D, first bloods,
+// and a Player of the Match (most kills, K−D tiebreak). The watch view is the product.
+interface BoxRow { handle: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; mvp: boolean }
+const boxScore = ref<{ teams: [BoxRow[], BoxRow[]]; mvp: string } | null>(null);
+function computeBox(tl: import('@ace/shared').MatchTimeline) {
+  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {};
+  for (const r of tl.rounds) {
+    const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
+    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; });
+  }
+  const rowsOf = (t: number): BoxRow[] => tl.teams[t].players.map(p => ({ handle: p.handle, role: p.role, agent: p.agent, igl: p.igl, kills: kills[p.handle] || 0, deaths: deaths[p.handle] || 0, fb: fb[p.handle] || 0, mvp: false }))
+    .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths));
+  const all = [...rowsOf(0), ...rowsOf(1)];
+  const mvp = all.slice().sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
+  if (mvp) mvp.mvp = true;
+  boxScore.value = { teams: [rowsOf(0).map(r => ({ ...r, mvp: r.handle === mvp?.handle })), rowsOf(1).map(r => ({ ...r, mvp: r.handle === mvp?.handle }))], mvp: mvp?.handle ?? '' };
+}
 const shareCopied = ref(false);
 let viewer: Viewer | null = null;
 function watch(fx: LiveFixture) { return watchAt(season.value, DAY.value, fx.slot); }
@@ -303,10 +322,11 @@ async function watchAt(s: number, d: number, slot: number) {
     const nav = await ensureNav(map);
     const out = simulateMatch(rep.snapshot, nav, 50);
     watching.value = { home: fx.home, away: fx.away, final: fx.score ?? null, map, season: s, day: d, slot };
+    computeBox(out);
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
-function closeWatch() { watching.value = null; viewer?.destroy(); viewer = null; }
+function closeWatch() { watching.value = null; boxScore.value = null; viewer?.destroy(); viewer = null; }
 /** A shareable deep-link to the watched replay — opening it auto-connects + plays. */
 function shareWatch() {
   if (!watching.value) return;
@@ -579,6 +599,23 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>
+        <!-- post-match box score + Player of the Match (derived from the timeline) -->
+        <div v-if="boxScore" class="lv-box">
+          <div v-for="(team, ti) in boxScore.teams" :key="ti" class="lv-boxteam">
+            <div class="lv-boxhead">
+              <i class="hq-dot" :style="{ background: `hsl(${hue(ti === 0 ? watching.home.tag : watching.away.tag)} 65% 55%)` }"></i>
+              <b>{{ ti === 0 ? watching.home.name : watching.away.name }}</b>
+              <span class="lv-boxsc">{{ watching.final?.[ti] }}</span>
+            </div>
+            <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span></div>
+            <div v-for="p in team" :key="p.handle" class="lv-boxrow" :class="{ mvp: p.mvp }">
+              <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
+              <span>{{ p.kills }}</span><span>{{ p.deaths }}</span>
+              <span :class="p.kills - p.deaths >= 0 ? 'pos' : 'neg'">{{ p.kills - p.deaths >= 0 ? '+' : '' }}{{ p.kills - p.deaths }}</span>
+              <span>{{ p.fb }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="lv-bottom">
