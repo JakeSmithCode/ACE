@@ -21,6 +21,7 @@ const rnd = (n: number) => Math.round(n);
 const chem = (p: Player) => Math.round(w.chemOf(p) * 100);   // 0..100% gelled with the squad
 const isMech = (k: keyof Attributes) => k === 'aim' || k === 'movement' || k === 'entry';
 const aceil = (p: Player, k: keyof Attributes) => scoutedAttr(p, k, true, sl(p));   // per-skill scouted ceiling (sharpens as you scout)
+const aceilR = (p: Player, k: keyof Attributes) => Math.round(aceil(p, k));         // rounded for display (ability drifts fractionally)
 // ability is fractional in-season; round both sides so a delta only shows once a
 // rounded point has actually moved (avoids ▲0 flicker from sub-point growth)
 const delta = (p: Player, k: keyof Attributes) => {
@@ -29,6 +30,10 @@ const delta = (p: Player, k: keyof Attributes) => {
 };
 const order = (p: Player) => (w.isStarter(p.id) ? 0 : 1);
 const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) || overall(b) - overall(a));
+// training focus: click a skill to direct this player's reps at it (faster there, a
+// touch slower elsewhere — a tradeoff). Click the focused skill again to clear it.
+const focusOf = (p: Player) => w.focusOf(p.id);
+const toggleFocus = (p: Player, k: keyof Attributes) => w.setFocus(p.id, focusOf(p) === k ? null : k);
 </script>
 
 <template>
@@ -56,7 +61,8 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         </button>
       </div>
       <div class="rs-attrs">
-        <div v-for="a in ATTRS" :key="a.k" class="rs-attr">
+        <div v-for="a in ATTRS" :key="a.k" class="rs-attr" :class="{ focused: focusOf(p) === a.k }"
+          @click="toggleFocus(p, a.k)" :title="focusOf(p) === a.k ? 'training focus here — click to clear' : `train ${a.label}: faster growth here, slightly slower elsewhere`">
           <div class="rs-abar">
             <i class="ghost" :class="{ mech: isMech(a.k) }" :style="{ width: aceil(p, a.k) + '%' }"></i>
             <i :class="{ mech: isMech(a.k) }" :style="{ width: p.attr[a.k] + '%' }"></i>
@@ -64,7 +70,8 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
           </div>
           <div class="rs-aval">
             <span class="rs-alabel">{{ a.label }}</span><b>{{ rnd(p.attr[a.k]) }}</b>
-            <span v-if="aceil(p, a.k) > rnd(p.attr[a.k])" class="rs-acl" :title="`scouted ceiling — this skill can grow to ~${aceil(p, a.k)} (fogged)`">↗{{ aceil(p, a.k) }}</span>
+            <span v-if="focusOf(p) === a.k" class="rs-focus" title="training focus">◎</span>
+            <span v-if="aceilR(p, a.k) > rnd(p.attr[a.k])" class="rs-acl" :title="`scouted ceiling — this skill can grow to ~${aceilR(p, a.k)} (fogged)`">↗{{ aceilR(p, a.k) }}</span>
             <span v-if="delta(p, a.k)" class="rs-delta" :class="delta(p, a.k) > 0 ? 'up' : 'dn'">{{ delta(p, a.k) > 0 ? '▲' : '▼' }}{{ Math.abs(delta(p, a.k)) }}</span>
           </div>
         </div>
@@ -80,6 +87,6 @@ const sorted = () => [...w.myRoster.value].sort((a, b) => order(a) - order(b) ||
         <button class="rs-sell" :disabled="!w.canSell(p.id)" @click="w.sellPlayer(p.id)">sell</button>
       </div>
     </div>
-    <div class="hq-compnote">Every player is on a <b>contract</b> — a wage <b>locked</b> for its term (you pay it even as he ages), counting down each season. A player in his <b>final year</b> shows <b class="rs-deal expiring">renew</b>: re-sign him at his current market wage, or he walks <b>free</b> at season's end. Potential is a <b>scouted</b> read; <b>start</b>/<b>bench</b> to override; sell to offload a deal (the buyer takes the wage).</div>
+    <div class="hq-compnote"><b>Click a skill</b> to set a <b>training focus ◎</b> — that player's reps target it (faster growth there, a touch slower elsewhere): sharpen a prospect's spike or shore up a weakness. Every player is on a <b>contract</b> — a wage <b>locked</b> for its term (you pay it even as he ages), counting down each season. A player in his <b>final year</b> shows <b class="rs-deal expiring">renew</b>: re-sign him at his current market wage, or he walks <b>free</b> at season's end. Potential is a <b>scouted</b> read; <b>start</b>/<b>bench</b> to override; sell to offload a deal (the buyer takes the wage).</div>
   </div>
 </template>

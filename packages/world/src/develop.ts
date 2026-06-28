@@ -105,15 +105,23 @@ export const SEASON_SHARE = 0.6;
 export interface DevBoost { growth: number; decline: number; ceiling: number; rust: number }
 export const NO_BOOST: DevBoost = { growth: 1, decline: 1, ceiling: 0, rust: 1 };
 
+// Training FOCUS — the manager directs a player's reps at one skill (DESIGN §8). The
+// focused attribute grows faster, the rest a touch slower, so it's a TRADEOFF (sharpen
+// the spike you want, ease the rest) not a free buff. Scales the post-draw `grow` only,
+// so the rng draw order/count is unchanged → absent focus is byte-identical.
+const FOCUS_UP = 1.7, FOCUS_DOWN = 0.82;
+
 /** One development step: grow toward potential + decline past peak, for `frac` of
- *  the annual curve, scaled by reps (`repMul`) and facility boosts. Shared by the
- *  in-season and off-season ticks so they can never drift. */
-function curveStep(p: Player, frac: number, repMul: number, rng: Rng, boost: DevBoost): Attributes {
+ *  the annual curve, scaled by reps (`repMul`) and facility boosts. An optional
+ *  training `focus` biases growth toward one skill. Shared by the in-season and
+ *  off-season ticks so they can never drift. */
+function curveStep(p: Player, frac: number, repMul: number, rng: Rng, boost: DevBoost, focus?: keyof Attributes): Attributes {
   const lr = learnRate(p.age);
   const attr = { ...p.attr };
   for (const k of ATTRS) {
     const ceil = p.potential?.[k] ?? attr[k];
-    const grow = Math.max(0, ceil - attr[k]) * lr * frac * repMul * boost.growth * rng.range(0.55, 1.25);
+    const fm = focus ? (k === focus ? FOCUS_UP : FOCUS_DOWN) : 1;   // post-draw scale → byte-identical when absent
+    const grow = Math.max(0, ceil - attr[k]) * lr * frac * repMul * boost.growth * fm * rng.range(0.55, 1.25);
     const dec = declineRate(p.age, MECH.has(k)) * frac * boost.decline * rng.range(0.6, 1.25);
     attr[k] = clamp(attr[k] + grow - dec);
   }
@@ -156,11 +164,11 @@ const REP_MUL: Record<DevContext, number> = { starter: 1, academy: 0.75, bench: 
  *  a starter and an academy prospect both get reps (grow, ceiling up); a benched
  *  senior grows far less AND rusts. The ceiling cloud resolves a slice (reps drift
  *  it, then narrow). Age is unchanged in-season (the bracket only shifts off-season). */
-export function developInSeason(p: Player, ctx: DevContext | boolean, games: number, rng: Rng, boost: DevBoost = NO_BOOST): Player {
+export function developInSeason(p: Player, ctx: DevContext | boolean, games: number, rng: Rng, boost: DevBoost = NO_BOOST, focus?: keyof Attributes): Player {
   const context: DevContext = ctx === true ? 'starter' : ctx === false ? 'bench' : ctx;
   const played = context !== 'bench';   // starter & academy both get reps and a ceiling-up bias
   const g = resolveCeiling(p, played, rng, boost.ceiling);
-  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), REP_MUL[context], rng, boost);
+  const attr = curveStep(g, SEASON_SHARE / Math.max(1, games), REP_MUL[context], rng, boost, focus);
   if (context === 'bench') for (const k of ATTRS) if (MECH.has(k)) attr[k] = clamp(attr[k] - rng.range(0.1, 0.28) * boost.rust);  // bench rust
   return { ...g, attr };
 }
@@ -168,9 +176,9 @@ export function developInSeason(p: Player, ctx: DevContext | boolean, games: num
 /** Off-season step: age +1 and the bootcamp share of the annual curve (full reps,
  *  rest + camp), plus a bootcamp slice of ceiling resolution. `frac` defaults to
  *  the WHOLE annual step. */
-export function developPlayer(p: Player, rng: Rng, frac = 1, boost: DevBoost = NO_BOOST): Player {
+export function developPlayer(p: Player, rng: Rng, frac = 1, boost: DevBoost = NO_BOOST, focus?: keyof Attributes): Player {
   const g = resolveCeiling(p, true, rng, boost.ceiling);   // bootcamp reps resolve a ceiling slice
-  return { ...g, age: g.age + 1, attr: curveStep(g, frac, 1, rng, boost) };
+  return { ...g, age: g.age + 1, attr: curveStep(g, frac, 1, rng, boost, focus) };
 }
 
 export const developSquad = (team: Team, rng: Rng): Team =>

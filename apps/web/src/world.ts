@@ -115,6 +115,15 @@ const marketWave = ref<{ handle: string; overall: number; role: string }[]>([]);
 // gem's value, so you can flip a prospect you don't need.
 const scouted = ref<Map<string, number>>(new Map());
 const scoutLevelOf = (id: string) => scouted.value.get(id) ?? 0;
+// training focus: a chosen skill the manager directs a player's reps at (faster in that
+// skill, slightly slower elsewhere — a tradeoff). Keyed by player id; absent = balanced.
+const focuses = ref<Map<string, keyof Attributes>>(new Map());
+const focusOf = (id: string): keyof Attributes | undefined => focuses.value.get(id);
+function setFocus(id: string, attr: keyof Attributes | null) {
+  const m = new Map(focuses.value);
+  if (attr) m.set(id, attr); else m.delete(id);
+  focuses.value = m;
+}
 
 // contract helpers for the UI: what you PAY a player (locked wage), what he'd
 // DEMAND to re-sign (current market), and his deal's years left
@@ -355,7 +364,7 @@ function resolveDay() {
   // develop + gel: a player on the roster builds chemistry (~+1 tenure/season,
   // spread across match-days) so a new signing gels into the five over time
   myRoster.value = myRoster.value.map(p => {
-    const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, boost);
+    const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, boost, focusOf(p.id));
     return { ...d, tenure: (d.tenure ?? 0) + 1 / total.value };
   });
   // your academy prospects develop on the reps path (academy circuit: grow, no rust)
@@ -423,7 +432,7 @@ function advanceSeason() {
   clubs.value = clubs.value.map((c, i) => i === myClub.value ? c
     : { ...c, team: { ...c.team, players: c.team.players.map(p => ({ ...p, tenure: (p.tenure ?? 0) + 1 })) } });
   const myBoost = facilityBoost(facilities.value);
-  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost));  // bootcamp share + HQ boost
+  myRoster.value = myRoster.value.map(p => developPlayer(p, rng, 1 - SEASON_SHARE, myBoost, focusOf(p.id)));  // bootcamp share + HQ boost
   // prospects age + get the bootcamp slice too (separate rng, order-independent)
   if (academy.value.prospects.length) {
     const ar = new Rng((seasonSeed.value ^ (season.value * 0x9e3779b9) ^ 0xACAD) >>> 0);
@@ -847,6 +856,7 @@ function snapshot() {
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
+    focuses: [...focuses.value.entries()],
   };
 }
 function save() {
@@ -871,6 +881,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   scouted.value = new Map(o.scouted ?? []);
   prevById.value = new Map(o.prevById);
   objectiveOutcome.value = (o as { objectiveOutcome?: typeof objectiveOutcome.value }).objectiveOutcome ?? null;
+  focuses.value = new Map((o as { focuses?: [string, keyof Attributes][] }).focuses ?? []);
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -886,7 +897,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, retirements, contractDepartures, marketWave, scouted, focuses],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -903,7 +914,7 @@ export function useWorld() {
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
-    scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX,
+    scoutLevelOf, scoutCost, canScout, scoutPlayer, SCOUT_MAX, focusOf, setFocus,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

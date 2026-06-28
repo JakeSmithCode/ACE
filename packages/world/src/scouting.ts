@@ -48,7 +48,7 @@ export const scoutedStars = (p: Player, owned = false, scoutLevel = 0): number =
  *  a lump: the spiky prospect (one elite ceiling, one capped) becomes legible, and
  *  role-fit is a real read. Never below the current value (you see what a skill IS). */
 export function scoutedAttr(p: Player, attr: keyof Attributes, owned = false, scoutLevel = 0): number {
-  const cur = p.attr[attr];
+  const cur = Math.round(p.attr[attr]);   // ability is fractional in-season — round the floor so the ceiling never reads fractional
   const truePot = p.potential?.[attr] ?? cur;
   const band = (1 - scoutConfidence(p, owned, scoutLevel)) * 20;
   return clamp(Math.round(truePot + noise(`${p.id}:${attr}`) * band), cur, 99);
