@@ -127,6 +127,43 @@ async function sell(sp: SquadPlayer) {
   } catch (e) { msg((e as Error).message); } finally { marketBusy.value = false; }
 }
 
+// --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
+const academyOpen = ref(false);
+const acadBusy = ref(false);
+const acadMsg = ref('');
+function toggleAcademy() { academyOpen.value = !academyOpen.value; }
+const academy = computed(() => myClub.value?.academy ?? null);
+async function upgradeAcademy() {
+  if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
+  try {
+    const r = await server.value.upgradeAcademy(token.value);
+    acadMsg.value = r.error ? r.error : `✓ youth wing → level ${r.level}`;
+    await refreshMe();
+  } catch (e) { acadMsg.value = (e as Error).message; } finally { acadBusy.value = false; }
+}
+async function promoteProspect(p: { id: string; handle: string }) {
+  if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
+  try {
+    const r = await server.value.promoteProspect(p.id, token.value);
+    acadMsg.value = r.ok ? `✓ ${p.handle} graduated to the senior squad` : (r.error ?? 'rejected');
+    await refreshMe();
+  } catch (e) { acadMsg.value = (e as Error).message; } finally { acadBusy.value = false; }
+}
+async function cutProspect(p: { id: string; handle: string }) {
+  if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
+  try { await server.value.cutProspect(p.id, token.value); acadMsg.value = `cut ${p.handle}`; await refreshMe(); }
+  catch (e) { acadMsg.value = (e as Error).message; } finally { acadBusy.value = false; }
+}
+async function scoutProspect(p: { id: string; handle: string }) {
+  if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
+  try {
+    const r = await server.value.scoutProspect(p.id, token.value);
+    acadMsg.value = r.ok ? `✓ ${p.handle} scouted — ceil ${r.ceiling[0]}–${r.ceiling[1]} (−${kfmt(r.cost!)})`
+      : (r.reason === 'insufficient funds' ? `need ${kfmt(r.cost!)} to scout` : (r.reason ?? 'rejected'));
+    await refreshMe();
+  } catch (e) { acadMsg.value = (e as Error).message; } finally { acadBusy.value = false; }
+}
+
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
 // the score to display: the running (completed-round) tally while live, but the TRUE
 // final once revealed (the live running-score excludes the in-progress decider round)
@@ -262,6 +299,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
           <button class="lv-planbtn" :class="{ on: planOpen }" @click="planOpen = !planOpen">✎ tactics</button>
           <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
+          <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <button class="lv-signout" @click="signOut">sign out</button>
         </template>
@@ -355,6 +393,43 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- the academy — your homegrown youth pipeline (build → intake → develop → graduate) -->
+      <div v-if="myClub && academyOpen && academy" class="lv-mktpanel acad">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Academy · level {{ academy.level }}<span class="lv-acadpips"><i v-for="n in academy.max" :key="n" :class="{ on: n <= academy.level }">▮</i></span></span>
+          <span class="lv-mktsub">homegrown prospects — raw but a wide ceiling cloud. Develop them across seasons, then graduate the hits <b>for free</b>.</span>
+          <button v-if="academy.cost != null" class="lv-go sm" :disabled="acadBusy || !academy.canUpgrade" :title="academy.canUpgrade ? '' : 'not enough in the bank'" @click="upgradeAcademy">
+            {{ academy.level === 0 ? 'build wing' : 'expand' }} · {{ kfmt(academy.cost) }}
+          </button>
+          <span v-else class="lv-acadmax">✦ fully built</span>
+        </div>
+        <div class="lv-acadmeta">
+          <span>next intake: <b>{{ academy.intakeNext }}</b> prospect{{ academy.intakeNext === 1 ? '' : 's' }}/season</span>
+          <span v-if="academy.upkeep">upkeep <b>{{ kfmt(academy.upkeep) }}</b>/season</span>
+          <span v-if="academy.wageBill">wages <b>{{ kfmt(academy.wageBill) }}</b>/season</span>
+          <span v-if="acadMsg" class="lv-wire" :class="{ ok: acadMsg.startsWith('✓') }">{{ acadMsg }}</span>
+        </div>
+        <div class="lv-mktboard">
+          <div v-for="p in academy.prospects" :key="p.id" class="lv-mktrow prospect">
+            <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
+            <b class="lv-mkthandle">{{ p.handle }}<i class="lv-prospect">YTH</i></b>
+            <span class="lv-mktage">age {{ p.age }}</span>
+            <span class="lv-mktovr">{{ p.overall }} <i>OVR</i></span>
+            <span class="lv-roomcell" :title="`scouted ceiling ${p.ceiling[0]}–${p.ceiling[1]} · ${p.room} OVR of upside`">
+              <span class="lv-mktceil" :class="{ wide: p.ceiling[1] - p.ceiling[0] >= 8 }">↗ {{ p.ceiling[0] }}–{{ p.ceiling[1] }}</span>
+              <span class="lv-room" :class="{ grow: p.room >= 8 }">+{{ p.room }}</span>
+              <span class="lv-scoutpips"><i v-for="n in 3" :key="n" :class="{ on: n <= p.scoutLevel }">•</i></span>
+            </span>
+            <span class="lv-acadacts">
+              <button v-if="p.scoutLevel < 3" class="lv-scoutbtn" :disabled="acadBusy" @click="scoutProspect(p)">scout</button>
+              <button class="lv-go sm" :disabled="acadBusy" title="graduate to the senior squad — no fee" @click="promoteProspect(p)">promote</button>
+              <button class="lv-sellbtn cut" :disabled="acadBusy" @click="cutProspect(p)">cut</button>
+            </span>
+          </div>
+          <div v-if="!academy.prospects.length" class="lv-empty">{{ academy.level === 0 ? 'build the wing to start taking intakes' : 'next intake arrives when the season rolls over' }}</div>
         </div>
       </div>
 

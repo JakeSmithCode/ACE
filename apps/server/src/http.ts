@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -75,6 +75,26 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // Knowledge is the owner's session state; only the money it costs is world state.
   const scoutReports = new Map<string, Map<string, number>>();
   const scoutLevelOf = (account: string | null, handle: string) => (account && scoutReports.get(account)?.get(handle)) || 0;
+  const addReport = (account: string, handle: string, level: number) => {
+    const r = scoutReports.get(account) ?? new Map<string, number>();
+    r.set(handle, level); scoutReports.set(account, r);
+  };
+  // the academy: each owner's homegrown youth pipeline (account → Academy). Knowledge
+  // + prospects are the owner's state; the money (upgrade, upkeep) hits the club balance.
+  const academies = new Map<string, Academy>();
+  const acadOf = (account: string) => academies.get(account) ?? defaultAcademy();
+  // every handle in the world that an intake must avoid (engine assumes unique handles):
+  // every rostered player, every academy prospect, AND the cached free-agent board (a
+  // promoted prospect must never collide with a signable free agent).
+  const allHandles = (w: WorldState): Set<string> => {
+    const s = new Set<string>();
+    for (const c of w.clubs) for (const p of c.roster) s.add(p.handle);
+    for (const a of academies.values()) for (const p of a.prospects) s.add(p.handle);
+    if (board) for (const p of board) s.add(p.handle);
+    return s;
+  };
+  // a stable per-account salt so each owner's prospect development draws its own stream
+  const acadSalt = (account: string) => { let h = 2166136261 >>> 0; for (let i = 0; i < account.length; i++) h = Math.imul(h ^ account.charCodeAt(i), 16777619) >>> 0; return h >>> 0; };
   // the legacy engine (DESIGN §9.2): the world remembers its champions, season by season
   const honors: { season: number; champion: string }[] = [];
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
@@ -110,11 +130,27 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (signings.length) { await store.saveWorld(id, nw); signings.forEach(s => sold.add(s.handle)); }
       return signings.length;
     };
+    // each owner's academy ticks at the season boundary: a full season of prospect
+    // development (reps + bootcamp + age), then the new season's intake class arrives.
+    const tickAcademies = async (newSeason: number) => {
+      if (!academies.size) return;
+      await getBoard();   // the intake must exclude FA-board handles too
+      for (const [acct, a] of academies) {
+        const c = await myClub(store, id, acct);
+        if (!c) continue;
+        const dev = developAcademy((await store.loadWorld(id))!, c.id, a, newSeason, acadSalt(acct));
+        let acad = dev.academy;
+        acad = takeIntake(((dev.world.seed ^ 0x5f356495) >>> 0), newSeason, acad, allHandles(dev.world));
+        academies.set(acct, acad);
+        await store.saveWorld(id, dev.world);
+      }
+    };
     const w = (await store.loadWorld(id))!;
     if (w.day < seasonLength(w)) { await tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: await churnMarket() }; }
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
     if (roll.champion) honors.push({ season: roll.season, champion: roll.champion });   // remember the champion
+    await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
     await tickDay((await store.loadWorld(id))!);
     return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
   };
@@ -290,12 +326,76 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       }));
       return json(res, 200, { tier, group, matchdays });
     }
-    // GET /me  → the club this account owns (x-account)
+    // GET /me  → the club this account owns (+ its academy: the youth pipeline)
     if (path[0] === 'me' && path.length === 1) {
       if (!account) return json(res, 401, { error: 'no account' });
       const c = await myClub(store, id, account);
       const wm = (await store.loadWorld(id))!;
-      return json(res, 200, c ? { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c) } : null);
+      if (!c) return json(res, 200, null);
+      const academy = academyView(acadOf(account), c.balance, h => scoutLevelOf(account, h));
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy });
+    }
+    // POST /academy/upgrade  → build/expand the youth wing (charges the club balance);
+    // a freshly-built academy delivers its first intake immediately.
+    if (path[0] === 'academy' && path[1] === 'upgrade' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const w = (await store.loadWorld(id))!;
+      try {
+        await getBoard();   // materialize the FA board so the intake excludes its handles
+        const up = upgradeAcademy(w, mine.id, acadOf(account));
+        let acad = up.academy;
+        acad = takeIntake(((w.seed ^ 0x5f356495) >>> 0), w.season, acad, allHandles(up.world));   // first class arrives
+        academies.set(account, acad);
+        await store.saveWorld(id, up.world);
+        const after = (await store.loadWorld(id))!;
+        return json(res, 200, academyView(acad, after.clubs.find(c => c.id === mine.id)!.balance, h => scoutLevelOf(account, h)));
+      } catch (e) { return json(res, 200, { error: (e as Error).message }); }
+    }
+    // POST /academy/promote  → graduate a prospect into the senior roster (no fee)
+    if (path[0] === 'academy' && path[1] === 'promote' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { ref?: string };
+      const w = (await store.loadWorld(id))!;
+      try {
+        const g = graduateProspect(w, mine.id, acadOf(account), w.patch, b.ref ?? '');
+        academies.set(account, g.academy);
+        await store.saveWorld(id, g.world);
+        const after = (await store.loadWorld(id))!;
+        const c = after.clubs.find(x => x.id === mine.id)!;
+        return json(res, 200, { ok: true, academy: academyView(g.academy, c.balance, h => scoutLevelOf(account, h)), squad: squadView(after, c) });
+      } catch (e) { return json(res, 200, { ok: false, error: (e as Error).message }); }
+    }
+    // POST /academy/cut  → release a prospect you've given up on
+    if (path[0] === 'academy' && path[1] === 'cut' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { ref?: string };
+      academies.set(account, cutProspect(acadOf(account), b.ref ?? ''));
+      const w = (await store.loadWorld(id))!;
+      return json(res, 200, academyView(acadOf(account), w.clubs.find(c => c.id === mine.id)!.balance, h => scoutLevelOf(account, h)));
+    }
+    // POST /academy/scout  → commission a report on one of YOUR prospects (owned →
+    // a tighter read, the residual is real plasticity). Reuses the scout machinery.
+    if (path[0] === 'academy' && path[1] === 'scout' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { ref?: string };
+      const p = acadOf(account).prospects.find(x => x.id === b.ref || x.handle === b.ref);
+      if (!p) return json(res, 404, { error: 'not in your academy' });
+      const level = scoutLevelOf(account, p.handle);
+      if (level >= SCOUT_MAX) return json(res, 200, { ok: false, reason: 'fully scouted', level, ceiling: scoutedRange(p, true, level) });
+      const cost = scoutCost(level);
+      if (cost > mine.balance) return json(res, 200, { ok: false, reason: 'insufficient funds', cost, level, ceiling: scoutedRange(p, true, level) });
+      await store.saveWorld(id, chargeScout((await store.loadWorld(id))!, mine.id, cost));
+      addReport(account, p.handle, level + 1);
+      const after = (await store.loadWorld(id))!;
+      return json(res, 200, { ok: true, level: level + 1, cost, ceiling: scoutedRange(p, true, level + 1), nextCost: level + 1 < SCOUT_MAX ? scoutCost(level + 1) : null, balance: after.clubs.find(c => c.id === mine.id)!.balance });
     }
     // POST /clubs/:id/claim  → take over an AI club (x-account)
     if (path[0] === 'clubs' && path.length === 3 && path[2] === 'claim' && req.method === 'POST') {

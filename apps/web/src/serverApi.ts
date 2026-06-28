@@ -24,7 +24,9 @@ export interface SquadPlayer { id: string; handle: string; role: string; age: nu
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[] }
+export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number }
+export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -94,6 +96,17 @@ export class AceServer {
   /** Commission a paid scouting report on a board free agent — charges your club and
    *  tightens the ceiling band for your eyes (private knowledge, the price stays fogged). */
   scout(handle: string, token: string): Promise<ScoutResult> { return this.post('/market/scout', { handle }, token); }
+
+  // ── the academy (the homegrown youth pipeline) ──
+  /** Build/expand the youth wing — charges your club; a fresh academy delivers its
+   *  first intake of teenage prospects immediately. Returns the updated academy view. */
+  upgradeAcademy(token: string): Promise<AcademyView & { error?: string }> { return this.post('/academy/upgrade', {}, token); }
+  /** Graduate a prospect into your senior roster — no transfer fee. */
+  promoteProspect(ref: string, token: string): Promise<{ ok: boolean; error?: string; academy?: AcademyView; squad?: SquadPlayer[] }> { return this.post('/academy/promote', { ref }, token); }
+  /** Cut a prospect you've given up on. */
+  cutProspect(ref: string, token: string): Promise<AcademyView> { return this.post('/academy/cut', { ref }, token); }
+  /** Commission a scouting report on one of your prospects (owned → a tighter read). */
+  scoutProspect(ref: string, token: string): Promise<ScoutResult> { return this.post('/academy/scout', { ref }, token); }
   /** Advance the season a match-day (owner action — the scheduler does this in prod).
    *  At the season boundary it rolls over: `rollover` + the new `season` + `champion`. */
   advance(token: string): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number }> { return this.post('/advance', {}, token); }
