@@ -308,6 +308,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <b class="lv-mkthandle">{{ e.handle }}</b>
             <span class="lv-mktage">age {{ e.age }}</span>
             <span class="lv-mktovr">{{ e.overall }} <i>OVR</i></span>
+            <span class="lv-mktceil" :class="{ wide: e.ceiling[1] - e.ceiling[0] >= 8 }" :title="`scouted potential ceiling (fogged) — wider band = more upside but more risk`">↗ {{ e.ceiling[0] }}–{{ e.ceiling[1] }}</span>
             <span class="lv-mktval">{{ kfmt(e.value) }}<i v-if="e.contested" class="lv-hot" title="contested by AI clubs">🔥</i></span>
             <input type="number" class="lv-mktbid" v-model.number="bidAmt[e.handle]" step="500" min="0" />
             <button class="lv-go sm" :disabled="marketBusy" @click="bid(e)">bid</button>

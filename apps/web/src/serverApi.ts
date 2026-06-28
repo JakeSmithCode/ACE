@@ -17,7 +17,7 @@ export interface LiveFixture {
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean }
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number] }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
 export interface SquadPlayer { id: string; handle: string; role: string; overall: number; value: number; starter: boolean }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }

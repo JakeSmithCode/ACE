@@ -10,6 +10,7 @@ import type { Player } from '@ace/shared';
 import { freeAgents, playerValue } from './market.js';
 import { topRivalBid, aiWantsToBuy } from './transfers.js';
 import { overall } from './develop.js';
+import { scoutedRange } from './scouting.js';
 import { clubTeam, startingFive, validFive, type WorldState, type WorldClub } from './state.js';
 
 /** The free-agent board for a world — deterministic per (seed, season), with handles
@@ -59,10 +60,14 @@ export function applySigning(w: WorldState, clubId: string, player: Player, cost
   return { ...w, clubs: w.clubs.map((x, j) => (j === i ? club : x)) };
 }
 
-/** A compact board entry for the wire — what the market UI renders. */
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean }
+/** A compact board entry for the wire — what the market UI renders. `ceiling` is the
+ *  **scouted potential band** (the gamble, DESIGN §4.1): the market-consensus fogged
+ *  ceiling — wide for a young/unresolved prospect (high upside, murky), tight for a
+ *  settled veteran. The price already reflects the consensus, so the band is exactly
+ *  the bet you're taking on top of it. */
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number] }
 export function marketEntry(w: WorldState, p: Player): MarketEntry {
-  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p) };
+  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p), ceiling: scoutedRange(p, false, 0) };
 }
 
 /** The richest AI club (not the seller) that genuinely wants `player` as an upgrade
