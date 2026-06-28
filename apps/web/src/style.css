@@ -1054,5 +1054,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-mailmeta b{font-size:13px}
 .lv-mailsubj{color:var(--muted-2);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lv-mailtext{color:var(--text);line-height:1.35;white-space:pre-wrap;word-break:break-word}
+/* live league chat */
+.lv-chatpanel{right:28px;height:60vh}
+.lv-chatlive{font-size:9px;font-style:normal;color:#5fd38a;margin-left:8px;letter-spacing:.05em}
+.lv-chatlog{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.lv-chatmsg{font-size:12.5px;line-height:1.35;word-break:break-word}
+.lv-chatfrom{font-family:var(--label);font-size:10px;font-weight:700;margin-right:7px;letter-spacing:.03em}
+.lv-chattext{color:var(--text)}
+.lv-chatmsg.me{text-align:right}
+.lv-chatmsg.me .lv-chatfrom{order:2;margin-right:0;margin-left:7px}
+.lv-chatsend{display:flex;gap:8px;padding:9px 10px;border-top:1px solid var(--line)}
+.lv-chatsend .lv-mailin{flex:1}
 .lv-newsitem.season{color:var(--muted-2)}
 .lv-newsage{font-style:normal;font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7}

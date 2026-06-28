@@ -39,6 +39,7 @@ export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; 
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 export interface MailMsg { id: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
+export interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -99,6 +100,18 @@ export class AceServer {
   sendMail(token: string, toTag: string, subject: string, body: string): Promise<{ ok: boolean; error?: string }> { return this.post('/mail/send', { toTag, subject, body }, token); }
   /** Mark one mail (by id) or all read. */
   markMailRead(token: string, id?: number): Promise<{ ok: boolean; unread: number }> { return this.post('/mail/read', id == null ? {} : { id }, token); }
+
+  // ── live league chat (real-time, SSE) ──
+  /** Subscribe to the live league chat — `onBacklog` fires once with recent history,
+   *  `onMessage` fires for each new message. Returns an unsubscribe fn. */
+  chatStream(onBacklog: (msgs: ChatMsg[]) => void, onMessage: (m: ChatMsg) => void): () => void {
+    const es = new EventSource(`${this.base}/chat/stream`);
+    es.addEventListener('backlog', e => { try { onBacklog(JSON.parse((e as MessageEvent).data) as ChatMsg[]); } catch { /* ignore */ } });
+    es.onmessage = e => { try { onMessage(JSON.parse(e.data) as ChatMsg); } catch { /* keepalive */ } };
+    return () => es.close();
+  }
+  /** Post a message to the league channel. */
+  sendChat(token: string, text: string): Promise<{ ok: boolean; error?: string }> { return this.post('/chat/send', { text }, token); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

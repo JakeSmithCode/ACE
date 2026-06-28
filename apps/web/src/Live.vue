@@ -328,6 +328,24 @@ async function sendMail() {
   } catch (e) { mailMsg.value = (e as Error).message; }
 }
 
+// live league chat (real-time SSE) — subscribe while the panel is open
+const chatMsgs = ref<import('./serverApi').ChatMsg[]>([]);
+const chatOpen = ref(false);
+const chatInput = ref('');
+let chatStop: (() => void) | null = null;
+function toggleChat() {
+  chatOpen.value = !chatOpen.value;
+  if (chatOpen.value && server.value) {
+    chatStop?.();
+    chatStop = server.value.chatStream(msgs => (chatMsgs.value = msgs), m => (chatMsgs.value = [...chatMsgs.value, m].slice(-120)));
+  } else { chatStop?.(); chatStop = null; }
+}
+async function sendChat() {
+  if (!server.value || !token.value || !chatInput.value.trim()) return;
+  const t = chatInput.value; chatInput.value = '';
+  try { await server.value.sendChat(token.value, t); } catch { chatInput.value = t; }
+}
+
 // the world's best players — a cross-club prestige board (who's the best, and where)
 const leaders = ref<LeaderRow[]>([]);
 const leaderRole = ref<string>('');
@@ -415,7 +433,7 @@ async function openClub(slug: string) {
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 
 onMounted(connect);
-onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); viewer?.destroy(); });
+onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); viewer?.destroy(); });
 </script>
 
 <template>
@@ -459,6 +477,25 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: mailOpen }" @click="toggleMail" title="mail">✉<span v-if="mailUnread" class="lv-bellbadge">{{ mailUnread > 9 ? '9+' : mailUnread }}</span></button>
           </div>
+          <div class="lv-bellwrap">
+            <button class="lv-bell" :class="{ on: chatOpen }" @click="toggleChat" title="league chat">💬</button>
+          </div>
+          <Teleport to="body">
+            <div v-if="chatOpen" class="lv-notifpanel lv-chatpanel">
+              <div class="lv-notifhead"><span class="lv-kicker">League chat <i class="lv-chatlive">● live</i></span><button class="lv-notifx" @click="toggleChat">✕</button></div>
+              <div class="lv-chatlog">
+                <div v-for="m in chatMsgs" :key="m.id" class="lv-chatmsg" :class="{ me: myClub && m.fromTag === myClub.tag }">
+                  <span class="lv-chatfrom" :style="{ color: `hsl(${hue(m.fromTag)} 60% 62%)` }">{{ m.fromTag }}</span>
+                  <span class="lv-chattext">{{ m.text }}</span>
+                </div>
+                <div v-if="!chatMsgs.length" class="lv-empty">no messages yet — say hello 👋</div>
+              </div>
+              <div class="lv-chatsend">
+                <input v-model="chatInput" class="lv-mailin" placeholder="message the league…" maxlength="300" @keyup.enter="sendChat" />
+                <button class="lv-go sm" :disabled="!chatInput.trim()" @click="sendChat">send</button>
+              </div>
+            </div>
+          </Teleport>
           <Teleport to="body">
             <div v-if="mailOpen" class="lv-notifpanel lv-mailpanel">
               <div class="lv-notifhead"><span class="lv-kicker">Mail</span><button class="lv-notifx" @click="mailOpen = false">✕</button></div>

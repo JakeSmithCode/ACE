@@ -146,6 +146,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   interface MailMsg { id: number; fromAccount: string; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; at: number }
   const mailboxes = new Map<string, MailMsg[]>();
   let mailSeq = 0;
+  // live league chat — a real-time channel for online owners (SSE fan-out). A bounded
+  // backlog + a set of connected streams that every new message is pushed to.
+  interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
+  const chatLog: ChatMsg[] = [];
+  let chatSeq = 0;
+  const chatSubs = new Set<ServerResponse>();
+  const chatBroadcast = (m: ChatMsg) => { const data = `data: ${JSON.stringify(m)}\n\n`; for (const r of chatSubs) { try { r.write(data); } catch { chatSubs.delete(r); } } };
   const ord = (n: number) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
   const tierName = (t: number) => RANK_TIERS[t] ?? `Tier ${t + 1}`;
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
@@ -482,6 +489,28 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const b = (await readBody(req)) as { id?: number };
       mailboxes.set(account, (mailboxes.get(account) ?? []).map(m => (b.id == null || m.id === b.id ? { ...m, read: true } : m)));
       return json(res, 200, { ok: true, unread: (mailboxes.get(account) ?? []).filter(m => !m.read).length });
+    }
+    // GET /chat/stream  → SSE: the live league chat (backlog event, then each new message)
+    if (path[0] === 'chat' && path[1] === 'stream') {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'access-control-allow-origin': '*' });
+      res.write(`event: backlog\ndata: ${JSON.stringify(chatLog.slice(-60))}\n\n`);
+      chatSubs.add(res);
+      req.on('close', () => chatSubs.delete(res));
+      return;
+    }
+    // POST /chat/send  → post a message to the league channel (broadcast to all streams)
+    if (path[0] === 'chat' && path[1] === 'send' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { text?: string };
+      const text = (b.text ?? '').trim().slice(0, 300);
+      if (!text) return json(res, 400, { error: 'empty message' });
+      const m: ChatMsg = { id: ++chatSeq, fromTag: mine.tag, fromName: mine.name, text, at: clock() };
+      chatLog.push(m);
+      if (chatLog.length > 200) chatLog.shift();
+      chatBroadcast(m);
+      return json(res, 200, { ok: true });
     }
     // GET /news  → the world news feed (transfers + champions, newest first)
     if (path[0] === 'news' && path.length === 1) {
