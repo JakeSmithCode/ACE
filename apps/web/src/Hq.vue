@@ -51,6 +51,8 @@ const wave = computed(() => w.marketWave.value);
 const headliner = computed(() => wave.value[0]);
 // the most notable injury from the last match-day (a roster event to manage)
 const injury = computed(() => w.lastInjury.value);
+// a derby result from the last match-day (vs your rival)
+const derby = computed(() => w.lastDerby.value);
 // team talk: pick a tone before the next match — the right one reads the room
 const talkTones = ['calm', 'rally', 'demand'] as const;
 const readLabel = (f: string) => f === 'great' ? '✓ reads the room' : f === 'poor' ? '✗ wrong tone' : '~ a safe call';
@@ -204,6 +206,11 @@ onUnmounted(() => { viewer?.destroy(); });
       </span>
       <span class="hq-retleague">a strained club can't keep its earners — grab them in the Market</span>
     </div>
+    <!-- derby result — you just played your rival -->
+    <div v-if="derby && dayIdx < total" class="hq-retbanner derby" :class="{ won: derby.won }">
+      <span class="hq-reth">⚔ Derby {{ derby.won ? 'won' : 'lost' }}</span>
+      <span class="hq-retmine"><span class="hq-retbye">{{ derby.won ? `bragging rights over ${derby.opp} — the squad's buzzing` : `${derby.opp} take the bragging rights — the room's flat` }}</span></span>
+    </div>
     <!-- injury — a player picked one up last match-day (rotate depth in) -->
     <div v-if="injury && dayIdx < total" class="hq-retbanner injury">
       <span class="hq-reth">⚕ Injury</span>
@@ -290,6 +297,10 @@ onUnmounted(() => { viewer?.destroy(); });
                 <span v-if="myStanding">· {{ myStanding.won }}W {{ myStanding.lost }}L · {{ myStanding.diff >= 0 ? '+' : '' }}{{ myStanding.diff }} diff</span>
               </div>
               <div class="hq-strbar"><i :style="{ width: (club(myClub).strength * 100) + '%' }"></i><span>strength {{ club(myClub).strength.toFixed(2) }}</span></div>
+              <div v-if="w.rivalId.value != null" class="hq-rival" :title="`your fiercest rival (nearest you in strength) — a derby carries extra morale stakes`">
+                ⚔ Rival <b class="hq-rivaltag">{{ tagOf(w.rivalId.value) }}</b> {{ nameOf(w.rivalId.value) }}
+                <span class="hq-h2h">H2H {{ w.derbyRecord.value.w }}–{{ w.derbyRecord.value.l }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -332,8 +343,8 @@ onUnmounted(() => { viewer?.destroy(); });
         <!-- fixtures -->
         <div class="hq-panel hq-fixtures">
           <h3><span class="b"></span>Your fixtures</h3>
-          <div v-if="nextFixture" class="hq-next">
-            <span class="hq-nextlbl">NEXT</span>
+          <div v-if="nextFixture" class="hq-next" :class="{ derby: w.nextIsDerby.value }">
+            <span class="hq-nextlbl">{{ w.nextIsDerby.value ? '⚔ DERBY' : 'NEXT' }}</span>
             <span class="hq-vs">{{ nextFixture.home === myClub ? 'vs' : '@' }} <b>{{ tagOf(oppOf(nextFixture)) }}</b> {{ nameOf(oppOf(nextFixture)) }}</span>
             <button class="hq-go sm" @click="w.resolveDay()">play ▶</button>
           </div>

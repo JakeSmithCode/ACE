@@ -733,6 +733,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-retbanner.wave .hq-reth{color:var(--brand)}
 .hq-retbanner.injury{border-left-color:var(--def)}
 .hq-retbanner.injury .hq-reth{color:var(--def)}
+.hq-retbanner.derby{border-left-color:var(--def)}
+.hq-retbanner.derby .hq-reth{color:var(--def)}
+.hq-retbanner.derby.won{border-left-color:var(--win)}
+.hq-retbanner.derby.won .hq-reth{color:var(--win)}
+/* rivalry line on the club card */
+.hq-rival{margin-top:8px;font-family:var(--label);font-size:11px;letter-spacing:.02em;color:var(--muted);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.hq-rivaltag{color:var(--def);font-family:var(--display);font-size:14px;letter-spacing:.02em}
+.hq-h2h{margin-left:auto;font-size:10px;color:var(--muted-2);font-variant-numeric:tabular-nums;background:#0b1520;border:1px solid var(--line);padding:2px 7px}
+/* derby flag on the next fixture */
+.hq-next.derby{border:1px solid rgba(255,92,110,.4);background:rgba(255,92,110,.06)}
+.hq-next.derby .hq-nextlbl{background:var(--def);color:var(--bg)}
 
 /* ── Match Center (async-PvP client) ─────────────────────────────────────── */
 .ace-nav .nav-live{display:inline-block;margin-left:7px;font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--live);border:1px solid rgba(255,70,85,.5);padding:1px 4px;vertical-align:middle;animation:lv-pulse 1.8s ease-in-out infinite}

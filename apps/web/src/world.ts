@@ -192,6 +192,25 @@ function talkFit(tone: Talk): { fit: 'great' | 'ok' | 'poor'; edge: number; mood
 const talkPreview = computed(() => teamTalk.value ? talkFit(teamTalk.value) : null);
 const talkFactor = () => (teamTalk.value ? 1 + talkFit(teamTalk.value).edge : 1);   // team-wide one-match edge
 function setTalk(t: Talk | null) { teamTalk.value = teamTalk.value === t ? null : t; }
+
+// ── Rivalries / derbies (the league feels alive) ─────────────────────────────────────
+// Your RIVAL is the club nearest your strength in your starting division — your closest
+// competitor, fixed for the career (the derby spans the leagues even if one of you moves).
+// A derby carries extra MORALE stakes (a win lifts the room more, a loss stings harder)
+// and a head-to-head record builds over the seasons. Pure store state, engine-invisible.
+const rivalId = ref<number | null>(null);
+const derbyRecord = ref<{ w: number; l: number }>({ w: 0, l: 0 });
+const lastDerby = ref<{ won: boolean; opp: string } | null>(null);     // for a banner
+/** The nearest-strength club in your division — your natural rival (chosen once, persisted). */
+function pickRival(): number | null {
+  const d = division.value[myClub.value], me = clubs.value[myClub.value].strength;
+  const peers = clubs.value.map((c, i) => ({ i, s: c.strength })).filter(m => m.i !== myClub.value && division.value[m.i] === d);
+  if (!peers.length) return null;
+  peers.sort((a, b) => Math.abs(a.s - me) - Math.abs(b.s - me) || a.i - b.i);
+  return peers[0].i;
+}
+const ensureRival = () => { if (rivalId.value == null) rivalId.value = pickRival(); };
+const isRival = (i: number) => rivalId.value != null && i === rivalId.value;
 /** Post-match: heal existing injuries a day, fatigue the five who played + recover the
  *  rest, and roll new injuries (risk scales with the fatigue they played at). Seeded so
  *  a replayed match-day is identical; never touches the world/engine stream. */
@@ -224,13 +243,15 @@ function updateFitness(fielded: Set<string>, rng: Rng) {
 /** Post-match mood drift: the result lifts/drops the whole squad, minutes reward starters
  *  and frustrate the benched, an injury stings, the psychologist lifts everyone — then the
  *  one-shot team-talk nudge is folded in and the talk is cleared. No rng (pure drift). */
-function updateMorale(fielded: Set<string>, won: boolean | null) {
+function updateMorale(fielded: Set<string>, won: boolean | null, derby = false) {
   const talkMood = teamTalk.value ? talkFit(teamTalk.value).mood : 0;
   const psych = staffEff.value.morale;
+  const derbySwing = derby ? (won ? 5 : won === false ? -5 : 0) : 0;   // a derby win/loss hits harder
   const next = new Map(morale.value);
   for (const p of myRoster.value) {
     let m = next.get(p.id) ?? MORALE_BASE;
     m += won === true ? 6 : won === false ? -5 : 0;              // the result moves the room
+    m += derbySwing;                                            // a derby is worth more either way
     m += fielded.has(p.id) ? 1.5 : -2.5;                         // minutes: starters happy, reserves restless
     if (isInjured(p.id)) m -= 3;                                 // being hurt stings
     m += psych + talkMood + (MORALE_BASE - m) * 0.06;            // psych lift + team talk + slow mean-reversion
@@ -434,6 +455,8 @@ const nextOpponent = computed(() => {
   const fx = nextFixture.value ?? mySchedule.value[0].find(f => f.home === myClub.value || f.away === myClub.value)!;
   return fx.home === myClub.value ? fx.away : fx.home;
 });
+// is your next match a derby (vs your rival)?
+const nextIsDerby = computed(() => nextFixture.value != null && isRival(nextOpponent.value));
 // the always-open board: free agents + every AI club's listed player (resolved
 // live so it reflects development; stale listings are filtered out)
 const market = computed<MarketEntry[]>(() => [
@@ -523,9 +546,17 @@ function resolveDay() {
   // fitness: fatigue the five who played, recover the rest, roll injuries (own seeded rng)
   const fr = new Rng((seasonSeed.value ^ (season.value * 0xC2B2AE35) ^ (dayIdx.value * 0x9e3779b9) ^ 0xF17) >>> 0);
   updateFitness(fiveIds, fr);
-  // morale: the result + minutes + team talk move the room (the talk is one-shot)
+  // morale: the result + minutes + team talk move the room (the talk is one-shot); a derby
+  // (vs your rival) carries extra stakes and adds to the head-to-head record.
   const myRes = fresh.find(r => r.home === myClub.value || r.away === myClub.value);
-  updateMorale(fiveIds, myRes ? myRes.winner === myClub.value : null);
+  const myWon = myRes ? myRes.winner === myClub.value : null;
+  const oppIdx = myRes ? (myRes.home === myClub.value ? myRes.away : myRes.home) : -1;
+  const derby = myRes != null && isRival(oppIdx);
+  if (derby) {
+    derbyRecord.value = myWon ? { ...derbyRecord.value, w: derbyRecord.value.w + 1 } : { ...derbyRecord.value, l: derbyRecord.value.l + 1 };
+    lastDerby.value = { won: !!myWon, opp: clubs.value[oppIdx].team.tag };
+  } else lastDerby.value = null;
+  updateMorale(fiveIds, myWon, derby);
   dayIdx.value++;
   syncLineup();        // re-derive your five + strength from the developed roster (injured now excluded)
   resolveListings();   // the market is always live — your listed players may sell each match-day
@@ -650,6 +681,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival();
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -670,6 +702,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival();
   refreshMarket();
 }
 
@@ -1014,7 +1047,7 @@ function snapshot() {
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
     focuses: [...focuses.value.entries()],
     fatigue: [...fatigue.value.entries()], injuries: [...injuries.value.entries()], staff: staff.value,
-    morale: [...morale.value.entries()],
+    morale: [...morale.value.entries()], rivalId: rivalId.value, derbyRecord: derbyRecord.value,
   };
 }
 function save() {
@@ -1044,6 +1077,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   injuries.value = new Map((o as { injuries?: [string, number][] }).injuries ?? []);
   staff.value = (o as { staff?: StaffHires }).staff ?? {};
   morale.value = new Map((o as { morale?: [string, number][] }).morale ?? []);
+  rivalId.value = (o as { rivalId?: number | null }).rivalId ?? null;
+  derbyRecord.value = (o as { derbyRecord?: { w: number; l: number } }).derbyRecord ?? { w: 0, l: 0 };
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1052,6 +1087,7 @@ function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ign
 // doesn't re-trigger a save of identical data.
 const _saved = loadSave();
 if (_saved) { hydrate(_saved); hasSave.value = true; }
+ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't carry one
 
 // autosave: the store reassigns these refs immutably on every change, so a
 // shallow watch catches them all. Debounced so a fast "sim to end" (many
@@ -1059,7 +1095,7 @@ if (_saved) { hydrate(_saved); hasSave.value = true; }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1080,6 +1116,7 @@ export function useWorld() {
     fatigueOf, injuryOf, isInjured, isTired, lastInjury,
     staff, staffMkt, staffEff, staffWages, hiredStaff, hireStaff, fireStaff, STAFF_ROLES,
     moraleOf, squadMorale, teamTalk, setTalk, talkPreview, talkFit, TALK_META,
+    rivalId, derbyRecord, isRival, nextIsDerby, lastDerby,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };
