@@ -48,6 +48,8 @@ const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '
         <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
         <div class="rs-name">{{ p.handle }}
           <i v-if="w.isStarter(p.id)" class="rs-start">XI</i><i v-else class="rs-res">RES</i>
+          <button v-if="w.isStarter(p.id)" class="rs-capt" :class="{ on: w.isCaptain(p.id) }" @click="w.setCaptain(p.id)"
+            :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>
         </div>
         <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
         <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
