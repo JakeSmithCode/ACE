@@ -24,19 +24,23 @@ export interface FixtureRow {
 /** A tick-log row (the idempotency key — `unique(worldId, season, day, kind)`). */
 export interface TickRow { worldId: string; season: number; day: number; kind: TickKind; fixtures: number }
 
+/** The persistence boundary — **async** so a real (Postgres) store fits behind the
+ *  same interface (the `MemoryStore` just resolves immediately). The tick worker +
+ *  HTTP layer await every call, so swapping `MemoryStore` for `PgStore` changes no
+ *  resolution code. */
 export interface WorldStore {
   /** Persist a freshly generated world; returns its id. */
-  createWorld(w: WorldState): string;
-  loadWorld(id: string): WorldState | null;
-  saveWorld(id: string, w: WorldState): void;
-  listWorlds(): string[];
+  createWorld(w: WorldState): Promise<string>;
+  loadWorld(id: string): Promise<WorldState | null>;
+  saveWorld(id: string, w: WorldState): Promise<void>;
+  listWorlds(): Promise<string[]>;
   /** Append a resolved match-day's fixtures (the canonical record). */
-  appendFixtures(id: string, rows: FixtureRow[]): void;
-  fixtures(id: string, season?: number): FixtureRow[];
+  appendFixtures(id: string, rows: FixtureRow[]): Promise<void>;
+  fixtures(id: string, season?: number): Promise<FixtureRow[]>;
   /** Idempotency: has this (season, day, kind) tick already been recorded? */
-  tickDone(id: string, season: number, day: number, kind: TickKind): boolean;
-  recordTick(row: TickRow): void;
-  ticks(id: string): TickRow[];
+  tickDone(id: string, season: number, day: number, kind: TickKind): Promise<boolean>;
+  recordTick(row: TickRow): Promise<void>;
+  ticks(id: string): Promise<TickRow[]>;
 }
 
 /** A fixture row built from a resolved `MatchResult` (club indices are the world's
@@ -57,35 +61,35 @@ export class MemoryStore implements WorldStore {
   private tickRows = new Map<string, TickRow[]>();
   private n = 0;
 
-  createWorld(w: WorldState): string {
+  async createWorld(w: WorldState): Promise<string> {
     const id = `world-${++this.n}`;
     this.worlds.set(id, structuredClone(w));
     this.fixtureRows.set(id, []);
     this.tickRows.set(id, []);
     return id;
   }
-  loadWorld(id: string): WorldState | null {
+  async loadWorld(id: string): Promise<WorldState | null> {
     const w = this.worlds.get(id);
     return w ? structuredClone(w) : null;   // copy out, like a row read — callers can't mutate our state
   }
-  saveWorld(id: string, w: WorldState): void {
+  async saveWorld(id: string, w: WorldState): Promise<void> {
     if (!this.worlds.has(id)) throw new Error(`saveWorld: unknown world ${id}`);
     this.worlds.set(id, structuredClone(w));
   }
-  listWorlds(): string[] { return [...this.worlds.keys()]; }
+  async listWorlds(): Promise<string[]> { return [...this.worlds.keys()]; }
 
-  appendFixtures(id: string, rows: FixtureRow[]): void { this.fixtureRows.get(id)!.push(...rows); }
-  fixtures(id: string, season?: number): FixtureRow[] {
+  async appendFixtures(id: string, rows: FixtureRow[]): Promise<void> { this.fixtureRows.get(id)!.push(...rows); }
+  async fixtures(id: string, season?: number): Promise<FixtureRow[]> {
     const all = this.fixtureRows.get(id) ?? [];
     return season == null ? all : all.filter(r => r.season === season);
   }
 
-  tickDone(id: string, season: number, day: number, kind: TickKind): boolean {
+  async tickDone(id: string, season: number, day: number, kind: TickKind): Promise<boolean> {
     return (this.tickRows.get(id) ?? []).some(t => t.season === season && t.day === day && t.kind === kind);
   }
-  recordTick(row: TickRow): void {
-    if (this.tickDone(row.worldId, row.season, row.day, row.kind)) throw new Error(`recordTick: duplicate ${row.season}/${row.day}/${row.kind}`);
+  async recordTick(row: TickRow): Promise<void> {
+    if ((this.tickRows.get(row.worldId) ?? []).some(t => t.season === row.season && t.day === row.day && t.kind === row.kind)) throw new Error(`recordTick: duplicate ${row.season}/${row.day}/${row.kind}`);
     this.tickRows.get(row.worldId)!.push(row);
   }
-  ticks(id: string): TickRow[] { return [...(this.tickRows.get(id) ?? [])]; }
+  async ticks(id: string): Promise<TickRow[]> { return [...(this.tickRows.get(id) ?? [])]; }
 }

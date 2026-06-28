@@ -48,7 +48,7 @@ async function main() {
   const token = refreshed.accessToken as string;   // the rotated, valid access token
 
   // ── 0b. the API surface: public club page, ownership, embargo-aware standings ─
-  const w = srv.store.loadWorld(srv.id)!;
+  const w = (await srv.store.loadWorld(srv.id))!;
   const target = w.clubs.find(c => c.tier === 0 && !c.owner)!.tag;
   const acct = (m: string, p: string, body?: unknown) => fetch(`${srv.url}${p}`, { method: m, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const standDuring = await get(`${srv.url}/standings/${SEASON}/0/0`);

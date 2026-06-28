@@ -369,16 +369,21 @@ not a sim rewrite.
    `account`/`refresh_token`, `world`, `club`, `player`, `fixture`, `listing`/
    `transfer`, `honor`, `tick_log`; `jsonb` holds the value objects verbatim so a
    `world`+`club`+`player` row set IS a `WorldState`), plus `infra/docker-compose.yml`
-   (Postgres 16 + Redis 7) and `infra/README.md`. The remaining half is the `PgStore`/
-   `PgAccountStore`. **Finding (correction to the earlier "mechanical wiring" note):**
-   the `WorldStore`/`AccountStore` interfaces are **synchronous** (designed for the
-   in-memory store + the sync tick worker), but a Postgres-backed store is inherently
-   **async** — so PgStore first needs the store interfaces + every caller (`tick.ts`,
-   `http.ts`, `owner.ts`, the market routes, `cli.ts`) made async (await-through), and
-   only then the SQL impl, and only then a live Postgres to integration-test. That's a
-   real refactor, not a drop-in, and it's risky to land unverified — so it's deferred
-   until a Postgres is available (or an explicit opt-in to the async refactor). The
-   resolution *math* still doesn't change; the interface shape does.*
+   (Postgres 16 + Redis 7) and `infra/README.md`. ✅ **The `PgStore`/`PgAccountStore`
+   are in.** The `WorldStore`/`AccountStore` interfaces were made **async** (a Postgres
+   store can't be sync) and the await threaded through every caller (`tick.ts`,
+   `http.ts`, `owner.ts`, the market routes, `cli.ts`) — the resolution **math is
+   unchanged**, so `pnpm run server` is **byte-identical** (5940 fixtures · 114 ticks,
+   determinism IDENTICAL). `pg.ts` implements both interfaces over a minimal injected
+   `Queryable` (which `pg.Pool` satisfies — **zero-dep**, nothing imports `pg`); the
+   WorldState is stored verbatim as `jsonb`, fixtures + `tick_log` as rows (the PK is
+   the idempotency key). SQL in `infra/migrations/0002_worldstore.sql`. **Verified
+   without a live DB** by `pnpm run server:pg`: PgStore run over an in-memory `Queryable`
+   fake (the exact statements `pg.ts` issues) ticks **3 seasons byte-identical to
+   MemoryStore**, idempotency is rejected by the PK, and the PgAccountStore auth flow
+   (register/login/rotate/single-use-refresh) matches. The only residual is real-Postgres
+   SQL parsing — `infra/docker-compose` spins one up for the integration test, and the
+   tick worker/HTTP layer run against it unchanged (they already await).*
 3. **Self-owned auth** (register/verify/login/refresh). ✅ *Done — `auth.ts` +
    `accounts.ts`, **zero-dep** (node `crypto`: scrypt password hash, a hand-rolled
    HS256 JWT access token, an opaque rotating refresh token stored hashed). The

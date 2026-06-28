@@ -55,15 +55,15 @@ export interface TickReport {
 /** Resolve the world's current match-day (or roll the season over if the season's
  *  matchdays are all done). Idempotent: a repeated (season, day, kind) is a no-op.
  *  Returns a report of what happened. */
-export function runTick(store: WorldStore, id: string, opts?: TickOptions): TickReport {
-  const w = store.loadWorld(id);
+export async function runTick(store: WorldStore, id: string, opts?: TickOptions): Promise<TickReport> {
+  const w = await store.loadWorld(id);
   if (!w) throw new Error(`runTick: unknown world ${id}`);
   const total = seasonLength(w);
 
   // season's match-days exhausted → the next tick is the off-season rollover
   if (w.day >= total) return rollover(store, id, w);
 
-  if (store.tickDone(id, w.season, w.day, 'matchday')) {
+  if (await store.tickDone(id, w.season, w.day, 'matchday')) {
     return { kind: 'matchday', skipped: true, season: w.season, day: w.day, fixtures: 0 };
   }
 
@@ -92,28 +92,28 @@ export function runTick(store: WorldStore, id: string, opts?: TickOptions): Tick
     if (opts?.broadcastSecs != null) row.broadcastSecs = opts.broadcastSecs;  // result until it plays out
     return row;
   });
-  store.appendFixtures(id, rows);
-  store.recordTick({ worldId: id, season: w.season, day: w.day, kind: 'matchday', fixtures: results.length });
-  store.saveWorld(id, next);
+  await store.appendFixtures(id, rows);
+  await store.recordTick({ worldId: id, season: w.season, day: w.day, kind: 'matchday', fixtures: results.length });
+  await store.saveWorld(id, next);
   return { kind: 'matchday', skipped: false, season: w.season, day: w.day, fixtures: results.length, fullSimmed, seasonComplete: next.day >= total };
 }
 
-function rollover(store: WorldStore, id: string, w: WorldState): TickReport {
-  if (store.tickDone(id, w.season, w.day, 'rollover')) {
+async function rollover(store: WorldStore, id: string, w: WorldState): Promise<TickReport> {
+  if (await store.tickDone(id, w.season, w.day, 'rollover')) {
     return { kind: 'rollover', skipped: true, season: w.season, day: w.day, fixtures: 0 };
   }
   const { world: next, champion, moves } = advanceWorld(w);   // playoffs · settle · develop · patch · promote/relegate
-  store.recordTick({ worldId: id, season: w.season, day: w.day, kind: 'rollover', fixtures: 0 });
-  store.saveWorld(id, next);
+  await store.recordTick({ worldId: id, season: w.season, day: w.day, kind: 'rollover', fixtures: 0 });
+  await store.saveWorld(id, next);
   return { kind: 'rollover', skipped: false, season: w.season, day: w.day, fixtures: 0, champion: w.clubs[champion].tag, promoted: moves.length };
 }
 
 /** Drive one full season to its rollover (a convenience over `runTick` for the
  *  scheduler/tests): tick through every match-day, then the season boundary. */
-export function runSeason(store: WorldStore, id: string, opts?: TickOptions): TickReport[] {
+export async function runSeason(store: WorldStore, id: string, opts?: TickOptions): Promise<TickReport[]> {
   const out: TickReport[] = [];
   for (;;) {
-    const r = runTick(store, id, opts);
+    const r = await runTick(store, id, opts);
     out.push(r);
     if (r.kind === 'rollover') return out;
     if (r.skipped) return out;   // already fully resolved up to here — stop rather than spin
