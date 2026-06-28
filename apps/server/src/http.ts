@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, clubTeam, soloRank, ownedClubs, RANK_TIERS, aiStyle, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -62,19 +62,32 @@ const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve
   req.on('end', () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
 });
 
-/** The public club page (§9) — identity, division, lifecycle, the fielded five, and
- *  whether a human owns it. Read-only, always available (no embargo on a club). */
-const publicClub = (w: WorldState, c: WorldClub) => ({
-  tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles, intlTitles: c.intlTitles ?? 0,
-  owned: c.owner != null, rating: Math.round(c.strength * 100), phase: clubPhase(clubTeam(c)),
-  // an AI club's tactical IDENTITY (Phase 5) — scout it to know how a rival plays; a
-  // human-owned club authors its own tactics, so it has no fixed AI style.
-  style: c.owner ? null : (({ archetype, label }) => ({ archetype, label }))(aiStyle(clubTeam(c))),
-  five: planFive(c).map(p => {
-    const ovr = Math.round(overall(p)), sr = soloRank(ovr);
-    return { handle: p.handle, role: p.role, overall: ovr, igl: !!p.igl, solo: sr.label, soloTier: sr.tier };
-  }),
-});
+/** A player's highest-mastery agent (the engine's default pick; name tiebreak). */
+const topAgentOf = (p: { agents: { agent: string; level: number }[] }) =>
+  [...p.agents].sort((a, b) => b.level - a.level || (a.agent < b.agent ? -1 : 1))[0]?.agent ?? 'Jett';
+
+/** The public club page (§9) — identity, division, lifecycle, the fielded five (with each
+ *  player's fielded AGENT, so you scout the real comp), and whether a human owns it. For an
+ *  AI club this is exactly what it'll field next: `aiBestFive` (the patch-aware five) + the
+ *  meta-aware `aiComp`. Read-only, always available (no embargo on a club). */
+const publicClub = (w: WorldState, c: WorldClub) => {
+  const ai = c.owner == null;
+  const fivePlayers = ai ? aiBestFive(c.roster, w.patch) : planFive(c);
+  const team = { id: c.id, tag: c.tag, name: c.name, players: fivePlayers };
+  const comp = ai ? aiComp(team, w.patch) : c.comp;
+  return {
+    tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles, intlTitles: c.intlTitles ?? 0,
+    owned: !ai, rating: Math.round(c.strength * 100), phase: clubPhase(team),
+    // an AI club's tactical IDENTITY (Phase 5) — scout it to know how a rival plays; a
+    // human-owned club authors its own tactics, so it has no fixed AI style.
+    style: ai ? (({ archetype, label }) => ({ archetype, label }))(aiStyle(team)) : null,
+    five: fivePlayers.map(p => {
+      const ovr = Math.round(overall(p)), sr = soloRank(ovr);
+      return { handle: p.handle, role: p.role, overall: ovr, igl: !!p.igl, solo: sr.label, soloTier: sr.tier,
+               agent: comp[p.id] ?? topAgentOf(p) };
+    }),
+  };
+};
 
 /** Embargo-aware standings (§8.5): derived from RESOLVED fixtures only, so the
  *  table never moves mid-broadcast. Built from the store's fixture rows (not the

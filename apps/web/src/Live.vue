@@ -961,6 +961,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
             <span class="lv-fivehandle"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i></span>
+            <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>
             <span v-if="p.solo" class="lv-ldsolo" :class="'rk-' + (p.soloTier || '').toLowerCase()">{{ p.solo }}</span>
             <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>
           </div>

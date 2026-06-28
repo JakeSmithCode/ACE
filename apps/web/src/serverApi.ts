@@ -27,7 +27,7 @@ export interface ScoutResult { ok: boolean; reason?: string; level: number; cost
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
 export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number; attrs: AttrScout[] }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
-export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean; solo?: string; soloTier?: string }
+export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean; solo?: string; soloTier?: string; agent?: string }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
 export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }

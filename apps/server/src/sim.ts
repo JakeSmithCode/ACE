@@ -4,16 +4,20 @@
 // and capture the input_snapshot so the client can re-sim the exact match to watch
 // (§7). Dormant divisions stay on the cheap `quickResult`; this is what makes a
 // human's matches actually watchable through the server path.
-import type { MatchInput } from '@ace/shared';
+import type { MatchInput, Team, Comp } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch } from '@ace/engine';
-import { buildMatchInput, clubTeam, fixtureMap, aiMatchupTactics, type WorldState, type WorldClub, type Fixture, type MatchResult } from '@ace/world';
+import { buildMatchInput, clubTeam, fixtureMap, aiMatchupTactics, aiComp, aiBestFive, type WorldState, type WorldClub, type Fixture, type MatchResult } from '@ace/world';
 
-/** The tactics a club brings to a fixture: a HUMAN owner's authored plan as-is; an AI club
- *  scouts its opponent and reads toward where that opponent's roster prefers to hit
- *  (`aiMatchupTactics`). A human's plan is sacred — only AI clubs get the matchup read. */
-function matchTactics(self: WorldClub, opp: WorldClub) {
-  return self.owner ? self.tactics : aiMatchupTactics(clubTeam(self), clubTeam(opp));
+/** What a club brings to a fixture — the manager's three levers (tactics, comp, lineup):
+ *  a HUMAN owner's authored plan is sacred (their saved five + comp + tactics, used as-is);
+ *  an AI club plays its IDENTITY — `aiBestFive` fields its strongest five for the live patch
+ *  (a buffed-agent specialist promoted off the bench), `aiComp` reads the meta to pick each
+ *  agent, and `aiMatchupTactics` reads toward where the opponent likes to hit. */
+function clubPlan(self: WorldClub, opp: WorldClub, patch: WorldState['patch']): { team: Team; comp: Comp; tactics: WorldClub['tactics'] } {
+  if (self.owner) return { team: clubTeam(self), comp: self.comp, tactics: self.tactics };
+  const team = { id: self.id, tag: self.tag, name: self.name, players: aiBestFive(self.roster, patch) };
+  return { team, comp: aiComp(team, patch), tactics: aiMatchupTactics(team, clubTeam(opp)) };
 }
 
 export interface SimResolver {
@@ -31,14 +35,15 @@ export function fullSimResolver(w: WorldState, navOf: (map: MatchInput['map']) =
   const resolve = (fx: Fixture, seed: number): MatchResult => {
     const home = w.clubs[fx.home], away = w.clubs[fx.away];
     const map = fixtureMap(seed);
+    const h = clubPlan(home, away, w.patch), a = clubPlan(away, home, w.patch);
     const input = buildMatchInput({
       seed, map, patch: w.patch,
-      home: clubTeam(home), away: clubTeam(away),
-      tactics: [matchTactics(home, away), matchTactics(away, home)], comp: [home.comp, away.comp],
+      home: h.team, away: a.team,
+      tactics: [h.tactics, a.tactics], comp: [h.comp, a.comp],
     });
     snapshots.set(seed, input);
-    const [h, a] = simulateMatch(input, navOf(map), forks).finalScore;
-    return { home: fx.home, away: fx.away, score: [h, a], winner: h > a ? fx.home : fx.away, seed };
+    const [hs, as] = simulateMatch(input, navOf(map), forks).finalScore;
+    return { home: fx.home, away: fx.away, score: [hs, as], winner: hs > as ? fx.home : fx.away, seed };
   };
   return { resolve, snapshots };
 }

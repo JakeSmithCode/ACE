@@ -871,7 +871,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-clubname{font-family:var(--display);font-size:24px;letter-spacing:.01em}
 .lv-clubsub{font-family:var(--label);font-size:11px;letter-spacing:.05em;color:var(--muted);text-transform:uppercase}
 .lv-clubfive{display:flex;flex-direction:column;gap:6px}
-.lv-fiverow{display:grid;grid-template-columns:42px 1fr auto auto;align-items:center;gap:10px;padding:7px 9px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel)}
+.lv-fiverow{display:grid;grid-template-columns:42px 1fr auto auto auto;align-items:center;gap:10px;padding:7px 9px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel)}
+.lv-fiveagent{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--brand);background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.22);padding:2px 7px;clip-path:var(--bevel)}
 .lv-fivehandle{display:flex;align-items:center;gap:8px;min-width:0}
 .lv-fiverow .lv-ldsolo{font-size:9px;padding:2px 7px}
 .lv-clubhead .lv-phase{margin-left:auto;font-size:9px}

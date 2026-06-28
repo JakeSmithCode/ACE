@@ -5,9 +5,11 @@
 // still differ. Pure — a function of the roster + the club id, no rng — so it's stable,
 // scoutable (the human can read an opponent's style), and the engine never sees it
 // (tactics are a normal MatchInput, so seed 42 is untouched).
-import type { Team, Tactics, Attributes } from '@ace/shared';
+import type { Team, Tactics, Attributes, Player, Comp, PatchState, Role } from '@ace/shared';
+import { overall } from './develop.js';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const ROLE_NEED: Record<Role, number> = { duelist: 2, initiator: 1, controller: 1, sentinel: 1 };
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /** Deterministic personality in [-1, 1) from a club id (FNV-1a) — the manager's tilt. */
@@ -82,4 +84,59 @@ export function aiMatchupTactics(myTeam: Team, oppTeam: Team): Tactics {
   const trust = clamp(0.75 - base.defense.aggression * 0.5, 0.35, 0.65);
   const read = clamp(base.defense.read * (1 - trust) + oppBias * trust, -1, 1);
   return { ...base, defense: { ...base.defense, read: r2(read) } };
+}
+
+// ── AI comp + lineup: read the LIVING META, don't blindly field your main ──────────
+// The engine values an agent pick as `compEdge = (tier−1)·60 + (mastery−75)·0.1` — tier
+// (the patch) dominates comfort. So a sharp manager re-picks its comp each patch: field a
+// buffed agent you have decent mastery on over your highest-mastery off-meta main. This
+// makes the agent meta LIVING for AI clubs too (CS-manager has no such patch lever).
+
+/** The engine's valuation of a player on a specific agent (mirrors `addLoadouts`). */
+function agentValue(level: number, agent: string, patch?: PatchState): number {
+  const tier = patch?.agentTier[agent] ?? 1.0;
+  return (tier - 1) * 60 + (level - 75) * 0.1;
+}
+
+/** The agent from a player's pool the engine would value most on this patch (id-stable
+ *  tiebreak). The patch-aware "main" — a manager reading the meta, not a fixed pick. */
+function bestAgent(p: Player, patch?: PatchState): { agent: string; value: number } {
+  const pool = p.agents.length ? p.agents : [{ agent: 'Jett', level: 45 }];
+  let best = pool[0], bestV = agentValue(best.level, best.agent, patch);
+  for (const a of pool) {
+    const v = agentValue(a.level, a.agent, patch);
+    if (v > bestV || (v === bestV && a.agent < best.agent)) { best = a; bestV = v; }
+  }
+  return { agent: best.agent, value: bestV };
+}
+
+/** A meta-aware comp for an AI club: each player fields the agent the engine values most
+ *  on the live patch. Only emits a pick where it differs from the engine's default (the
+ *  highest-mastery agent) would be — but emitting the explicit map is harmless and keeps
+ *  the resolver simple. Pure + deterministic; the engine treats it as a normal `Comp`. */
+export function aiComp(team: Team, patch?: PatchState): Comp {
+  const comp: Comp = {};
+  for (const p of team.players) comp[p.id] = bestAgent(p, patch).agent;
+  return comp;
+}
+
+/** A player's effective strength to the AI selector: base overall plus the patch value of
+ *  their best agent pick (so a specialist on a hard-buffed agent is worth fielding even a
+ *  touch below another's raw overall — the meta promotes them off the bench). */
+function lineupRating(p: Player, patch?: PatchState): number {
+  return overall(p) + bestAgent(p, patch).value;
+}
+
+/** The five an AI club fields, chosen by patch-aware effective strength — so a buffed-agent
+ *  specialist gets promoted over a marginally-higher-overall reserve when the meta favours
+ *  him. Reduces EXACTLY to `startingFive`'s best-overall pick when no patch (or a flat
+ *  patch) makes a difference, so the world/season CLIs stay byte-identical. */
+export function aiBestFive(roster: Player[], patch?: PatchState): Player[] {
+  const five: Player[] = [];
+  (['duelist', 'initiator', 'controller', 'sentinel'] as const).forEach(role => {
+    const inRole = roster.filter(p => p.role === role)
+      .sort((a, b) => lineupRating(b, patch) - lineupRating(a, patch) || (a.id < b.id ? -1 : 1));
+    five.push(...inRole.slice(0, ROLE_NEED[role]));
+  });
+  return five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
 }
