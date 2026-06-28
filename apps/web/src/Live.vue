@@ -957,6 +957,12 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
           <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
         </div>
+        <div v-if="clubModal.dossier" class="lv-dossier">
+          <div class="lv-doshead">⌖ SCOUTING REPORT</div>
+          <div class="lv-dosrow"><i>ATTACK</i><span>{{ clubModal.dossier.attack }}<em v-if="clubModal.dossier.lurk"> · runs a lurk</em></span></div>
+          <div class="lv-dosrow"><i>DEFENSE</i><span>{{ clubModal.dossier.defense }}</span></div>
+          <div class="lv-doscounter"><i>⮞ COUNTER</i><span>{{ clubModal.dossier.counter }}</span></div>
+        </div>
         <div class="lv-clubfive">
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>

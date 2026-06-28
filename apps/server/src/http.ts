@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -66,6 +66,23 @@ const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve
 const topAgentOf = (p: { agents: { agent: string; level: number }[] }) =>
   [...p.agents].sort((a, b) => b.level - a.level || (a.agent < b.agent ? -1 : 1))[0]?.agent ?? 'Jett';
 
+/** A plain-English scouting DOSSIER from an AI club's deterministic tactics — the
+ *  pre-match read (better than a CS-manager flavour blurb: it's derived from the same
+ *  dials the engine resolves, so it's the truth, and it tells you how to counter). */
+const scoutDossier = (t: { attack: { siteBias: number; tempo: number; lurk?: string }; defense: { read: number; aggression: number } }) => {
+  const site = t.attack.siteBias > 0.12 ? 'favours A' : t.attack.siteBias < -0.12 ? 'favours B' : 'hits both sites';
+  const tempo = t.attack.tempo > 0.6 ? 'fast executes' : t.attack.tempo < 0.42 ? 'slow, default-heavy' : 'measured tempo';
+  const hold = t.defense.read > 0.12 ? 'stacks A on defense' : t.defense.read < -0.12 ? 'stacks B on defense' : 'reads both sites';
+  const aggro = t.defense.aggression > 0.55 ? 'aggressive holds / early picks' : t.defense.aggression < 0.4 ? 'passive, retake-oriented' : 'standard holds';
+  // a counter tip: attack the side they under-defend; hold the side they like to hit.
+  const counter = t.defense.read > 0.12 ? 'attack B — they over-stack A'
+    : t.defense.read < -0.12 ? 'attack A — they over-stack B'
+    : t.attack.siteBias > 0.12 ? 'stack A on defense — they love hitting A'
+    : t.attack.siteBias < -0.12 ? 'stack B on defense — they love hitting B'
+    : 'balanced — no obvious tell to exploit';
+  return { attack: `${site}, ${tempo}`, defense: `${hold}, ${aggro}`, lurk: !!t.attack.lurk, counter };
+};
+
 /** The public club page (§9) — identity, division, lifecycle, the fielded five (with each
  *  player's fielded AGENT, so you scout the real comp), and whether a human owns it. For an
  *  AI club this is exactly what it'll field next: `aiBestFive` (the patch-aware five) + the
@@ -81,6 +98,8 @@ const publicClub = (w: WorldState, c: WorldClub) => {
     // an AI club's tactical IDENTITY (Phase 5) — scout it to know how a rival plays; a
     // human-owned club authors its own tactics, so it has no fixed AI style.
     style: ai ? (({ archetype, label }) => ({ archetype, label }))(aiStyle(team)) : null,
+    // the pre-match scouting read — tendencies + a counter tip, from the AI's real dials.
+    dossier: ai ? scoutDossier(aiTactics(team)) : null,
     five: fivePlayers.map(p => {
       const ovr = Math.round(overall(p)), sr = soloRank(ovr);
       return { handle: p.handle, role: p.role, overall: ovr, igl: !!p.igl, solo: sr.label, soloTier: sr.tier,
