@@ -106,17 +106,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // + prospects are the owner's state; the money (upgrade, upkeep) hits the club balance.
   const academies = new Map<string, Academy>();
   const acadOf = (account: string) => academies.get(account) ?? defaultAcademy();
-  // The academy + scout Maps above are a write-through CACHE over the store's per-account
-  // data blob (`ace_account_data`), so a PgStore-backed deployment keeps a human's youth
-  // pipeline + scout reports across restarts. Hydrated at startup; persisted on mutation.
-  const persistAccount = (account: string) => store.saveAccountData(id, account, {
-    academy: academies.get(account) ?? null,
-    scout: Object.fromEntries(scoutReports.get(account) ?? []),
-  });
-  for (const { account, data } of await store.listAccountData(id)) {
-    if (data.academy) academies.set(account, data.academy as Academy);
-    if (data.scout) scoutReports.set(account, new Map(Object.entries(data.scout as Record<string, number>)));
-  }
+  // (persistAccount + hydration live below, once the notif + mail maps are declared too)
   // every handle in the world that an intake must avoid (engine assumes unique handles):
   // every rostered player, every academy prospect, AND the cached free-agent board (a
   // promoted prospect must never collide with a signable free agent).
@@ -160,6 +150,24 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const mailboxes = new Map<string, MailMsg[]>();
   let mailSeq = 0;
   const pushMail = (account: string, m: MailMsg) => { const box = mailboxes.get(account) ?? []; box.unshift(m); if (box.length > 200) box.length = 200; mailboxes.set(account, box); };
+  // The academy + scout + notif + mail Maps are a write-through CACHE over the store's
+  // per-account data blob (`ace_account_data`), so a PgStore-backed deployment keeps a
+  // human's youth pipeline, scout reports, and inboxes across restarts. Hydrated at
+  // startup; the seq counters resume past the restored ids so new ones never collide.
+  const persistAccount = (account: string) => store.saveAccountData(id, account, {
+    academy: academies.get(account) ?? null,
+    scout: Object.fromEntries(scoutReports.get(account) ?? []),
+    notifs: notifs.get(account) ?? [],
+    mail: mailboxes.get(account) ?? [],
+  });
+  for (const { account, data } of await store.listAccountData(id)) {
+    if (data.academy) academies.set(account, data.academy as Academy);
+    if (data.scout) scoutReports.set(account, new Map(Object.entries(data.scout as Record<string, number>)));
+    if (Array.isArray(data.notifs)) notifs.set(account, data.notifs as Notif[]);
+    if (Array.isArray(data.mail)) mailboxes.set(account, data.mail as MailMsg[]);
+  }
+  for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
+  for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
   // live league chat — a real-time channel for online owners (SSE fan-out). A bounded
   // backlog + a set of connected streams that every new message is pushed to.
   interface ChatMsg { id: number; fromTag: string; fromName: string; text: string; at: number }
@@ -245,6 +253,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
             notify(c.owner, 'result', `${us > them ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`, wn.season, f.day);
           }
         }
+        await persistAccount(c.owner);   // durable: the owner's freshly-pushed notifications
       }
     };
     const w = (await store.loadWorld(id))!;
@@ -270,6 +279,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (pos) notify(c.owner, 'season', `Season ${roll.season}: ${c.tag} finished ${ord(pos)} in ${tierName(c.tier)}`, roll.season, liveDay);
         if (roll.champion === c.tag) notify(c.owner, 'award', `🏆 ${c.tag} are Season ${roll.season} champions!`, roll.season, liveDay);
         if (mvp && c.roster.some(p => p.handle === mvp.handle)) notify(c.owner, 'award', `★ Your player ${mvp.handle} won Season ${roll.season} MVP (${mvp.kills} kills)`, roll.season, liveDay);
+        await persistAccount(c.owner);
       }
     }
     await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
@@ -464,6 +474,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!account) return json(res, 401, { error: 'no account' });
       const b = (await readBody(req)) as { id?: number };
       notifs.set(account, (notifs.get(account) ?? []).map(n => (b.id == null || n.id === b.id ? { ...n, read: true } : n)));
+      await persistAccount(account);
       return json(res, 200, { ok: true, unread: (notifs.get(account) ?? []).filter(n => !n.read).length });
     }
     // GET /mail  → your owner-to-owner inbox (received messages) + unread count
@@ -506,6 +517,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       pushMail(target.owner, { ...base, read: false, mine: false });           // recipient: unread, incoming
       pushMail(account, { ...base, read: true, mine: true });                   // sender: a read copy (sent items)
       notify(target.owner, 'system', `✉ New message from ${mine.tag}: ${subject}`, w.season, liveDay);
+      await persistAccount(target.owner); await persistAccount(account);        // durable: both mailboxes (+ recipient's notif)
       return json(res, 200, { ok: true });
     }
     // POST /mail/read  → mark one message (id), a whole thread (threadId), or all read
@@ -514,6 +526,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const b = (await readBody(req)) as { id?: number; threadId?: number };
       const all = b.id == null && b.threadId == null;
       mailboxes.set(account, (mailboxes.get(account) ?? []).map(m => (all || m.id === b.id || m.threadId === b.threadId ? { ...m, read: true } : m)));
+      await persistAccount(account);
       return json(res, 200, { ok: true, unread: (mailboxes.get(account) ?? []).filter(m => !m.read).length });
     }
     // GET /chat/stream  → SSE: the live league chat (backlog event, then each new message)
@@ -660,6 +673,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         const ci = (await store.loadWorld(id))!.clubs.findIndex(x => x.id === club.id);
         const fx = (await store.fixtures(id, (await store.loadWorld(id))!.season)).find(f => f.day === liveDay && (f.home === ci || f.away === ci));
         if (fx) { notifiedLive.add(key(fx)); const opp = labelOf(fx.home === ci ? fx.away : fx.home); notify(account, 'fixture', `Match-day ${fx.day + 1}: ${club.tag} vs ${opp.tag}${fx.inputSnapshot ? ' · ' + fx.inputSnapshot.map : ''} — live now`, (await store.loadWorld(id))!.season, fx.day); }
+        await persistAccount(account);   // durable: the welcome + first-fixture notifications
         return json(res, 200, publicClub((await store.loadWorld(id))!, club));
       }
       catch (e) { return json(res, 409, { error: (e as Error).message }); }
