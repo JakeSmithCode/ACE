@@ -26,3 +26,4 @@ export * from './worldAcademy.js';
 export * from './leaderboard.js';
 export * from './ai.js';
 export * from './staff.js';
+export * from './sponsor.js';

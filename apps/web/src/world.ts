@@ -19,6 +19,7 @@ import {
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
   defaultAcademy, academyIntake, academyCost, academyUpkeep, academyWageBill, intakeSize, ACADEMY_MAX,
   staffMarket, staffEffect, withStaffBoost, staffWageBill, STAFF_ROLES,
+  sponsorOffers, sponsorGoalMet, sponsorGoalText, type SponsorOffer, type ActiveSponsor,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
@@ -496,6 +497,16 @@ const confidenceStatus = computed<ConfStatus>(() => {
   return { key: 'brink', label: 'on the brink — your job is at risk' };
 });
 
+// ── Sponsorships (a commercial layer with its own objectives) ────────────────────────
+// Pick one of three multi-season deals — a base cheque + a performance bonus on a goal.
+// Paid out each season settle (base always, bonus if the goal was met).
+const sponsor = ref<ActiveSponsor | null>(null);
+const lastSponsorPay = ref<{ name: string; base: number; bonus: number; met: boolean } | null>(null);
+const sponsorOffersList = computed<SponsorOffer[]>(() =>
+  sponsor.value ? [] : sponsorOffers(seasonSeed.value, season.value, clubs.value[myClub.value].strength, myClub.value));
+const goalTextOf = (o: { goal: SponsorOffer['goal']; goalN: number }) => sponsorGoalText(o);
+function signSponsor(o: SponsorOffer) { if (!sponsor.value) sponsor.value = { ...o, yearsLeft: o.years }; }
+
 const nextFixture = computed(() => done.value ? null
   : mySchedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
 const nextOpponent = computed(() => {
@@ -656,8 +667,18 @@ function advanceSeason() {
   const aw = seasonAwards();
   lastAwards.value = aw;
   if (aw) awardsHistory.value = [aw, ...awardsHistory.value].slice(0, 30);
+  // sponsorship payout: the base cheque always, the bonus if its goal was met this season
+  let sponsorPay = 0;
+  if (sponsor.value) {
+    const wins = myResults.value.filter(r => r.winner === myClub.value).length;
+    const met = sponsorGoalMet(sponsor.value.goal, sponsor.value.goalN, { objMet, finish: objFinish, divSize: DIV_SIZE, promo: PROMO, wins });
+    sponsorPay = sponsor.value.base + (met ? sponsor.value.bonus : 0);
+    lastSponsorPay.value = { name: sponsor.value.name, base: sponsor.value.base, bonus: met ? sponsor.value.bonus : 0, met };
+    const yl = sponsor.value.yearsLeft - 1;
+    sponsor.value = yl > 0 ? { ...sponsor.value, yearsLeft: yl } : null;   // deal runs out → new offers next season
+  } else lastSponsorPay.value = null;
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net + objBonus : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
+    i === myClub.value ? b + ledger.value!.net + objBonus + sponsorPay : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
   const pr = promoteRelegate(division.value, tables, PROMO);
   division.value = pr.division; lastMoves.value = pr.moves;
@@ -739,7 +760,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -760,7 +781,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null;
   refreshMarket();
 }
 
@@ -1108,6 +1129,7 @@ function snapshot() {
     morale: [...morale.value.entries()], rivalId: rivalId.value, derbyRecord: derbyRecord.value,
     lastAwards: lastAwards.value, awardsHistory: awardsHistory.value,
     boardConfidence: boardConfidence.value, sacked: sacked.value,
+    sponsor: sponsor.value, lastSponsorPay: lastSponsorPay.value,
   };
 }
 function save() {
@@ -1143,6 +1165,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   awardsHistory.value = (o as { awardsHistory?: SeasonAwards[] }).awardsHistory ?? [];
   boardConfidence.value = (o as { boardConfidence?: number }).boardConfidence ?? 60;
   sacked.value = (o as { sacked?: boolean }).sacked ?? false;
+  sponsor.value = (o as { sponsor?: ActiveSponsor | null }).sponsor ?? null;
+  lastSponsorPay.value = (o as { lastSponsorPay?: typeof lastSponsorPay.value }).lastSponsorPay ?? null;
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1159,7 +1183,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1182,6 +1206,7 @@ export function useWorld() {
     moraleOf, squadMorale, teamTalk, setTalk, talkPreview, talkFit, TALK_META,
     rivalId, derbyRecord, isRival, nextIsDerby, lastDerby, lastAwards, awardsHistory,
     boardConfidence, sacked, confidenceStatus,
+    sponsor, sponsorOffersList, lastSponsorPay, goalTextOf, signSponsor,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

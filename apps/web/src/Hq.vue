@@ -55,6 +55,8 @@ const injury = computed(() => w.lastInjury.value);
 const derby = computed(() => w.lastDerby.value);
 // last season's division awards (shown at the rollover)
 const awards = computed(() => w.lastAwards.value);
+// last season's sponsor payout (for the finance ledger line)
+const sponsorPay = computed(() => w.lastSponsorPay.value);
 // team talk: pick a tone before the next match — the right one reads the room
 const talkTones = ['calm', 'rally', 'demand'] as const;
 const readLabel = (f: string) => f === 'great' ? '✓ reads the room' : f === 'poor' ? '✗ wrong tone' : '~ a safe call';
@@ -357,11 +359,31 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-led"><span>Prize money</span><b class="pos">+{{ fmt(ledger.prize) }}</b></div>
             <div v-if="ledger.playoff" class="hq-led"><span>Playoff bonus 🏆</span><b class="pos">+{{ fmt(ledger.playoff) }}</b></div>
             <div v-if="objectiveOutcome && objectiveOutcome.bonus" class="hq-led"><span>Board objective ⌖</span><b class="pos">+{{ fmt(objectiveOutcome.bonus) }}</b></div>
+            <div v-if="sponsorPay" class="hq-led"><span>Sponsor 🅢 {{ sponsorPay.name }}{{ sponsorPay.bonus ? ' +bonus' : '' }}</span><b class="pos">+{{ fmt(sponsorPay.base + sponsorPay.bonus) }}</b></div>
             <div class="hq-led"><span>Squad wages</span><b class="neg">−{{ fmt(ledger.wages) }}</b></div>
             <div v-if="ledger.upkeep" class="hq-led"><span>HQ upkeep</span><b class="neg">−{{ fmt(ledger.upkeep) }}</b></div>
             <div class="hq-led net"><span>Net last season</span><b :class="ledger.net >= 0 ? 'pos' : 'neg'">{{ ledger.net >= 0 ? '+' : '−' }}{{ fmt(Math.abs(ledger.net)) }}</b></div>
           </div>
           <div v-else class="hq-compnote">Finish the season to settle the books — better finishes pay more; the wage bill is owed regardless.</div>
+        </div>
+
+        <!-- sponsorship -->
+        <div class="hq-panel hq-spon">
+          <h3><span class="b"></span>Sponsorship <span class="rs-sub">{{ w.sponsor.value ? `${w.sponsor.value.yearsLeft}y left` : 'pick a deal' }}</span></h3>
+          <div v-if="w.sponsor.value" class="hq-sponactive">
+            <div class="hq-sponname">🅢 {{ w.sponsor.value.name }}</div>
+            <div class="hq-sponterms">
+              <span><b class="pos">{{ fmt(w.sponsor.value.base) }}</b>/yr base</span>
+              <span>+ <b class="pos">{{ fmt(w.sponsor.value.bonus) }}</b> if you {{ w.goalTextOf(w.sponsor.value) }}</span>
+            </div>
+          </div>
+          <div v-else class="hq-sponoffers">
+            <div v-for="o in w.sponsorOffersList.value" :key="o.id" class="hq-sponoffer">
+              <div class="hq-spononame">🅢 {{ o.name }} <i>{{ o.years }}y</i></div>
+              <div class="hq-sponobits"><span><b>{{ fmt(o.base) }}</b>/yr</span><span class="hq-sponbonus">+{{ fmt(o.bonus) }} if {{ w.goalTextOf(o) }}</span></div>
+              <button class="hq-sponsign" @click="w.signSponsor(o)">sign</button>
+            </div>
+          </div>
         </div>
 
         <!-- fixtures -->
