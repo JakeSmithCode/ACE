@@ -892,3 +892,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-hofseason .lv-hofsno{font-family:var(--label);font-size:11px;color:var(--brand);min-width:26px}
 .lv-hofseason b{font-family:var(--display);font-size:15px}
 .lv-hofempty{padding:24px 8px;text-align:center;color:var(--muted-2);font-family:var(--label);font-size:12px;letter-spacing:.04em;line-height:1.6}
+.lv-share{margin-left:auto;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.4);color:var(--brand);font-family:var(--label);font-size:11px;letter-spacing:.04em;padding:4px 12px;cursor:pointer;clip-path:var(--bevel)}
+.lv-share:hover{background:rgba(34,211,238,.2)}
+.lv-watchhead .ed-close{margin-left:8px}

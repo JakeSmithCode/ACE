@@ -15,6 +15,7 @@ export interface LiveFixture {
   final: [number, number] | null; home: ClubLabel; away: ClubLabel; map: MapId | null;
 }
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
+export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
@@ -55,6 +56,10 @@ export class AceServer {
   club(slug: string): Promise<ClubPage> { return fetch(`${this.base}/clubs/${slug}`).then(r => j<ClubPage>(r)); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
+  }
+  /** A fixture's spoiler-safe public view (who's playing, status, final once resolved). */
+  fixture(season: number, day: number, slot: number): Promise<FixturePublic> {
+    return fetch(`${this.base}/fixtures/${season}/${day}/${slot}`).then(r => j<FixturePublic>(r));
   }
   /** A watchable fixture's snapshot once resolved — 425 until then (returns null). */
   async replay(season: number, day: number, slot: number): Promise<ReplayPayload | null> {

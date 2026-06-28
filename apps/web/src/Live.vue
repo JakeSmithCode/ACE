@@ -127,6 +127,9 @@ async function connect() {
     await refreshMe();
     await loadHonors();
     openStream();
+    // a shared deep-link (?watch=season/day/slot) → auto-open that replay
+    const wp = new URL(location.href).searchParams.get('watch');
+    if (wp) { const [ws, wd, wsl] = wp.split('/').map(Number); if (![ws, wd, wsl].some(isNaN)) void watchAt(ws, wd, wsl); }
     // standings only move at reveal — refresh them every few seconds while watching
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refreshTable, 4000);
@@ -161,25 +164,38 @@ async function refreshTable() { if (server.value && world.value) try { table.val
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
 
-// --- watch a revealed fixture back in the viewer ---------------------------
+// --- watch a revealed fixture back in the viewer (live or via a shared link) ---
+interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number }
 const host = ref<HTMLElement | null>(null);
-const watching = ref<LiveFixture | null>(null);
+const watching = ref<Watched | null>(null);
 const loadingWatch = ref(false);
+const shareCopied = ref(false);
 let viewer: Viewer | null = null;
-async function watch(fx: LiveFixture) {
-  if (!server.value || fx.status !== 'resolved') return;
+function watch(fx: LiveFixture) { return watchAt(season.value, DAY.value, fx.slot); }
+/** Render any resolved fixture's replay by (season, day, slot) — the live `watch`
+ *  and a shared deep-link both route through here. */
+async function watchAt(s: number, d: number, slot: number) {
+  if (!server.value) return;
   loadingWatch.value = true;
   try {
-    const rep = await server.value.replay(season.value, DAY.value, fx.slot);
+    const fx = await server.value.fixture(s, d, slot);
+    if (fx.status !== 'resolved') { errMsg.value = 'that match is still live — no spoilers'; return; }
+    const rep = await server.value.replay(s, d, slot);
     if (!rep?.snapshot) return;
     const map = rep.snapshot.map;
     const nav = await ensureNav(map);
     const out = simulateMatch(rep.snapshot, nav, 50);
-    watching.value = fx;
+    watching.value = { home: fx.home, away: fx.away, final: fx.score ?? null, map, season: s, day: d, slot };
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
 function closeWatch() { watching.value = null; viewer?.destroy(); viewer = null; }
+/** A shareable deep-link to the watched replay — opening it auto-connects + plays. */
+function shareWatch() {
+  if (!watching.value) return;
+  const u = `${location.origin}${location.pathname}?server=${encodeURIComponent(url.value)}&watch=${watching.value.season}/${watching.value.day}/${watching.value.slot}`;
+  navigator.clipboard?.writeText(u).then(() => { shareCopied.value = true; setTimeout(() => (shareCopied.value = false), 2200); }).catch(() => { /* clipboard blocked */ });
+}
 
 // --- the public club page (click any club tag to browse its squad) ----------
 const clubModal = ref<ClubPage | null>(null);
@@ -363,6 +379,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <div class="lv-watchhead">
           <b>{{ watching.home.tag }}</b> {{ watching.final?.[0] }} – {{ watching.final?.[1] }} <b>{{ watching.away.tag }}</b>
           · <span class="hq-rmap">{{ watching.map }}</span> · re-simmed from the server snapshot
+          <button class="lv-share" @click="shareWatch">{{ shareCopied ? '✓ link copied' : '⤴ share' }}</button>
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>
