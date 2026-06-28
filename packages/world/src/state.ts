@@ -179,7 +179,11 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
     results.push(opts.resolve ? opts.resolve(fx, seed, d.tier) : quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, seed));
   }));
   const clubs = w.clubs.map(c => {
-    const five = new Set(startingFive(c.roster).map(p => p.id));
+    // develop on the five a club actually FIELDS (`planFive` honours an owner's explicit
+    // lineup), so playing time is a real lever: start a graduated prospect and he gets
+    // reps and grows; leave him benched and he rusts. For a generated club with no
+    // lineup, `planFive` === `startingFive`, so the world/season CLIs are byte-identical.
+    const five = new Set(planFive(c).map(p => p.id));
     const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng));
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
   });

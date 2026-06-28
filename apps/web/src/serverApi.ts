@@ -118,6 +118,15 @@ export class AceServer {
       body: JSON.stringify({ tactics }),
     }).then(r => j<ClubPlan>(r));
   }
+  /** Set your fielded five — an explicit lineup (2 duelists + 1 init/ctrl/sentinel)
+   *  drives who plays AND who develops (a started prospect gets reps; a benched one
+   *  rusts). Rejected if it isn't a valid five. */
+  setLineup(lineup: string[], token: string): Promise<ClubPlan> {
+    return fetch(`${this.base}/me/plan`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ lineup }),
+    }).then(r => j<ClubPlan>(r));
+  }
 
   /** Subscribe to a day's synced live match-center (SSE). `onFrame` fires ~1/s with
    *  every watched fixture's running score; returns an unsubscribe fn. Falls back to

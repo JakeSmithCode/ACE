@@ -127,6 +127,42 @@ async function sell(sp: SquadPlayer) {
   } catch (e) { msg((e as Error).message); } finally { marketBusy.value = false; }
 }
 
+// --- the lineup lever — field who you want (start a prospect to develop him) ---------
+// The fielded five drives BOTH what's played and who develops (reps vs rust), so
+// starting a graduated prospect is how you grow him. Compute the new valid five
+// client-side (swap within role — keeps the comp valid), then save it as the lineup.
+async function saveLineup(ids: string[]) {
+  if (!server.value || !token.value) return; marketBusy.value = true;
+  try { await server.value.setLineup(ids, token.value); await refreshMe(); }
+  catch (e) { acadMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
+/** Can this benched player be started? (there's a same-role starter to drop.) */
+function canStart(sp: SquadPlayer): boolean {
+  const sq = myClub.value?.squad ?? [];
+  return !sp.starter && sq.some(p => p.starter && p.role === sp.role);
+}
+/** Can this starter be benched? (a same-role reserve can cover the slot.) */
+function canBench(sp: SquadPlayer): boolean {
+  const sq = myClub.value?.squad ?? [];
+  return sp.starter && sq.some(p => !p.starter && p.role === sp.role);
+}
+function startReserve(sp: SquadPlayer) {
+  const sq = myClub.value?.squad ?? [];
+  const drop = sq.filter(p => p.starter && p.role === sp.role).sort((a, b) => a.overall - b.overall)[0]; // weakest same-role starter
+  if (!drop) return;
+  const five = sq.filter(p => p.starter && p.id !== drop.id).map(p => p.id);
+  five.push(sp.id);
+  saveLineup(five);
+}
+function benchStarter(sp: SquadPlayer) {
+  const sq = myClub.value?.squad ?? [];
+  const sub = sq.filter(p => !p.starter && p.role === sp.role).sort((a, b) => b.overall - a.overall)[0]; // best same-role reserve
+  if (!sub) return;
+  const five = sq.filter(p => p.starter && p.id !== sp.id).map(p => p.id);
+  five.push(sub.id);
+  saveLineup(five);
+}
+
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
 const acadBusy = ref(false);
@@ -389,7 +425,11 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
                 <span class="lv-room" :class="{ grow: sp.room >= 5, done: sp.room === 0 }">{{ sp.room >= 5 ? `▲ +${sp.room}` : sp.room > 0 ? `+${sp.room}` : 'peaked' }}</span>
               </span>
               <span class="lv-mktval">{{ kfmt(sp.value) }}</span>
-              <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
+              <span class="lv-squadacts">
+                <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>
+                <button v-else-if="canBench(sp)" class="lv-scoutbtn" :disabled="marketBusy" title="bench him (a benched player rusts)" @click="benchStarter(sp)">bench</button>
+                <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
+              </span>
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
             </div>
           </div>

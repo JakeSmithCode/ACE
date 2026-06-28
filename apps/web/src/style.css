@@ -924,3 +924,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-acadacts{display:flex;gap:8px;align-items:center;justify-self:end}
 .lv-sellbtn.cut{background:transparent;border:1px solid var(--line);color:var(--muted-2)}
 .lv-sellbtn.cut:hover:not(:disabled){border-color:#c25;color:#e57}
+.lv-squadacts{display:flex;gap:8px;align-items:center;justify-self:end}
+.lv-scoutbtn.start{color:#5fd38a;border-color:rgba(95,211,138,.4)}
+.lv-scoutbtn.start:hover:not(:disabled){color:#7fe3a4;border-color:#5fd38a}

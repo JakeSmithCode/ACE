@@ -11,7 +11,7 @@ import { freeAgents, playerValue } from './market.js';
 import { topRivalBid, aiWantsToBuy } from './transfers.js';
 import { overall } from './develop.js';
 import { scoutedRange } from './scouting.js';
-import { clubTeam, startingFive, validFive, type WorldState, type WorldClub } from './state.js';
+import { clubTeam, startingFive, planFive, validFive, type WorldState, type WorldClub } from './state.js';
 
 /** The free-agent board for a world — deterministic per (seed, season), with handles
  *  disjoint from every rostered player (the engine assumes unique handles). The
@@ -155,7 +155,7 @@ export function resolveAiMarket(w: WorldState, available: Player[], max = 2): { 
  *  (your staff watch them daily) but the residual is real plasticity. */
 export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number }
 export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
-  const five = new Set(startingFive(c.roster).map(p => p.id));
+  const five = new Set(planFive(c).map(p => p.id));   // the five actually FIELDED (honours a saved lineup), so XI matches who plays + develops
   return c.roster.map(p => {
     const ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, 0);
     return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), ceiling, room: Math.max(0, ceiling[1] - ovr) };
