@@ -54,6 +54,17 @@ export function scoutedAttr(p: Player, attr: keyof Attributes, owned = false, sc
   return clamp(Math.round(truePot + noise(`${p.id}:${attr}`) * band), cur, 99);
 }
 
+/** A per-skill scouted breakdown — `cur` (what the skill IS) + `ceil` (the fogged
+ *  per-attribute ceiling) + `mech` (mechanical vs cerebral). This is potential per
+ *  SKILL, not a lump: a spiky prospect (elite entry ceiling, capped utility) becomes
+ *  legible and role-fit is a real read. The order is mechanical-first then cerebral. */
+export interface AttrScout { key: keyof Attributes; cur: number; ceil: number; mech: boolean }
+const ATTR_ORDER: (keyof Attributes)[] = ['aim', 'movement', 'entry', 'gameSense', 'utility', 'clutch'];
+const MECH_ATTRS = new Set<keyof Attributes>(['aim', 'movement', 'entry']);
+export function scoutedAttrs(p: Player, owned = false, scoutLevel = 0): AttrScout[] {
+  return ATTR_ORDER.map(key => ({ key, cur: Math.round(p.attr[key]), ceil: scoutedAttr(p, key, owned, scoutLevel), mech: MECH_ATTRS.has(key) }));
+}
+
 /** The scouted ceiling **range** — the gamble made legible. Wide for an
  *  unresolved prospect (real plasticity `potVar` + observation error), tight for
  *  a settled veteran you own. `[lo, hi]` overall — "this kid could be 78 or 94". */

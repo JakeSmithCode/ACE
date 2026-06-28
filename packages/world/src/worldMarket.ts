@@ -10,7 +10,7 @@ import type { Player } from '@ace/shared';
 import { freeAgents, playerValue } from './market.js';
 import { topRivalBid, aiWantsToBuy } from './transfers.js';
 import { overall } from './develop.js';
-import { scoutedRange } from './scouting.js';
+import { scoutedRange, scoutedAttrs, type AttrScout } from './scouting.js';
 import { clubTeam, startingFive, planFive, validFive, type WorldState, type WorldClub } from './state.js';
 
 /** The free-agent board for a world — deterministic per (seed, season), with handles
@@ -65,13 +65,13 @@ export function applySigning(w: WorldState, clubId: string, player: Player, cost
  *  ceiling — wide for a young/unresolved prospect (high upside, murky), tight for a
  *  settled veteran. The price already reflects the consensus, so the band is exactly
  *  the bet you're taking on top of it. */
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number }
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export function marketEntry(w: WorldState, p: Player, scoutLevel = 0): MarketEntry {
   // `value` is the market CONSENSUS (fogged at level 0 — the asking price you must
-  // clear). A paid report tightens only the `ceiling` band for YOUR eyes, never the
-  // price — so scouting is private information: learn the consensus is mispricing a
-  // gem, then sign him at the unchanged asking. That edge is the whole point.
-  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p), ceiling: scoutedRange(p, false, scoutLevel), scoutLevel };
+  // clear). A paid report tightens only the `ceiling` band + per-skill `attrs` for
+  // YOUR eyes, never the price — so scouting is private information: learn the
+  // consensus is mispricing a gem, then sign him at the unchanged asking.
+  return { handle: p.handle, role: p.role, age: p.age, overall: Math.round(overall(p)), value: playerValue(p, w.patch), contested: isContested(w, p), ceiling: scoutedRange(p, false, scoutLevel), scoutLevel, attrs: scoutedAttrs(p, false, scoutLevel) };
 }
 
 /** What a scouting report costs at the current level — 1.5k / 3k / 4.5k (matches the
@@ -153,11 +153,11 @@ export function resolveAiMarket(w: WorldState, available: Player[], max = 2): { 
  *  veteran sitting on his ceiling is done improving (flip him). `room` is that gap
  *  (ceiling-top − OVR), the at-a-glance "upside left" read. Owned → tighter bands
  *  (your staff watch them daily) but the residual is real plasticity. */
-export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number; attrs: AttrScout[] }
 export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
   const five = new Set(planFive(c).map(p => p.id));   // the five actually FIELDED (honours a saved lineup), so XI matches who plays + develops
   return c.roster.map(p => {
     const ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, 0);
-    return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), ceiling, room: Math.max(0, ceiling[1] - ovr) };
+    return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), ceiling, room: Math.max(0, ceiling[1] - ovr), attrs: scoutedAttrs(p, true, 0) };
   }).sort((a, b) => Number(b.starter) - Number(a.starter) || b.overall - a.overall);
 }

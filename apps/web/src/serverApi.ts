@@ -17,14 +17,15 @@ export interface LiveFixture {
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
 export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
-export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number }
+export interface AttrScout { key: string; cur: number; ceil: number; mech: boolean }
+export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
-export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; ceiling: [number, number]; room: number; attrs: AttrScout[] }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
-export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number }
+export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; owned: boolean; rating: number; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView }
 

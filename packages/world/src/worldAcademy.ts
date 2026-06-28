@@ -11,7 +11,7 @@ import { Rng } from '@ace/engine';
 import type { Player } from '@ace/shared';
 import { type Academy, academyIntake, academyCost, academyUpkeep, intakeSize, academyWageBill, ACADEMY_MAX } from './academy.js';
 import { developInSeason, developPlayer, overall, SEASON_SHARE } from './develop.js';
-import { scoutedRange } from './scouting.js';
+import { scoutedRange, scoutedAttrs, type AttrScout } from './scouting.js';
 import { newContract } from './finance.js';
 import type { WorldState } from './state.js';
 
@@ -24,7 +24,7 @@ const clubIndex = (w: WorldState, clubId: string) => {
 /** A prospect for the wire — the gamble made legible. Owned (your academy) → tighter
  *  bands, but a teen's residual plasticity is wide: a raw 14-year-old is the foggiest
  *  read in the game. `room` is the OVR of upside left (ceiling-top − current). */
-export interface ProspectView { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number }
+export interface ProspectView { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: ProspectView[] }
 
 /** The academy view for an owner — the wing's level + cost, and every prospect with
@@ -35,8 +35,8 @@ export function academyView(a: Academy, balance: number, scoutOf: (handle: strin
     level: a.level, max: ACADEMY_MAX, cost, canUpgrade: cost != null && balance >= cost,
     upkeep: academyUpkeep(a.level), intakeNext: intakeSize(a.level), wageBill: academyWageBill(a.prospects),
     prospects: a.prospects.map(p => {
-      const ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, scoutOf(p.handle));
-      return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, ceiling, room: Math.max(0, ceiling[1] - ovr), scoutLevel: scoutOf(p.handle) };
+      const lvl = scoutOf(p.handle), ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, lvl);
+      return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, ceiling, room: Math.max(0, ceiling[1] - ovr), scoutLevel: lvl, attrs: scoutedAttrs(p, true, lvl) };
     }),
   };
 }

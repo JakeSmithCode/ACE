@@ -200,6 +200,15 @@ async function scoutProspect(p: { id: string; handle: string }) {
   } catch (e) { acadMsg.value = (e as Error).message; } finally { acadBusy.value = false; }
 }
 
+// --- per-skill scouting detail — the spiky-prospect read (role-fit is a real call) ---
+const expanded = ref<Set<string>>(new Set());
+function toggleExpand(key: string) {
+  const s = new Set(expanded.value);
+  if (s.has(key)) s.delete(key); else s.add(key);
+  expanded.value = s;
+}
+const ATTR_LABEL: Record<string, string> = { aim: 'AIM', movement: 'MOV', entry: 'ENT', gameSense: 'GME', utility: 'UTL', clutch: 'CLT' };
+
 const hue = (tag: string) => (tag.charCodeAt(0) * 47 + (tag.charCodeAt(1) || 0) * 13) % 360;
 // the score to display: the running (completed-round) tally while live, but the TRUE
 // final once revealed (the live running-score excludes the in-progress decider round)
@@ -395,9 +404,10 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <span v-if="wireNote" class="lv-wire">⇄ {{ wireNote }}</span>
         </div>
         <div class="lv-mktboard">
-          <div v-for="e in board" :key="e.handle" class="lv-mktrow">
+          <template v-for="e in board" :key="e.handle">
+          <div class="lv-mktrow">
             <span class="rs-role" :class="e.role">{{ e.role.slice(0, 3).toUpperCase() }}</span>
-            <b class="lv-mkthandle">{{ e.handle }}</b>
+            <b class="lv-mkthandle clk" :class="{ open: expanded.has('m:'+e.handle) }" title="per-skill scouting" @click="toggleExpand('m:'+e.handle)">{{ e.handle }}<i class="lv-disc">▾</i></b>
             <span class="lv-mktage">age {{ e.age }}</span>
             <span class="lv-mktovr">{{ e.overall }} <i>OVR</i></span>
             <span class="lv-ceilcell">
@@ -410,14 +420,23 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             <button class="lv-go sm" :disabled="marketBusy" @click="bid(e)">bid</button>
             <span class="lv-mktmsg" :class="{ ok: (bidMsg[e.handle] || '').startsWith('✓') }">{{ bidMsg[e.handle] }}</span>
           </div>
+          <div v-if="expanded.has('m:'+e.handle)" class="lv-attrs">
+            <div v-for="a in e.attrs" :key="a.key" class="lv-attr" :class="{ mech: a.mech }">
+              <span class="lv-attrk">{{ ATTR_LABEL[a.key] }}</span>
+              <span class="lv-attrbar"><i class="fill" :style="{ width: a.cur + '%' }"></i><i v-if="a.ceil > a.cur" class="gap" :style="{ left: a.cur + '%', width: (a.ceil - a.cur) + '%' }"></i><i class="tick" :style="{ left: a.ceil + '%' }"></i></span>
+              <span class="lv-attrv">{{ a.cur }}<em v-if="a.ceil > a.cur">↗{{ a.ceil }}</em></span>
+            </div>
+          </div>
+          </template>
           <div v-if="!board.length" class="lv-empty">loading the board…</div>
         </div>
         <div v-if="myClub.squad && myClub.squad.length" class="lv-squad">
           <div class="lv-mkth"><span class="lv-kicker">Your squad</span><span class="lv-mktsub">sell to the richest club that wants him — blocked if it would break your valid five</span></div>
           <div class="lv-mktboard">
-            <div v-for="sp in myClub.squad" :key="sp.id" class="lv-mktrow squad">
+            <template v-for="sp in myClub.squad" :key="sp.id">
+            <div class="lv-mktrow squad">
               <span class="rs-role" :class="sp.role">{{ sp.role.slice(0, 3).toUpperCase() }}</span>
-              <b class="lv-mkthandle">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i></b>
+              <b class="lv-mkthandle clk" :class="{ open: expanded.has('s:'+sp.id) }" title="per-skill scouting" @click="toggleExpand('s:'+sp.id)">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i><i class="lv-disc">▾</i></b>
               <span class="lv-mktage">age {{ sp.age }}</span>
               <span class="lv-mktovr">{{ sp.overall }} <i>OVR</i></span>
               <span class="lv-roomcell" :title="`scouted ceiling ${sp.ceiling[0]}–${sp.ceiling[1]} · ${sp.room} OVR of upside left`">
@@ -432,6 +451,14 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               </span>
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
             </div>
+            <div v-if="expanded.has('s:'+sp.id)" class="lv-attrs">
+              <div v-for="a in sp.attrs" :key="a.key" class="lv-attr" :class="{ mech: a.mech }">
+                <span class="lv-attrk">{{ ATTR_LABEL[a.key] }}</span>
+                <span class="lv-attrbar"><i class="fill" :style="{ width: a.cur + '%' }"></i><i v-if="a.ceil > a.cur" class="gap" :style="{ left: a.cur + '%', width: (a.ceil - a.cur) + '%' }"></i><i class="tick" :style="{ left: a.ceil + '%' }"></i></span>
+                <span class="lv-attrv">{{ a.cur }}<em v-if="a.ceil > a.cur">↗{{ a.ceil }}</em></span>
+              </div>
+            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -453,9 +480,10 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <span v-if="acadMsg" class="lv-wire" :class="{ ok: acadMsg.startsWith('✓') }">{{ acadMsg }}</span>
         </div>
         <div class="lv-mktboard">
-          <div v-for="p in academy.prospects" :key="p.id" class="lv-mktrow prospect">
+          <template v-for="p in academy.prospects" :key="p.id">
+          <div class="lv-mktrow prospect">
             <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
-            <b class="lv-mkthandle">{{ p.handle }}<i class="lv-prospect">YTH</i></b>
+            <b class="lv-mkthandle clk" :class="{ open: expanded.has('a:'+p.id) }" title="per-skill scouting" @click="toggleExpand('a:'+p.id)">{{ p.handle }}<i class="lv-prospect">YTH</i><i class="lv-disc">▾</i></b>
             <span class="lv-mktage">age {{ p.age }}</span>
             <span class="lv-mktovr">{{ p.overall }} <i>OVR</i></span>
             <span class="lv-roomcell" :title="`scouted ceiling ${p.ceiling[0]}–${p.ceiling[1]} · ${p.room} OVR of upside`">
@@ -469,6 +497,14 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               <button class="lv-sellbtn cut" :disabled="acadBusy" @click="cutProspect(p)">cut</button>
             </span>
           </div>
+          <div v-if="expanded.has('a:'+p.id)" class="lv-attrs">
+            <div v-for="a in p.attrs" :key="a.key" class="lv-attr" :class="{ mech: a.mech }">
+              <span class="lv-attrk">{{ ATTR_LABEL[a.key] }}</span>
+              <span class="lv-attrbar"><i class="fill" :style="{ width: a.cur + '%' }"></i><i v-if="a.ceil > a.cur" class="gap" :style="{ left: a.cur + '%', width: (a.ceil - a.cur) + '%' }"></i><i class="tick" :style="{ left: a.ceil + '%' }"></i></span>
+              <span class="lv-attrv">{{ a.cur }}<em v-if="a.ceil > a.cur">↗{{ a.ceil }}</em></span>
+            </div>
+          </div>
+          </template>
           <div v-if="!academy.prospects.length" class="lv-empty">{{ academy.level === 0 ? 'build the wing to start taking intakes' : 'next intake arrives when the season rolls over' }}</div>
         </div>
       </div>
