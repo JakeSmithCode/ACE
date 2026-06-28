@@ -137,13 +137,19 @@ function openStream() {
   fixtures.value = [];
   stopStream = server.value.liveStream(world.value.season, DAY.value, fs => { fixtures.value = [...fs].sort((a, b) => a.slot - b.slot); }, refreshTable);
 }
-// advance the season a match-day — your authored tactics drive your next fixtures
+// advance the season a match-day — your authored tactics drive your next fixtures.
+// at the season boundary it rolls over (playoffs → champion → new season).
+const champBanner = ref<{ season: number; champion: string } | null>(null);
 async function advance() {
   if (!server.value || !token.value) return;
   advancing.value = true;
   try {
     const r = await server.value.advance(token.value);
-    if (!r.done) { DAY.value = r.broadcastDay; if (world.value) world.value = await server.value.world(); openStream(); await refreshTable(); await refreshMe(); }
+    if (r.done) return;
+    DAY.value = r.broadcastDay;
+    if (world.value) world.value = await server.value.world();
+    openStream(); await refreshTable(); await refreshMe();
+    if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); }
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
@@ -288,6 +294,13 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- season rolled over → the champion + a fresh season -->
+      <div v-if="champBanner" class="lv-champ">
+        <span class="lv-trophy">🏆</span>
+        <span class="lv-champtxt"><b>{{ champBanner.champion }}</b> won Season {{ champBanner.season }} — <i>Season {{ champBanner.season + 1 }} begins</i></span>
+        <button class="lv-champx" @click="champBanner = null">✕</button>
       </div>
 
       <!-- the day's live matches -->

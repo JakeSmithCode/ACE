@@ -86,16 +86,23 @@ export function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> 
   };
   cacheDay(1, 0);
   /** Tick the next match-day onto the air (a fresh broadcast window). The owner's
-   *  authored tactics drive their fixtures, so a season plays out under your plan. */
-  const advance = (): { broadcastDay: number; done: boolean } => {
+   *  authored tactics drive their fixtures, so a season plays out under your plan.
+   *  At the season boundary it rolls the season over (playoffs → settle → develop →
+   *  patch → promote/relegate) and puts the NEW season's day 0 on air — so the season
+   *  cycle completes: a champion is crowned and a fresh season begins. */
+  const advance = (): { broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string } => {
+    const tickDay = (w: WorldState) => {
+      liveKickoff = clock();
+      runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
+      liveDay = w.day;
+      cacheDay(w.season, w.day);
+    };
     const w = store.loadWorld(id)!;
-    if (w.day >= seasonLength(w)) return { broadcastDay: liveDay, done: true };   // season's match-days exhausted
-    const day = w.day;
-    liveKickoff = clock();
-    runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
-    liveDay = day;
-    cacheDay(w.season, day);
-    return { broadcastDay: liveDay, done: false };
+    if (w.day < seasonLength(w)) { tickDay(w); return { broadcastDay: liveDay, done: false }; }
+    // season's match-days exhausted → roll it over, then open the new season's day 0
+    const roll = runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
+    tickDay(store.loadWorld(id)!);
+    return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
   };
   const fixtureAt = (season: number, day: number, slot: number): FixtureRow | undefined =>
     store.fixtures(id, season).find(f => f.day === day && f.slot === slot);

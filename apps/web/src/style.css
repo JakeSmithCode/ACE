@@ -848,3 +848,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-advance:hover{background:rgba(34,211,238,.24)}
 .lv-advance:disabled{opacity:.5;cursor:default}
 .lv-seasondone{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.06em;color:var(--gold);text-transform:uppercase}
+/* Match Center — season champion banner */
+.lv-champ{display:flex;align-items:center;gap:14px;background:linear-gradient(110deg,rgba(229,181,103,.16),var(--bg-2) 70%);border:1px solid rgba(229,181,103,.4);clip-path:var(--bevel);padding:13px 18px;margin-bottom:16px}
+.lv-trophy{font-size:24px;filter:drop-shadow(0 0 10px rgba(229,181,103,.5))}
+.lv-champtxt{font-family:var(--display);font-size:19px;letter-spacing:.01em}
+.lv-champtxt b{color:var(--gold)}
+.lv-champtxt i{font-style:normal;color:var(--muted)}
+.lv-champx{margin-left:auto;background:none;border:none;color:var(--muted-2);font-size:14px;cursor:pointer}
+.lv-champx:hover{color:var(--text)}
