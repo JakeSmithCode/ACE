@@ -37,6 +37,7 @@ export interface LeaderRow { rank: number; handle: string; role: string; age: nu
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
 export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
+export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -77,6 +78,12 @@ export class AceServer {
   news(): Promise<{ news: NewsItem[] }> { return fetch(`${this.base}/news`).then(r => j<{ news: NewsItem[] }>(r)); }
   /** Season player stats (top fraggers) from resolved watched matches. */
   stats(): Promise<{ season: number; players: StatRow[] }> { return fetch(`${this.base}/stats`).then(r => j<{ season: number; players: StatRow[] }>(r)); }
+  /** Your notification inbox (targeted events) + unread count. */
+  notifications(token: string): Promise<{ items: Notif[]; unread: number }> {
+    return fetch(`${this.base}/notifications`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ items: Notif[]; unread: number }>(r));
+  }
+  /** Mark one notification (by id) or all (omit) read. */
+  markNotifsRead(token: string, id?: number): Promise<{ ok: boolean; unread: number }> { return this.post('/notifications/read', id == null ? {} : { id }, token); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

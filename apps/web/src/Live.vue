@@ -65,7 +65,7 @@ async function doAuth() {
     await refreshMe();
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); } }
+async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); } }
 async function doClaim() {
   if (!server.value || !token.value || !claimTag.value) return; busy.value = true; authErr.value = '';
   try { myClub.value = await server.value.claim(claimTag.value, token.value); await refreshMe(); }  // refresh → /me carries the plan
@@ -246,7 +246,7 @@ async function connect() {
     if (wp) { const [ws, wd, wsl] = wp.split('/').map(Number); if (![ws, wd, wsl].some(isNaN)) void watchAt(ws, wd, wsl); }
     // standings only move at reveal — refresh them every few seconds while watching
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(refreshTable, 4000);
+    pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); }, 4000);
   } catch (e) { status.value = 'error'; errMsg.value = (e as Error).message; }
 }
 function openStream() {
@@ -284,6 +284,22 @@ async function loadHonors() { if (server.value) try { hof.value = await server.v
 const newsFeed = ref<NewsItem[]>([]);
 const newsIcon: Record<string, string> = { transfer: '⇄', champion: '🏆', season: '◇', award: '★' };
 async function loadNews() { if (server.value) try { newsFeed.value = (await server.value.news()).news; } catch { /* transient */ } }
+
+// notifications — the world targeted to YOU (your fixtures/results/season events)
+const notifList = ref<import('./serverApi').Notif[]>([]);
+const notifUnread = ref(0);
+const notifOpen = ref(false);
+const notifIcon: Record<string, string> = { fixture: '⚔', result: '▣', season: '◇', award: '★', system: 'ⓘ' };
+async function loadNotifs() {
+  if (!server.value || !token.value) return;
+  try { const r = await server.value.notifications(token.value); notifList.value = r.items; notifUnread.value = r.unread; } catch { /* transient */ }
+}
+async function toggleNotifs() {
+  notifOpen.value = !notifOpen.value;
+  if (notifOpen.value && server.value && token.value && notifUnread.value) {
+    try { await server.value.markNotifsRead(token.value); notifUnread.value = 0; notifList.value = notifList.value.map(n => ({ ...n, read: true })); } catch { /* transient */ }
+  }
+}
 
 // the world's best players — a cross-club prestige board (who's the best, and where)
 const leaders = ref<LeaderRow[]>([]);
@@ -410,6 +426,22 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
           <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
           <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
+          <div class="lv-bellwrap">
+            <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
+          </div>
+          <Teleport to="body">
+            <div v-if="notifOpen" class="lv-notifpanel">
+              <div class="lv-notifhead"><span class="lv-kicker">Notifications</span><button class="lv-notifx" @click="notifOpen = false">✕</button></div>
+              <div class="lv-notiflist">
+                <div v-for="n in notifList" :key="n.id" class="lv-notifrow" :class="[n.kind, { unread: !n.read }]">
+                  <i class="lv-notifico">{{ notifIcon[n.kind] }}</i>
+                  <span class="lv-notiftext">{{ n.text }}</span>
+                  <span class="lv-notifage">S{{ n.season }}</span>
+                </div>
+                <div v-if="!notifList.length" class="lv-empty">no notifications yet</div>
+              </div>
+            </div>
+          </Teleport>
           <button class="lv-signout" @click="signOut">sign out</button>
         </template>
         <template v-else-if="authed">

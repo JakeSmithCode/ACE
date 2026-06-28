@@ -1020,5 +1020,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-newsitem.champion{color:#e6c66a}
 .lv-newsitem.award{color:#7fc8e6}
 .lv-verifynote{font-family:var(--label);font-size:10px;letter-spacing:.04em;color:#5fd38a}
+/* notifications bell + panel */
+.lv-bellwrap{position:relative;display:inline-block}
+.lv-bell{position:relative;background:transparent;border:1px solid var(--line);border-radius:7px;padding:4px 8px;cursor:pointer;font-size:14px;line-height:1;transition:border-color .12s}
+.lv-bell:hover,.lv-bell.on{border-color:var(--brand)}
+.lv-bellbadge{position:absolute;top:-6px;right:-6px;background:#e2486a;color:#fff;font-family:var(--label);font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 0 2px var(--bg,#0a0e14)}
+.lv-notifpanel{position:fixed;top:150px;right:28px;z-index:120;width:344px;max-height:60vh;display:flex;flex-direction:column;background:#0c131c;border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+.lv-notifhead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--line)}
+.lv-notifx{background:none;border:none;color:var(--muted-2);cursor:pointer;font-size:13px}
+.lv-notiflist{overflow-y:auto;padding:4px}
+.lv-notifrow{display:grid;grid-template-columns:20px 1fr auto;gap:9px;align-items:start;padding:9px 9px;border-radius:7px;font-size:12.5px;line-height:1.35}
+.lv-notifrow:hover{background:rgba(255,255,255,.025)}
+.lv-notifrow.unread{background:rgba(90,160,210,.07)}
+.lv-notifico{font-style:normal;opacity:.85;text-align:center}
+.lv-notifrow.award .lv-notifico{color:#e6c66a}
+.lv-notifrow.result .lv-notifico{color:#7fc8e6}
+.lv-notiftext{color:var(--text)}
+.lv-notifrow.unread .lv-notiftext{font-weight:500}
+.lv-notifage{font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7;white-space:nowrap;margin-top:2px}
 .lv-newsitem.season{color:var(--muted-2)}
 .lv-newsage{font-style:normal;font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7}

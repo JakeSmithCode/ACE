@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, clubTeam, soloRank, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, clubTeam, soloRank, ownedClubs, RANK_TIERS, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -127,6 +127,22 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     news.push({ kind, text, season, day });
     if (news.length > 60) news.shift();   // keep it bounded
   };
+  // per-account notifications — the world news feed targeted to YOU (your fixtures +
+  // results, season outcomes, your player's awards). In-memory keyed by account (the
+  // PgStore per-account table is the same follow-up as academy/scout state).
+  type NotifKind = 'fixture' | 'result' | 'season' | 'award' | 'system';
+  interface Notif { id: number; kind: NotifKind; text: string; season: number; day: number; read: boolean; at: number }
+  const notifs = new Map<string, Notif[]>();
+  let notifSeq = 0;
+  const notify = (account: string, kind: NotifKind, text: string, season: number, day: number) => {
+    const list = notifs.get(account) ?? [];
+    list.unshift({ id: ++notifSeq, kind, text, season, day, read: false, at: clock() });
+    if (list.length > 50) list.length = 50;   // bounded inbox
+    notifs.set(account, list);
+  };
+  const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
+  const ord = (n: number) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
+  const tierName = (t: number) => RANK_TIERS[t] ?? `Tier ${t + 1}`;
   const getBoard = async () => (board ??= marketBoard((await store.loadWorld(id))!));
   // the live broadcast cursor — which match-day is on air + when it kicked off. Mutable
   // so the season can PROGRESS: `advance` ticks the next day and moves the cursor.
@@ -179,8 +195,33 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         await store.saveWorld(id, dev.world);
       }
     };
+    // targeted notifications: each owner gets their fixture-going-live + any new result
+    // (deduped by fixture key, so the same event never double-notifies).
+    const notifyOwners = async () => {
+      const wn = (await store.loadWorld(id))!;
+      const owned = ownedClubs(wn);
+      if (!owned.length) return;
+      const rows = await store.fixtures(id, wn.season);
+      for (const c of owned) {
+        if (!c.owner) continue;
+        const ci = wn.clubs.indexOf(c);
+        for (const f of rows) {
+          if (f.home !== ci && f.away !== ci) continue;
+          const k = key(f), opp = labelOf(f.home === ci ? f.away : f.home);
+          if (f.day === liveDay && !notifiedLive.has(k)) {
+            notifiedLive.add(k);
+            notify(c.owner, 'fixture', `Match-day ${f.day + 1}: ${c.tag} vs ${opp.tag}${f.inputSnapshot ? ' · ' + f.inputSnapshot.map : ''} — live now`, wn.season, f.day);
+          }
+          if (fixtureStatus(f, clock()) === 'resolved' && !notifiedResults.has(k)) {
+            notifiedResults.add(k);
+            const us = f.home === ci ? f.homeScore : f.awayScore, them = f.home === ci ? f.awayScore : f.homeScore;
+            notify(c.owner, 'result', `${us > them ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`, wn.season, f.day);
+          }
+        }
+      }
+    };
     const w = (await store.loadWorld(id))!;
-    if (w.day < seasonLength(w)) { await tickDay(w); return { broadcastDay: liveDay, done: false, rivalSignings: await churnMarket() }; }
+    if (w.day < seasonLength(w)) { await tickDay(w); const rs = await churnMarket(); await notifyOwners(); return { broadcastDay: liveDay, done: false, rivalSignings: rs }; }
     // capture the finishing season's MVP (top fragger) before the world rolls over —
     // the season's resolved timelines are still current here; tie it into the legacy feed.
     const mvpAcc = new Map<string, PlayerStat>();
@@ -191,8 +232,22 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     pushNews('season', `Season ${roll.season + 1} begins`, roll.season + 1, 0);
+    // season-end notifications per owner: final placement (from the finished season, using
+    // the pre-rollover world `w` for the right tier), the title, and your-player-is-MVP.
+    {
+      const rows = await store.fixtures(id, roll.season);
+      for (const c of ownedClubs(w)) {
+        if (!c.owner) continue;
+        const table = standingsView(w, rows, c.tier, c.group, clock());
+        const pos = table.findIndex(t => t.club === c.tag) + 1;
+        if (pos) notify(c.owner, 'season', `Season ${roll.season}: ${c.tag} finished ${ord(pos)} in ${tierName(c.tier)}`, roll.season, liveDay);
+        if (roll.champion === c.tag) notify(c.owner, 'award', `🏆 ${c.tag} are Season ${roll.season} champions!`, roll.season, liveDay);
+        if (mvp && c.roster.some(p => p.handle === mvp.handle)) notify(c.owner, 'award', `★ Your player ${mvp.handle} won Season ${roll.season} MVP (${mvp.kills} kills)`, roll.season, liveDay);
+      }
+    }
     await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
     await tickDay((await store.loadWorld(id))!);
+    await notifyOwners();   // the new season's day-0 fixture going live
     return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
   };
   const fixtureAt = async (season: number, day: number, slot: number): Promise<FixtureRow | undefined> =>
@@ -370,6 +425,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills }));
       return json(res, 200, { season: w.season, players });
     }
+    // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
+    if (path[0] === 'notifications' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const list = notifs.get(account) ?? [];
+      return json(res, 200, { items: list, unread: list.filter(n => !n.read).length });
+    }
+    // POST /notifications/read  → mark one (by id) or all read
+    if (path[0] === 'notifications' && path[1] === 'read' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const b = (await readBody(req)) as { id?: number };
+      notifs.set(account, (notifs.get(account) ?? []).map(n => (b.id == null || n.id === b.id ? { ...n, read: true } : n)));
+      return json(res, 200, { ok: true, unread: (notifs.get(account) ?? []).filter(n => !n.read).length });
+    }
     // GET /news  → the world news feed (transfers + champions, newest first)
     if (path[0] === 'news' && path.length === 1) {
       return json(res, 200, { news: [...news].reverse().slice(0, 40) });
@@ -481,7 +549,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const w = (await store.loadWorld(id))!;
       const c = w.clubs.find(x => x.tag.toLowerCase() === path[1].toLowerCase() || x.id === path[1]);
       if (!c) return json(res, 404, { error: 'no such club' });
-      try { const club = await claim(store, id, c.id, account); return json(res, 200, publicClub((await store.loadWorld(id))!, club)); }
+      try {
+        const club = await claim(store, id, c.id, account);
+        notify(account, 'system', `Welcome to ${club.name} — you're the new owner. Author your tactics + lineup to drive your matches.`, (await store.loadWorld(id))!.season, liveDay);
+        // surface the current live fixture immediately (the bell shouldn't be empty)
+        const ci = (await store.loadWorld(id))!.clubs.findIndex(x => x.id === club.id);
+        const fx = (await store.fixtures(id, (await store.loadWorld(id))!.season)).find(f => f.day === liveDay && (f.home === ci || f.away === ci));
+        if (fx) { notifiedLive.add(key(fx)); const opp = labelOf(fx.home === ci ? fx.away : fx.home); notify(account, 'fixture', `Match-day ${fx.day + 1}: ${club.tag} vs ${opp.tag}${fx.inputSnapshot ? ' · ' + fx.inputSnapshot.map : ''} — live now`, (await store.loadWorld(id))!.season, fx.day); }
+        return json(res, 200, publicClub((await store.loadWorld(id))!, club));
+      }
       catch (e) { return json(res, 409, { error: (e as Error).message }); }
     }
     // PATCH /me/plan  → author your club's plan (x-account)
