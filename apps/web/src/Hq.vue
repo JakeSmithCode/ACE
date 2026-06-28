@@ -17,7 +17,7 @@ import { useWorld } from './world';
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
   total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, titles,
-  myDivision, division, lastMoves } = w;
+  myDivision, division, lastMoves, objective, objectiveMet, objectiveRank, objectiveOutcome } = w;
 const N = w.N;
 const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_SIZE;
 
@@ -281,6 +281,25 @@ onUnmounted(() => { viewer?.destroy(); });
           </div>
         </div>
 
+        <!-- board objective -->
+        <div class="hq-panel hq-obj">
+          <h3><span class="b"></span>Board objective <span class="rs-sub">the brief for season {{ season }}</span></h3>
+          <div class="hq-objbody">
+            <div class="hq-objgoal" :class="objective.kind">
+              <i class="hq-objicon">⌖</i>
+              <div class="hq-objtext">
+                <b>{{ objective.label }}</b>
+                <span>{{ objective.kind === 'promote' ? `finish top ${objective.needRank}` : objective.kind === 'tophalf' ? `finish in the top ${objective.needRank}` : `stay out of the bottom ${PROMO}` }}</span>
+              </div>
+              <span class="hq-objtrack" :class="objectiveMet ? 'on' : 'off'">{{ objectiveMet ? '● on track' : '○ off pace' }}</span>
+            </div>
+            <div class="hq-objnow">Currently <b>{{ objectiveRank }}<sup>{{ ['st','nd','rd'][objectiveRank-1] || 'th' }}</sup></b> of {{ DIV_SIZE }} · board bonus <b class="pos">{{ fmt(objective.bonus) }}</b> if met</div>
+            <div v-if="objectiveOutcome" class="hq-objlast" :class="objectiveOutcome.met ? 'met' : 'miss'">
+              Last season: {{ objectiveOutcome.met ? `✓ ${objectiveOutcome.label} achieved — board bonus paid` : `✗ ${objectiveOutcome.label} missed (${objectiveOutcome.finish}${['st','nd','rd'][objectiveOutcome.finish-1] || 'th'})` }}
+            </div>
+          </div>
+        </div>
+
         <!-- finances -->
         <div class="hq-panel hq-fin">
           <h3><span class="b"></span>Finances</h3>
@@ -289,6 +308,7 @@ onUnmounted(() => { viewer?.destroy(); });
             <div class="hq-led"><span>Sponsor (s{{ ledger.season }})</span><b class="pos">+{{ fmt(ledger.sponsor) }}</b></div>
             <div class="hq-led"><span>Prize money</span><b class="pos">+{{ fmt(ledger.prize) }}</b></div>
             <div v-if="ledger.playoff" class="hq-led"><span>Playoff bonus 🏆</span><b class="pos">+{{ fmt(ledger.playoff) }}</b></div>
+            <div v-if="objectiveOutcome && objectiveOutcome.bonus" class="hq-led"><span>Board objective ⌖</span><b class="pos">+{{ fmt(objectiveOutcome.bonus) }}</b></div>
             <div class="hq-led"><span>Squad wages</span><b class="neg">−{{ fmt(ledger.wages) }}</b></div>
             <div v-if="ledger.upkeep" class="hq-led"><span>HQ upkeep</span><b class="neg">−{{ fmt(ledger.upkeep) }}</b></div>
             <div class="hq-led net"><span>Net last season</span><b :class="ledger.net >= 0 ? 'pos' : 'neg'">{{ ledger.net >= 0 ? '+' : '−' }}{{ fmt(Math.abs(ledger.net)) }}</b></div>

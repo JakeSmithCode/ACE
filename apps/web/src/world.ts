@@ -263,6 +263,28 @@ const myTeam = computed(() => clubs.value[myClub.value].team);
 const rankOf = (i: number) => tableOf(division.value[i]).findIndex(s => s.club === i) + 1;
 const myStanding = computed(() => table.value.find(s => s.club === myClub.value));
 const myResults = computed(() => results.value.filter(r => r.home === myClub.value || r.away === myClub.value));
+
+// ── The board's season objective (a manager-game staple, made fair for ACE) ──────────
+// At season start the board sets an expectation from your PRE-SEASON strength rank
+// within your division: a title-favourite is told to win promotion, a mid club to make
+// the top half, an underdog to survive. Meeting it pays a board bonus; it's never a
+// punishment beyond the standing itself (DESIGN §18 — pressure, not a mugging). Snapshotted
+// so it stays a fixed target even as rosters drift through the season.
+type Objective = { kind: 'promote' | 'tophalf' | 'survive'; label: string; needRank: number; bonus: number; seed: number };
+function computeObjective(): Objective {
+  const d = division.value[myClub.value];
+  const members = clubs.value.map((c, i) => ({ i, s: c.strength })).filter(m => division.value[m.i] === d).sort((a, b) => b.s - a.s);
+  const seed = members.findIndex(m => m.i === myClub.value) + 1;   // 1 = strongest in the tier
+  if (seed <= PROMO) return { kind: 'promote', label: 'Win promotion', needRank: PROMO, bonus: 9000, seed };
+  if (seed <= DIV_SIZE / 2) return { kind: 'tophalf', label: 'Finish top half', needRank: DIV_SIZE / 2, bonus: 4500, seed };
+  return { kind: 'survive', label: 'Avoid relegation', needRank: DIV_SIZE - PROMO, bonus: 2500, seed };
+}
+const objective = ref<Objective>(computeObjective());
+// the just-finished season's verdict (for the off-season banner; null until a season rolls).
+const objectiveOutcome = ref<{ met: boolean; label: string; bonus: number; finish: number } | null>(null);
+// live progress: your current division rank vs the target (met = on/ahead of pace).
+const objectiveRank = computed(() => rankOf(myClub.value));
+const objectiveMet = computed(() => objectiveRank.value > 0 && objectiveRank.value <= objective.value.needRank);
 const nextFixture = computed(() => done.value ? null
   : mySchedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
 const nextOpponent = computed(() => {
@@ -378,8 +400,13 @@ function advanceSeason() {
   const myWages = squadWageBill(myRoster.value, patch.value) + academyWageBill(academy.value.prospects);
   const myUpkeep = facilityUpkeep(facilities.value) + academyUpkeep(academy.value.level);
   ledger.value = { season: season.value, ...settle(myClub.value, myWages + myUpkeep), wages: myWages, upkeep: myUpkeep };
+  // did you meet the board's objective? a bonus if so (never a fine — pressure, not a mugging).
+  const objFinish = rankIn(myClub.value);
+  const objMet = objFinish > 0 && objFinish <= objective.value.needRank;
+  const objBonus = objMet ? objective.value.bonus : 0;
+  objectiveOutcome.value = { met: objMet, label: objective.value.label, bonus: objBonus, finish: objFinish };
   balances.value = balances.value.map((b, i) =>
-    i === myClub.value ? b + ledger.value!.net : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
+    i === myClub.value ? b + ledger.value!.net + objBonus : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
   // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
   const pr = promoteRelegate(division.value, tables, PROMO);
   division.value = pr.division; lastMoves.value = pr.moves;
@@ -410,6 +437,7 @@ function advanceSeason() {
   patch.value = m.patch; metaChanges.value = m.changes;
   syncLineup();
   season.value++;
+  objective.value = computeObjective();   // the board sets a fresh target for the new season + division
   runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
@@ -457,6 +485,7 @@ function selectClub(i: number) {
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
+  objective.value = computeObjective(); objectiveOutcome.value = null;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -475,6 +504,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   forcedStart.value = new Set(); forcedBench.value = new Set();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
   facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
+  objective.value = computeObjective(); objectiveOutcome.value = null;
   refreshMarket();
 }
 
@@ -816,7 +846,7 @@ function snapshot() {
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
-    prevById: [...prevById.value.entries()],
+    prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
   };
 }
 function save() {
@@ -840,6 +870,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   contractDepartures.value = o.contractDepartures ?? []; marketWave.value = o.marketWave ?? [];
   scouted.value = new Map(o.scouted ?? []);
   prevById.value = new Map(o.prevById);
+  objectiveOutcome.value = (o as { objectiveOutcome?: typeof objectiveOutcome.value }).objectiveOutcome ?? null;
+  objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
 
@@ -867,6 +899,7 @@ export function useWorld() {
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
+    objective, objectiveMet, objectiveRank, objectiveOutcome,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
     bidFor, isContested, askingOf, chemOf, teamCohesion,
