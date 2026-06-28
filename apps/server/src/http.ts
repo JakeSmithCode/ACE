@@ -17,12 +17,17 @@ import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
+import { IntervalScheduler, type Scheduler } from './scheduler.js';
 import { buildCircuitView, type CircuitView } from './circuitView.js';
 import { randomBytes } from 'node:crypto';
 
 export interface LiveServerOpts {
   seed?: number; broadcastSecs?: number; port?: number;
   clock?: () => number;   // seconds; default real wall-clock
+  /** If set, a Scheduler auto-advances the world a match-day every N seconds — the
+   *  production "matches resolve on a schedule" behaviour (BullMQ in prod; an in-process
+   *  IntervalScheduler here). Unset → manual /advance only. */
+  autoAdvanceSecs?: number;
 }
 export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; auth: AuthService; close: () => Promise<void> }
 
@@ -712,11 +717,21 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     return json(res, 404, { error: 'not found' });
   });
 
+  // the scheduled tick worker (PHASE2 §6): when autoAdvanceSecs is set, a Scheduler
+  // resolves the next match-day on a cadence — the production "matches resolve on a
+  // schedule" behaviour (BullMQ in prod; an in-process IntervalScheduler here, the same
+  // `advance` fn either way). Unset → manual /advance only.
+  let scheduler: Scheduler | null = null;
+  if (opts.autoAdvanceSecs) {
+    scheduler = new IntervalScheduler(opts.autoAdvanceSecs * 1000);
+    scheduler.start(() => advance());
+  }
+
   return new Promise(resolve => {
     server.listen(opts.port ?? 0, () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : opts.port;
-      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => server.close(() => r())) });
+      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => { scheduler?.stop(); server.close(() => r()); }) });
     });
   });
 }
