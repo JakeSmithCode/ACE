@@ -857,3 +857,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-champx{margin-left:auto;background:none;border:none;color:var(--muted-2);font-size:14px;cursor:pointer}
 .lv-champx:hover{color:var(--text)}
 .lv-wire{margin-left:auto;font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--gold);animation:lv-pulse 2s ease-in-out 2}
+/* Match Center — public club page modal */
+.lv-badge.clickable,.lv-cname.clickable{cursor:pointer;transition:filter .12s ease}
+.lv-badge.clickable:hover{filter:brightness(1.25)}
+.lv-cname.clickable:hover{color:var(--brand)}
+.lv-clubmodal{position:fixed;inset:0;z-index:50;background:rgba(8,12,18,.72);display:grid;place-items:center;padding:20px}
+.lv-clubcard{position:relative;width:min(440px,92vw);background:var(--bg-2);border:1px solid var(--line-2);clip-path:var(--bevel);padding:22px 24px}
+.lv-clubx{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted-2);font-size:16px;cursor:pointer}
+.lv-clubx:hover{color:var(--text)}
+.lv-clubhead{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.lv-clubhead .lv-badge.id{width:46px;height:46px;font-size:18px}
+.lv-clubmeta{display:flex;flex-direction:column;gap:4px}
+.lv-clubname{font-family:var(--display);font-size:24px;letter-spacing:.01em}
+.lv-clubsub{font-family:var(--label);font-size:11px;letter-spacing:.05em;color:var(--muted);text-transform:uppercase}
+.lv-clubfive{display:flex;flex-direction:column;gap:6px}
+.lv-fiverow{display:grid;grid-template-columns:42px 1fr auto auto;align-items:center;gap:10px;padding:7px 9px;background:#0a121b;border:1px solid var(--line);clip-path:var(--bevel)}
+.lv-fiverow b{font-family:var(--display);font-size:16px;letter-spacing:.02em}
+.lv-igltag{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid rgba(229,181,103,.5);padding:1px 4px;font-style:normal}
+.lv-fiveovr{font-family:var(--display);font-weight:700;font-size:16px;color:var(--text)}
+.lv-fiveovr i{font-family:var(--label);font-size:9px;font-style:normal;color:var(--muted-2);letter-spacing:.06em}

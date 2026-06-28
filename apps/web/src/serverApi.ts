@@ -47,6 +47,8 @@ export class AceServer {
 
   world(): Promise<WorldSummary> { return fetch(`${this.base}/world`).then(r => j<WorldSummary>(r)); }
   circuit(): Promise<CircuitView> { return fetch(`${this.base}/circuit`).then(r => j<CircuitView>(r)); }
+  /** A club's public page (identity, division, the fielded five) — read-only. */
+  club(slug: string): Promise<ClubPage> { return fetch(`${this.base}/clubs/${slug}`).then(r => j<ClubPage>(r)); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

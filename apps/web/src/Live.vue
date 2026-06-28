@@ -177,6 +177,16 @@ async function watch(fx: LiveFixture) {
 }
 function closeWatch() { watching.value = null; viewer?.destroy(); viewer = null; }
 
+// --- the public club page (click any club tag to browse its squad) ----------
+const clubModal = ref<ClubPage | null>(null);
+const clubBusy = ref(false);
+async function openClub(slug: string) {
+  if (!server.value) return; clubBusy.value = true;
+  try { clubModal.value = await server.value.club(slug); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { clubBusy.value = false; }
+}
+const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
+
 onMounted(connect);
 onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); viewer?.destroy(); });
 </script>
@@ -319,7 +329,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <div class="lv-cards">
           <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag) }]">
             <div class="lv-team">
-              <i class="lv-badge" :style="{ background: `hsl(${hue(f.home.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.home.tag)} 65% 55%)` }">{{ f.home.tag }}</i>
+              <i class="lv-badge clickable" :style="{ background: `hsl(${hue(f.home.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.home.tag)} 65% 55%)` }" @click="openClub(f.home.tag)">{{ f.home.tag }}</i>
               <span class="lv-tname">{{ f.home.name }}</span>
             </div>
             <div class="lv-mid">
@@ -334,7 +344,7 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               </div>
             </div>
             <div class="lv-team away">
-              <i class="lv-badge" :style="{ background: `hsl(${hue(f.away.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.away.tag)} 65% 55%)` }">{{ f.away.tag }}</i>
+              <i class="lv-badge clickable" :style="{ background: `hsl(${hue(f.away.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.away.tag)} 65% 55%)` }" @click="openClub(f.away.tag)">{{ f.away.tag }}</i>
               <span class="lv-tname">{{ f.away.name }}</span>
             </div>
             <button v-if="f.status === 'resolved'" class="lv-watch" :disabled="loadingWatch" @click="watch(f)">▷ watch</button>
@@ -360,12 +370,34 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
         <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
         <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
           <span class="r">{{ rank + 1 }}</span>
-          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
+          <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
           <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
           <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
           <span class="pts">{{ s.points }}</span>
         </div>
       </div>
     </template>
+
+    <!-- the public club page (read-only) -->
+    <div v-if="clubModal" class="lv-clubmodal" @click.self="clubModal = null">
+      <div class="lv-clubcard">
+        <button class="lv-clubx" @click="clubModal = null">✕</button>
+        <div class="lv-clubhead">
+          <i class="lv-badge id" :style="{ background: `hsl(${hue(clubModal.tag)} 60% 24%)`, borderColor: `hsl(${hue(clubModal.tag)} 65% 55%)` }">{{ clubModal.tag }}</i>
+          <div class="lv-clubmeta">
+            <b class="lv-clubname">{{ clubModal.name }}</b>
+            <span class="lv-clubsub">Tier {{ clubModal.tier + 1 }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template></span>
+          </div>
+        </div>
+        <div class="lv-clubfive">
+          <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
+            <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
+            <b>{{ p.handle }}</b>
+            <i v-if="p.igl" class="lv-igltag">IGL</i>
+            <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
