@@ -263,7 +263,8 @@ function updateFitness(fielded: Set<string>, rng: Rng) {
         const o = overall(p);
         if (!worst || o > worst.ovr) worst = { handle: p.handle, days, ovr: o };
       } else {
-        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN * staffEff.value.fatigueMul));
+        const campFit = camp.value === 'fitness' ? CAMP_FAT : 1;   // a fitness camp slows the burn
+        fat.set(p.id, Math.min(FAT_MAX, cur + FAT_GAIN * staffEff.value.fatigueMul * campFit));
       }
     } else {
       fat.set(p.id, Math.max(0, cur - FAT_RECOVER));      // bench/rest recovers
@@ -286,7 +287,7 @@ function updateMorale(fielded: Set<string>, won: boolean | null, derby = false) 
     m += derbySwing;                                            // a derby is worth more either way
     m += fielded.has(p.id) ? 1.5 : -2.5;                         // minutes: starters happy, reserves restless
     if (isInjured(p.id)) m -= 3;                                 // being hurt stings
-    m += psych + talkMood + (MORALE_BASE - m) * 0.06;            // psych lift + team talk + slow mean-reversion
+    m += psych + talkMood + (camp.value === 'sharpness' ? CAMP_MOOD : 0) + (MORALE_BASE - m) * 0.06;   // psych + talk + scrim-block sharpness + mean-reversion
     next.set(p.id, Math.max(0, Math.min(100, m)));
   }
   morale.value = next;
@@ -507,6 +508,21 @@ const sponsorOffersList = computed<SponsorOffer[]>(() =>
 const goalTextOf = (o: { goal: SponsorOffer['goal']; goalN: number }) => sponsorGoalText(o);
 function signSponsor(o: SponsorOffer) { if (!sponsor.value) sponsor.value = { ...o, yearsLeft: o.years }; }
 
+// ── Pre-season training camp (a one-time-per-season prep choice) ─────────────────────
+// Before the season's first match you pick a camp focus that shapes the whole season —
+// each plugs into a system you already manage: fitness (slower fatigue), chemistry (gel
+// faster), or sharpness (the room starts + stays buzzing). Locked once the season starts.
+type Camp = 'fitness' | 'chemistry' | 'sharpness';
+const camp = ref<Camp | null>(null);
+const CAMP_META: Record<Camp, { label: string; icon: string; blurb: string }> = {
+  fitness: { label: 'Fitness camp', icon: '⛰', blurb: 'slower fatigue all season — your stars stay fresh' },
+  chemistry: { label: 'Team building', icon: '⬡', blurb: 'the squad gels faster — chemistry builds quicker' },
+  sharpness: { label: 'Scrim block', icon: '◎', blurb: 'sharper out the gate — higher morale all season' },
+};
+const canPickCamp = computed(() => dayIdx.value <= 3);   // the early-season window — locked once the campaign is underway
+function setCamp(c: Camp) { if (canPickCamp.value) camp.value = camp.value === c ? null : c; }
+const CAMP_FAT = 0.82, CAMP_CHEM = 1.6, CAMP_MOOD = 1.6;   // the per-system multipliers/adds
+
 const nextFixture = computed(() => done.value ? null
   : mySchedule.value[dayIdx.value].find(f => f.home === myClub.value || f.away === myClub.value) ?? null);
 const nextOpponent = computed(() => {
@@ -593,7 +609,8 @@ function resolveDay() {
   // spread across match-days) so a new signing gels into the five over time
   myRoster.value = myRoster.value.map(p => {
     const d = developInSeason(p, fiveIds.has(p.id), total.value, dr, boost, focusOf(p.id));
-    return { ...d, tenure: (d.tenure ?? 0) + 1 / total.value };
+    const chem = camp.value === 'chemistry' ? CAMP_CHEM : 1;   // a team-building camp gels the squad faster
+    return { ...d, tenure: (d.tenure ?? 0) + chem / total.value };
   });
   // your academy prospects develop on the reps path (academy circuit: grow, no rust)
   // — a separate rng so it never perturbs the senior-roster stream
@@ -711,6 +728,7 @@ function advanceSeason() {
   season.value++;
   objective.value = computeObjective();   // the board sets a fresh target for the new season + division
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;   // the off-season heals everyone
+  camp.value = null;               // a fresh pre-season camp choice for the new campaign
   runIntake();                     // the new season's academy class arrives
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
@@ -760,7 +778,7 @@ function selectClub(i: number) {
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null;
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -781,7 +799,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null;
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null;
   refreshMarket();
 }
 
@@ -1129,7 +1147,7 @@ function snapshot() {
     morale: [...morale.value.entries()], rivalId: rivalId.value, derbyRecord: derbyRecord.value,
     lastAwards: lastAwards.value, awardsHistory: awardsHistory.value,
     boardConfidence: boardConfidence.value, sacked: sacked.value,
-    sponsor: sponsor.value, lastSponsorPay: lastSponsorPay.value,
+    sponsor: sponsor.value, lastSponsorPay: lastSponsorPay.value, camp: camp.value,
   };
 }
 function save() {
@@ -1167,6 +1185,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   sacked.value = (o as { sacked?: boolean }).sacked ?? false;
   sponsor.value = (o as { sponsor?: ActiveSponsor | null }).sponsor ?? null;
   lastSponsorPay.value = (o as { lastSponsorPay?: typeof lastSponsorPay.value }).lastSponsorPay ?? null;
+  camp.value = (o as { camp?: Camp | null }).camp ?? null;
   objective.value = computeObjective();   // derived from restored strength/division
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } hasSave.value = false; }
@@ -1183,7 +1202,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1207,6 +1226,7 @@ export function useWorld() {
     rivalId, derbyRecord, isRival, nextIsDerby, lastDerby, lastAwards, awardsHistory,
     boardConfidence, sacked, confidenceStatus,
     sponsor, sponsorOffersList, lastSponsorPay, goalTextOf, signSponsor,
+    camp, setCamp, canPickCamp, CAMP_META,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
   };

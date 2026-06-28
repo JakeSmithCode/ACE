@@ -753,6 +753,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-retbanner.derby .hq-reth{color:var(--def)}
 .hq-retbanner.derby.won{border-left-color:var(--win)}
 .hq-retbanner.derby.won .hq-reth{color:var(--win)}
+/* pre-season training camp banner */
+.hq-camp{margin-bottom:16px;padding:11px 14px;background:linear-gradient(180deg,#0c1a16,#0a130f);border:1px solid var(--line);border-left:2px solid var(--win)}
+.hq-camph{font-family:var(--label);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--win);display:block;margin-bottom:9px}
+.hq-camph i{font-style:normal;color:var(--muted-2);text-transform:none;letter-spacing:0;font-size:10px;margin-left:8px}
+.hq-camprow{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.hq-campbtn{text-align:left;background:#0b1520;border:1px solid var(--line);padding:9px 11px;cursor:pointer;clip-path:var(--bevel);display:flex;flex-direction:column;gap:3px}
+.hq-campbtn:hover{border-color:var(--line-2)}
+.hq-campbtn.on{background:rgba(59,209,127,.1);border-color:rgba(59,209,127,.45)}
+.hq-campbtn b{font-family:var(--display);font-size:15px;color:var(--text)}
+.hq-campbtn.on b{color:var(--win)}
+.hq-campbtn span{font-size:10.5px;color:var(--muted-2);line-height:1.35}
 /* sponsorship panel */
 .hq-sponactive{padding:11px 12px;background:#0c1722;border:1px solid var(--line);border-left:3px solid var(--gold);clip-path:var(--bevel)}
 .hq-sponname{font-family:var(--display);font-weight:700;font-size:17px;color:var(--gold);margin-bottom:5px}

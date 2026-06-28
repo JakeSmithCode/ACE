@@ -221,6 +221,16 @@ onUnmounted(() => { viewer?.destroy(); });
       </span>
       <span class="hq-retleague">a strained club can't keep its earners — grab them in the Market</span>
     </div>
+    <!-- pre-season training camp — a one-time prep choice, locked once the season starts -->
+    <div v-if="w.canPickCamp.value && !playoffs" class="hq-camp">
+      <span class="hq-camph">⛺ Pre-season camp <i>set your squad up for the campaign — lock it in early</i></span>
+      <div class="hq-camprow">
+        <button v-for="c in (['fitness','chemistry','sharpness'] as const)" :key="c" class="hq-campbtn" :class="{ on: w.camp.value === c }" @click="w.setCamp(c)">
+          <b>{{ w.CAMP_META[c].icon }} {{ w.CAMP_META[c].label }}</b>
+          <span>{{ w.CAMP_META[c].blurb }}</span>
+        </button>
+      </div>
+    </div>
     <!-- end-of-season awards — your division's MVP, young gun, and your most-improved -->
     <div v-if="awards && !playoffs && dayIdx < total" class="hq-awards">
       <span class="hq-awh">🏅 {{ awards.division }} awards · season {{ awards.season }}</span>
@@ -395,7 +405,7 @@ onUnmounted(() => { viewer?.destroy(); });
             <button class="hq-go sm" @click="w.resolveDay()">play ▶</button>
           </div>
           <div v-if="nextFixture" class="hq-talk">
-            <span class="hq-talklbl">Team talk <i>squad mood {{ w.squadMorale() }}</i></span>
+            <span class="hq-talklbl">Team talk <i>squad mood {{ w.squadMorale() }}<template v-if="w.camp.value"> · {{ w.CAMP_META[w.camp.value].icon }} {{ w.CAMP_META[w.camp.value].label }}</template></i></span>
             <div class="hq-talkrow">
               <button v-for="t in talkTones" :key="t" class="hq-talkbtn" :class="{ on: w.teamTalk.value === t }" @click="w.setTalk(t)">{{ w.TALK_META[t].icon }} {{ w.TALK_META[t].label }}</button>
             </div>
