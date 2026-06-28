@@ -32,6 +32,7 @@ export interface ClubPage { tag: string; name: string; tier: number; group: numb
 export interface LeaderRow { rank: number; handle: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
 export interface NewsItem { kind: 'transfer' | 'champion' | 'season'; text: string; season: number; day: number }
+export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -70,6 +71,8 @@ export class AceServer {
   powerRankings(): Promise<{ clubs: ClubRankRow[] }> { return fetch(`${this.base}/powerrankings`).then(r => j<{ clubs: ClubRankRow[] }>(r)); }
   /** The world news feed — recent transfers + champions (newest first). */
   news(): Promise<{ news: NewsItem[] }> { return fetch(`${this.base}/news`).then(r => j<{ news: NewsItem[] }>(r)); }
+  /** Season player stats (top fraggers) from resolved watched matches. */
+  stats(): Promise<{ season: number; players: StatRow[] }> { return fetch(`${this.base}/stats`).then(r => j<{ season: number; players: StatRow[] }>(r)); }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

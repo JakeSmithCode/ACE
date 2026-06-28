@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -259,6 +259,7 @@ async function advance() {
     if (r.rivalSignings) { wireNote.value = `${r.rivalSignings} free agent${r.rivalSignings > 1 ? 's' : ''} signed by rival clubs`; setTimeout(() => (wireNote.value = ''), 4000); }
     if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); await loadHonors(); }
     await loadNews();
+    if (statsOpen.value) await loadStats();
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
@@ -287,6 +288,12 @@ const powerOpen = ref(false);
 const PHASE_LABEL: Record<string, string> = { rebuilding: 'rebuild', rising: 'rising', prime: 'prime', aging: 'aging' };
 async function loadPower() { if (server.value) try { powerClubs.value = (await server.value.powerRankings()).clubs; } catch { /* transient */ } }
 async function togglePower() { powerOpen.value = !powerOpen.value; if (powerOpen.value && !powerClubs.value.length) await loadPower(); }
+
+// season stat leaders — top fraggers from the watched (Premier) matches that have played
+const statRows = ref<StatRow[]>([]);
+const statsOpen = ref(false);
+async function loadStats() { if (server.value) try { statRows.value = (await server.value.stats()).players; } catch { /* transient */ } }
+async function toggleStats() { statsOpen.value = !statsOpen.value; if (statsOpen.value) await loadStats(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
 interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number }
@@ -714,6 +721,28 @@ onUnmounted(() => { stopStream?.(); if (pollTimer) clearInterval(pollTimer); vie
               <span class="lv-pwpower">{{ c.power }} <i>PWR</i></span>
             </div>
             <div v-if="!powerClubs.length" class="lv-empty">loading…</div>
+          </div>
+        </template>
+      </div>
+
+      <!-- season stat leaders — top fraggers from the matches that have played -->
+      <div class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="toggleStats">🎯 Season stat leaders <i class="lv-disc" :class="{ open: statsOpen }">▾</i></button>
+          <span class="lv-note">top fraggers from Premier matches played so far this season</span>
+        </div>
+        <template v-if="statsOpen">
+          <div class="lv-ldboard">
+            <div class="lv-strow lv-sthead"><span class="lv-ldrank">#</span><span></span><span>Player</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span>MVP</span><span>GP</span></div>
+            <div v-for="s in statRows" :key="s.handle" class="lv-strow">
+              <span class="lv-ldrank" :class="{ top: s.rank <= 3 }">{{ s.rank }}</span>
+              <span class="rs-role" :class="s.role">{{ s.role.slice(0,3).toUpperCase() }}</span>
+              <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i></b>
+              <span class="lv-stk">{{ s.kills }}</span><span>{{ s.deaths }}</span>
+              <span :class="s.kd >= 1 ? 'pos' : 'neg'">{{ s.kd.toFixed(2) }}</span>
+              <span>{{ s.fb }}</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
+            </div>
+            <div v-if="!statRows.length" class="lv-empty">no matches resolved yet — advance a match-day</div>
           </div>
         </template>
       </div>

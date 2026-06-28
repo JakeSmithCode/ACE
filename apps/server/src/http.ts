@@ -27,6 +27,26 @@ export interface LiveServerOpts {
 export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; auth: AuthService; close: () => Promise<void> }
 
 const key = (f: { season: number; day: number; slot: number }) => `${f.season}:${f.day}:${f.slot}`;
+
+// Season player stats — accumulated from the full-simmed (watched) match timelines.
+// The engine keys every kill by player handle, so this is a pure tally; the match's
+// top fragger earns an MVP. Gives the watched division real player careers.
+interface PlayerStat { handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number }
+function tallyTimeline(tl: MatchTimeline, into: Map<string, PlayerStat>): void {
+  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {};
+  for (const r of tl.rounds) {
+    const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
+    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; });
+  }
+  let mvp = '', best = -1;
+  for (const tm of tl.teams) for (const p of tm.players) { const k = kills[p.handle] || 0; if (k > best) { best = k; mvp = p.handle; } }
+  tl.teams.forEach(tm => tm.players.forEach(p => {
+    const s = into.get(p.handle) ?? { handle: p.handle, club: tm.tag, role: p.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0 };
+    s.kills += kills[p.handle] || 0; s.deaths += deaths[p.handle] || 0; s.fb += fb[p.handle] || 0; s.matches += 1;
+    if (p.handle === mvp) s.mvp += 1;
+    into.set(p.handle, s);
+  }));
+}
 const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
@@ -322,6 +342,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'powerrankings' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       return json(res, 200, { clubs: topClubs(w, 25) });
+    }
+    // GET /stats  → season player stats (top fraggers) from RESOLVED watched matches only
+    // (embargo-safe — a sealed match contributes nothing until it reveals).
+    if (path[0] === 'stats' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      const rows = await store.fixtures(id, w.season);
+      const acc = new Map<string, PlayerStat>();
+      for (const f of rows) {
+        if (fixtureStatus(f, now) !== 'resolved') continue;
+        const tl = timelines.get(key(f));
+        if (tl) tallyTimeline(tl, acc);
+      }
+      const players = [...acc.values()]
+        .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
+        .slice(0, 25)
+        .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills }));
+      return json(res, 200, { season: w.season, players });
     }
     // GET /news  → the world news feed (transfers + champions, newest first)
     if (path[0] === 'news' && path.length === 1) {

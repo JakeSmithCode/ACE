@@ -875,6 +875,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-fivehandle{display:flex;align-items:center;gap:8px;min-width:0}
 .lv-fiverow .lv-ldsolo{font-size:9px;padding:2px 7px}
 .lv-clubhead .lv-phase{margin-left:auto;font-size:9px}
+/* season stat leaders */
+.lv-strow{display:grid;grid-template-columns:34px 40px 1fr 44px 44px 56px 44px 52px 44px;align-items:center;gap:8px;padding:6px 6px;border-bottom:1px solid var(--line)}
+.lv-strow:hover{background:rgba(255,255,255,.02)}
+.lv-strow>span:not(.lv-ldrank):not(.rs-role){text-align:center;color:var(--muted-2);font-variant-numeric:tabular-nums;font-size:13px}
+.lv-sthead{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.lv-sthead>span{color:var(--muted-2)!important}
+.lv-sthandle{font-size:14px;display:flex;align-items:center;gap:8px;min-width:0}
+.lv-stclub{font-family:var(--label);font-size:10px;font-style:normal;color:var(--muted-2);cursor:pointer}
+.lv-stclub:hover{color:var(--brand)}
+.lv-stk{color:var(--text)!important;font-weight:700}
+.lv-strow .pos{color:#5fd38a!important}.lv-strow .neg{color:#e2768a!important}
+.lv-stmvp{color:#e6c66a!important}
 .lv-fiverow b{font-family:var(--display);font-size:16px;letter-spacing:.02em}
 .lv-igltag{font-family:var(--label);font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid rgba(229,181,103,.5);padding:1px 4px;font-style:normal}
 .lv-fiveovr{font-family:var(--display);font-weight:700;font-size:16px;color:var(--text)}
