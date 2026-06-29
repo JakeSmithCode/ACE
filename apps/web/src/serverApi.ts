@@ -59,10 +59,19 @@ export interface WCSide { code: string; country: string; flag: string }
 export interface WCPlayer { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }
 export interface WorldCupView {
   season: number;
-  squads: { code: string; country: string; flag: string; strength: number; pool: number; five: WCPlayer[] }[];
+  squads: { code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; five: WCPlayer[] }[];
   bracket: { field: WCSide[]; rounds: { round: number; a: WCSide; b: WCSide; winner: WCSide }[][]; champion: WCSide };
   final: { a: WCSide; b: WCSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput };
 }
+export interface NationElection {
+  code: string; country: string; flag: string;
+  manager: string | null;                                   // the elected manager's club tag
+  candidates: { tag: string; votes: number; you: boolean }[];
+  hasTactics: boolean; youCandidate: boolean; youManager: boolean;
+  yourVoteTag: string | null;                               // who you backed
+  tactics?: Tactics;                                        // present only if you're the manager
+}
+export interface ElectionsView { nations: NationElection[]; you: string | null }
 
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
@@ -77,6 +86,18 @@ export class AceServer {
   circuit(): Promise<CircuitView> { return fetch(`${this.base}/circuit`).then(r => j<CircuitView>(r)); }
   /** The World Cup — national teams by nationality, the bracket, the full-simmed final. */
   worldCup(): Promise<WorldCupView> { return fetch(`${this.base}/worldcup`).then(r => j<WorldCupView>(r)); }
+  /** National-team manager elections (with a Bearer, includes your own status). */
+  worldCupElections(token?: string): Promise<ElectionsView> {
+    return fetch(`${this.base}/worldcup/elections`, token ? { headers: { authorization: `Bearer ${token}` } } : {}).then(r => j<ElectionsView>(r));
+  }
+  /** Stand as a candidate to manage a nation (you must own a club). */
+  runForNation(code: string, token: string): Promise<{ ok: boolean; manager: string }> { return this.post(`/worldcup/${code}/run`, {}, token); }
+  /** Back a candidate (by their club tag) to manage a nation. */
+  voteNation(code: string, candidateTag: string, token: string): Promise<{ ok: boolean; manager: string }> { return this.post(`/worldcup/${code}/vote`, { candidateTag }, token); }
+  /** As the elected manager, author the nation's tactics (drives the engine-simmed final). */
+  setNationTactics(code: string, tactics: Tactics, token: string): Promise<{ ok: boolean }> {
+    return fetch(`${this.base}/worldcup/${code}/tactics`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ tactics }) }).then(r => j<{ ok: boolean }>(r));
+  }
   /** The Hall of Fame — season champions + all-time title leaders (the legacy engine). */
   honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }> {
     return fetch(`${this.base}/honors`).then(r => j<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>(r));

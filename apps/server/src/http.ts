@@ -6,7 +6,8 @@
 // sees the same wall-clock moment). The result + snapshot stay sealed until the
 // broadcast plays out.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { MatchTimeline } from '@ace/shared';
+import type { MatchTimeline, Tactics } from '@ace/shared';
+import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
@@ -135,6 +136,33 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const circuitSeed = opts.seed ?? 7;
   let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
   let worldCupCache: WorldCupView | undefined;   // the World Cup, recomputed each season
+  // National-team manager ELECTIONS (the World Cup social layer): human club-owners run
+  // to manage a nation, others vote, and the winner authors the nation's tactics — which
+  // drive the engine-simmed final. In-memory per server (Pg follow-up like the other
+  // per-account state). Keyed by 3-letter country code.
+  interface NationElection { candidates: string[]; votes: Map<string, string>; tactics?: Tactics }
+  const elections = new Map<string, NationElection>();
+  const electionOf = (code: string): NationElection => {
+    let e = elections.get(code);
+    if (!e) { e = { candidates: [], votes: new Map() }; elections.set(code, e); }
+    return e;
+  };
+  const clubTagOf = (w: WorldState, account: string): string | null => w.clubs.find(c => c.owner === account)?.tag ?? null;
+  const tallyVotes = (e: NationElection, cand: string): number => { let n = 0; for (const v of e.votes.values()) if (v === cand) n++; return n; };
+  // the elected manager: the candidate with the most votes (ties → first to run)
+  const electedManager = (code: string): string | null => {
+    const e = elections.get(code); if (!e || !e.candidates.length) return null;
+    let best = e.candidates[0], bestN = -1;
+    for (const cand of e.candidates) { const n = tallyVotes(e, cand); if (n > bestN) { bestN = n; best = cand; } }
+    return best;
+  };
+  // the nation's plan: the ELECTED manager's authored tactics (an ousted manager's plan
+  // doesn't drive the team — only the sitting manager's does).
+  const nationTactics = (code: string): Tactics | undefined => {
+    const mgr = electedManager(code); if (!mgr) return undefined;
+    return elections.get(code)?.tactics;
+  };
+  const bustWorldCup = () => { worldCupCache = undefined; };   // an election change re-sims the final
   // the transfer market: a free-agent board built once (stable) + a `sold` set of
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
@@ -662,11 +690,72 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       return json(res, 200, circuit);
     }
     // GET /worldcup  → the World Cup (national teams by nationality; full-sims the final).
-    // Cached per season (the squads shift as the world's talent develops/moves).
+    // Cached per season (the squads shift as the world's talent develops/moves); the
+    // elected managers' tactics drive the final, so an election change busts the cache.
     if (path[0] === 'worldcup' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
-      if (!worldCupCache || worldCupCache.season !== w.season) worldCupCache = buildWorldCupView(w, navOf);
+      if (!worldCupCache || worldCupCache.season !== w.season) {
+        worldCupCache = buildWorldCupView(w, navOf, { tacticsOf: nationTactics, managerOf: code => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; } });
+      }
       return json(res, 200, worldCupCache);
+    }
+    // GET /worldcup/elections  → the manager election state for each qualified nation
+    // (current manager, candidates + vote counts, and — with a Bearer — your own status).
+    if (path[0] === 'worldcup' && path[1] === 'elections' && path.length === 2 && req.method === 'GET') {
+      const w = (await store.loadWorld(id))!;
+      if (!worldCupCache || worldCupCache.season !== w.season) {
+        worldCupCache = buildWorldCupView(w, navOf, { tacticsOf: nationTactics, managerOf: code => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; } });
+      }
+      const myTag = account ? clubTagOf(w, account) : null;
+      const nations = worldCupCache.squads.map(s => {
+        const e = electionOf(s.code), mgr = electedManager(s.code);
+        const candidates = e.candidates.map(a => ({ tag: clubTagOf(w, a) ?? '—', votes: tallyVotes(e, a), you: a === account }))
+          .sort((x, y) => y.votes - x.votes || x.tag.localeCompare(y.tag));
+        return {
+          code: s.code, country: s.country, flag: s.flag,
+          manager: mgr ? clubTagOf(w, mgr) : null,
+          candidates, hasTactics: !!e.tactics && mgr != null,
+          youCandidate: account != null && e.candidates.includes(account),
+          youManager: account != null && mgr === account,
+          yourVoteTag: account ? (e.votes.has(account) ? (clubTagOf(w, e.votes.get(account)!) ?? null) : null) : null,
+          tactics: (account != null && mgr === account) ? (e.tactics ?? DEFAULT_TACTICS) : undefined,
+        };
+      });
+      return json(res, 200, { nations, you: myTag });
+    }
+    // POST /worldcup/:code/run  → stand as a candidate to manage a nation (auto-backs self)
+    if (path[0] === 'worldcup' && path.length === 3 && path[2] === 'run' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const w = (await store.loadWorld(id))!;
+      if (!clubTagOf(w, account)) return json(res, 403, { error: 'claim a club first — only owners can run' });
+      const code = path[1].toUpperCase(), e = electionOf(code);
+      if (!e.candidates.includes(account)) e.candidates.push(account);
+      e.votes.set(account, account);   // running backs yourself
+      bustWorldCup();
+      return json(res, 200, { ok: true, manager: clubTagOf(w, electedManager(code)!) });
+    }
+    // POST /worldcup/:code/vote  { candidateTag }  → back a candidate (by their club tag)
+    if (path[0] === 'worldcup' && path.length === 3 && path[2] === 'vote' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const w = (await store.loadWorld(id))!;
+      const code = path[1].toUpperCase(), e = electionOf(code);
+      const body = (await readBody(req)) as { candidateTag?: string };
+      const cand = e.candidates.find(a => clubTagOf(w, a)?.toLowerCase() === (body.candidateTag ?? '').toLowerCase());
+      if (!cand) return json(res, 404, { error: 'no such candidate' });
+      e.votes.set(account, cand);
+      bustWorldCup();
+      return json(res, 200, { ok: true, manager: clubTagOf(w, electedManager(code)!) });
+    }
+    // PATCH /worldcup/:code/tactics  { tactics }  → the elected manager authors the plan
+    if (path[0] === 'worldcup' && path.length === 3 && path[2] === 'tactics' && req.method === 'PATCH') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const code = path[1].toUpperCase();
+      if (electedManager(code) !== account) return json(res, 403, { error: 'only the elected manager can author tactics' });
+      const body = (await readBody(req)) as { tactics?: Tactics };
+      if (!body.tactics) return json(res, 422, { error: 'no tactics' });
+      electionOf(code).tactics = body.tactics;
+      bustWorldCup();
+      return json(res, 200, { ok: true });
     }
     // GET /world  → the shard summary (region, clock, the division pyramid + the
     // live broadcast cursor so the client streams the right match-day)

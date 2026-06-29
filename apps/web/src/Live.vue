@@ -5,7 +5,7 @@
 // spoilers until it's over); once revealed we pull the snapshot and re-sim it in the
 // viewer (the engine runs client-side, so watching costs the server nothing). This is
 // the seam between the deep persistence backend and the broadcast-grade viewer.
-import { onMounted, onUnmounted, ref, computed } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch as vueWatch } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS, personOf } from '@ace/world';
@@ -41,6 +41,9 @@ const authMode = ref<'register' | 'login'>('register');
 const email = ref(''); const password = ref(''); const authErr = ref(''); const busy = ref(false);
 const claimTag = ref('');
 const authed = computed(() => !!token.value);
+// mirror the access token to localStorage so a single sign-in carries to other views
+// (the World Cup election panel reuses it). Cleared on sign-out.
+vueWatch(token, (t: string | null) => { if (t) localStorage.setItem('ace.token', t); else localStorage.removeItem('ace.token'); });
 const tierName = (t: number) => RANK_TIERS[t] ?? `T${t}`;
 const mine = (tag: string) => myClub.value?.tag === tag;
 
