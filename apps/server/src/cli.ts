@@ -5,7 +5,7 @@
 // DB, no HTTP — the exact resolution code the server runs, against an in-memory
 // store. The store is async (so a Postgres store fits the same interface), so this
 // awaits through — the math is identical.
-import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, createWorld, simulateSeason, advanceWorld, worldDivisions, createCircuit, internationalEvent, regionTitles, awardInternational, internationalTransfers, DEFAULT_INTL_PRIZE, divisionTable, type IntlResult, type WorldState, type CrossMove } from '@ace/world';
+import { RANK_TIERS, divisionSchedule, membersOf, planFive, validFive, createWorld, simulateSeason, advanceWorld, worldDivisions, createCircuit, internationalEvent, regionTitles, awardInternational, DEFAULT_INTL_PRIZE, divisionTable, type IntlResult, type WorldState } from '@ace/world';
 import { simulateMatch } from '@ace/engine';
 import { MemoryStore, type WorldStore } from './store.js';
 import { seedWorld } from './seed.js';
@@ -157,11 +157,11 @@ async function main() {
   // a shard is one region's pyramid (its own world row, ticked independently); each
   // season the regions' best meet at an international event (Masters/Champions).
   const REGIONS_DEMO = ['AMER', 'EMEA', 'PACIFIC', 'CHINA'];
-  async function runCircuit(s: number): Promise<{ champs: string[]; intl: IntlResult[]; premierChamps: string[]; prizeBump: number; titled: { tag: string; region: string; n: number }[]; moves: CrossMove[]; conserved: boolean; allValid: boolean }> {
+  async function runCircuit(s: number): Promise<{ champs: string[]; intl: IntlResult[]; premierChamps: string[]; prizeBump: number; titled: { tag: string; region: string; n: number }[] }> {
     const cs = new MemoryStore();
     const ids = await Promise.all(createCircuit(s, { regions: REGIONS_DEMO, tiers: 3, size: 6, promo: 1 }).map(w => cs.createWorld(w)));
     const intl: IntlResult[] = [], champs: string[] = [];
-    let premierChamps: string[] = [], prizeBump = 0, moves: CrossMove[] = [], conserved = true, allValid = true;
+    let premierChamps: string[] = [], prizeBump = 0;
     for (let yr = 0; yr < 3; yr++) {
       const worlds = await Promise.all(ids.map(async id => simulateSeason(await load(cs, id))));
       const ev = internationalEvent(worlds, { seed: (s ^ (yr * 0x9e3779b9)) >>> 0, slots: 2 });
@@ -169,20 +169,13 @@ async function main() {
       if (yr === 0) premierChamps = worlds.map(w => `${w.region}·${w.clubs[divisionTable(w, 0, 0)[0].club].tag}`);
       const paid = awardInternational(worlds, ev);   // prize money into the shards (DESIGN §9)
       if (yr === 0) { const champW = paid.find(w => w.region === ev.champion.region)!; prizeBump = champW.clubs[ev.champion.club].balance - worlds.find(w => w.region === ev.champion.region)!.clubs[ev.champion.club].balance; }
-      // the international transfer window: qualifiers raid cross-region talent with their winnings
-      const before = paid.reduce((n, w) => n + w.clubs.reduce((m, c) => m + c.roster.length, 0), 0);
-      const t = internationalTransfers(paid, ev.field, { max: 6, minUpgrade: 2 });
-      const after = t.worlds.reduce((n, w) => n + w.clubs.reduce((m, c) => m + c.roster.length, 0), 0);
-      if (after !== before) conserved = false;                                  // no players created/lost in a swap
-      if (t.worlds.some(w => w.clubs.some(c => !validFive(planFive(c))))) allValid = false;  // every club still fields a valid five
-      if (yr === 0) moves = t.moves;
-      await Promise.all(ids.map((id, i) => cs.saveWorld(id, advanceWorld(t.worlds[i]).world)));
+      await Promise.all(ids.map((id, i) => cs.saveWorld(id, advanceWorld(paid[i]).world)));
     }
     // the prestige ledger: clubs ranked by international (Masters) titles won over the run
     const finalWorlds = await Promise.all(ids.map(id => load(cs, id)));
     const titled = finalWorlds.flatMap(w => w.clubs.filter(c => c.intlTitles).map(c => ({ tag: c.tag, region: w.region, n: c.intlTitles! })))
       .sort((a, b) => b.n - a.n || a.tag.localeCompare(b.tag));
-    return { champs, intl, premierChamps, prizeBump, titled, moves, conserved, allValid };
+    return { champs, intl, premierChamps, prizeBump, titled };
   }
   const C = await runCircuit(seed);
   const fieldN = C.intl[0].field.length, bracketN = C.intl[0].placement.length;
@@ -191,14 +184,9 @@ async function main() {
   console.log(`  region cup  : ${Object.entries(regionTitles(C.intl)).map(([r, n]) => `${r}×${n}`).join('  ')}`);
   console.log(`  club titles : ${C.titled.length ? C.titled.map(c => `${c.region}·${c.tag}×${c.n}`).join('  ') : '—'} (Masters prestige, accrued on the champion club)`);
   console.log(`  prize money : s1 champion banked +$${C.prizeBump.toLocaleString()} (of $${DEFAULT_INTL_PRIZE.champion.toLocaleString()} top prize) → the circuit reshapes budgets ${C.prizeBump === DEFAULT_INTL_PRIZE.champion ? '✓' : '✗'}`);
-  const C2 = await runCircuit(seed);
-  const detC = JSON.stringify(C2.champs) === JSON.stringify(C.champs);
-  const detMoves = JSON.stringify(C2.moves) === JSON.stringify(C.moves);
+  const detC = JSON.stringify((await runCircuit(seed)).champs) === JSON.stringify(C.champs);
   const independent = new Set(C.premierChamps).size === REGIONS_DEMO.length;
-  const xreg = C.moves.every(m => m.from.region !== m.to.region);
-  console.log(`  intl market : ${C.moves.length} cross-region transfer${C.moves.length === 1 ? '' : 's'} (s1)${C.moves.length ? ' — ' + C.moves.slice(0, 3).map(m => `${m.player}(${m.overall}) ${m.from.region}·${m.from.tag}→${m.to.region}·${m.to.tag} $${(m.fee / 1000).toFixed(0)}k`).join('  ') : ''}`);
-  console.log(`  transfer ok : cross-region only → ${xreg ? '✓' : '✗'}; rosters conserved (swaps) → ${C.conserved ? '✓' : '✗'}; every club still fields a valid five → ${C.allValid ? '✓' : '✗'}`);
-  console.log(`  properties  : shards resolve independently → ${independent ? '✓' : '✗'}; whole circuit deterministic → ${detC && detMoves ? '✓' : '✗'}`);
+  console.log(`  properties  : shards resolve independently → ${independent ? '✓' : '✗'}; whole circuit deterministic → ${detC ? '✓' : '✗'}`);
 
   console.log(`\n  persisted (run A): ${(await A.store.fixtures(A.id)).length} fixtures · ${(await A.store.ticks(A.id)).length} ticks logged\n`);
 }

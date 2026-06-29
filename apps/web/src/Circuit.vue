@@ -112,22 +112,6 @@ onUnmounted(() => viewer?.destroy());
         </div>
       </div>
 
-      <!-- the international transfer window — talent flows cross-region to the qualifiers -->
-      <div v-if="cv.transfers && cv.transfers.length" class="cir-window">
-        <div class="cir-brackh">⇄ International transfer window · talent follows the prize money</div>
-        <div class="cir-moves">
-          <div v-for="(m, i) in cv.transfers" :key="i" class="cir-move">
-            <span class="cir-mvplayer"><b>{{ m.player }}</b><i class="rs-role" :class="m.role">{{ m.role.slice(0,3).toUpperCase() }}</i><em>{{ m.overall }} OVR</em></span>
-            <span class="cir-mvflow">
-              <span class="cir-mvclub" :style="{ '--s': `hsl(${rhue(m.from.region)} 60% 52%)` }">{{ m.from.region }}·{{ m.from.tag }}</span>
-              <span class="cir-mvarrow">→</span>
-              <span class="cir-mvclub to" :style="{ '--s': `hsl(${rhue(m.to.region)} 60% 52%)` }">{{ m.to.region }}·{{ m.to.tag }}</span>
-            </span>
-            <span class="cir-mvfee">{{ m.fee ? '$' + (m.fee/1000).toFixed(0) + 'k' : 'swap' }}</span>
-          </div>
-        </div>
-      </div>
-
       <!-- the watched grand final -->
       <div v-if="watching" class="lv-watchwrap">
         <div class="lv-watchhead">

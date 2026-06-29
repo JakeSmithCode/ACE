@@ -52,7 +52,6 @@ export interface CircuitView {
     champion: { region: string; tag: string; name: string };
   };
   final: { a: IntlSide; b: IntlSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput; prize: number };
-  transfers?: { player: string; role: string; overall: number; fee: number; from: { region: string; tag: string }; to: { region: string; tag: string } }[];
 }
 
 const j = async <T>(r: Response): Promise<T> => {
