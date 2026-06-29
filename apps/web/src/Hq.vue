@@ -132,9 +132,9 @@ onUnmounted(() => { viewer?.destroy(); });
     <!-- season control bar -->
     <div class="hq-bar">
       <div class="hq-season">
-        <span class="hq-kicker">Season {{ season }}</span>
+        <span class="hq-kicker">Season {{ season }} · {{ w.today.value.year }}</span>
         <b>{{ DIVS }} divisions · {{ N }} clubs</b>
-        <span class="hq-day">Match-day {{ Math.min(dayIdx, total) }} / {{ total }}</span>
+        <span class="hq-day">{{ w.todayLabel.value }} · <i>Day {{ w.dayNo.value }} / {{ w.seasonDays.value }}</i> · Match-day {{ Math.min(dayIdx, total) }} / {{ total }}</span>
       </div>
       <div class="hq-tabs">
         <button :class="{ on: hqTab === 'season' }" @click="hqTab = 'season'">Season</button>

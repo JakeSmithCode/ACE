@@ -28,3 +28,5 @@ export * from './ai.js';
 export * from './staff.js';
 export * from './sponsor.js';
 export * from './traits.js';
+export * from './calendar.js';
+export * from './identity.js';

@@ -4,7 +4,7 @@
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
 import type { Attributes, Player } from '@ace/shared';
-import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank, traitOf } from '@ace/world';
+import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank, traitOf, personOf, displayAge, fmtDayMonth, birthdayPassed } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -37,6 +37,11 @@ const toggleFocus = (p: Player, k: keyof Attributes) => w.setFocus(p.id, focusOf
 // morale mood chip: a player's match-day mood (minutes/results/team talks move it)
 const moodClass = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? 'hi' : m >= 50 ? 'mid' : 'lo'; };
 const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '◔ high' : m >= 50 ? '◔ ok' : '◔ low'; };
+// the person behind the handle — real name, date-derived age, birthday
+const person = (p: Player) => personOf(p.id);
+const ageOf = (p: Player) => displayAge(p.age, person(p).birthday, w.today.value);
+const bday = (p: Player) => fmtDayMonth(person(p).birthday);
+const hadBday = (p: Player) => birthdayPassed(person(p).birthday, w.today.value);
 </script>
 
 <template>
@@ -51,7 +56,8 @@ const moodIcon = (p: Player) => { const m = w.moraleOf(p.id); return m >= 75 ? '
           <button v-if="w.isStarter(p.id)" class="rs-capt" :class="{ on: w.isCaptain(p.id) }" @click="w.setCaptain(p.id)"
             :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>
         </div>
-        <div class="rs-meta">age {{ p.age }} · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
+        <div class="rs-realname">{{ person(p).name }}</div>
+        <div class="rs-meta">age {{ ageOf(p) }} · <span class="rs-bday" :class="{ on: hadBday(p) }" :title="hadBday(p) ? `turned ${ageOf(p)} on ${bday(p)} this season` : `birthday ${bday(p)} — turns ${ageOf(p) + 1}`">🎂 {{ bday(p) }}</span> · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
         <div class="rs-tags">
           <span v-if="traitOf(p.id)" class="rs-trait" :class="'tr-' + traitOf(p.id)!.key" :title="traitOf(p.id)!.blurb">✦ {{ traitOf(p.id)!.label }}</span>
           <span v-if="w.isMentor(p)" class="rs-mentor" title="a senior leader — develops your young players faster">🎓 mentor</span>

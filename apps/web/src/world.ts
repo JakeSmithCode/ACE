@@ -21,6 +21,7 @@ import {
   staffMarket, staffEffect, withStaffBoost, staffWageBill, STAFF_ROLES,
   sponsorOffers, sponsorGoalMet, sponsorGoalText, type SponsorOffer, type ActiveSponsor,
   traitKeyOf,
+  matchDate, seasonLength, dayOfSeason, fmtDate, type GameDate,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
@@ -517,6 +518,12 @@ const tableOf = (d: number): Standing[] =>
 const table = computed(() => tableOf(myDivision.value));   // your tier's table (drives playoffs, rank, standing)
 const total = computed(() => schedules.value[0].length);
 const done = computed(() => dayIdx.value >= total.value);
+// the in-game CALENDAR: today's date (the current/next match-day), the day-of-season
+// counter (X of Y), derived purely from (season, dayIdx) — drives the header + birthdays.
+const today = computed<GameDate>(() => matchDate(season.value, Math.min(dayIdx.value, total.value - 1)));
+const seasonDays = computed(() => seasonLength(total.value));
+const dayNo = computed(() => Math.min(dayOfSeason(dayIdx.value), seasonDays.value));
+const todayLabel = computed(() => fmtDate(today.value));
 const myTeam = computed(() => clubs.value[myClub.value].team);
 // rank is WITHIN a club's own division
 const rankOf = (i: number) => tableOf(division.value[i]).findIndex(s => s.club === i) + 1;
@@ -1307,6 +1314,7 @@ export function useWorld() {
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
+    today, todayLabel, seasonDays, dayNo,
     objective, objectiveMet, objectiveRank, objectiveOutcome,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,
