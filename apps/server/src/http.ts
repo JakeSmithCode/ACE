@@ -19,6 +19,7 @@ import { claim, savePlan, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
 import { buildCircuitView, type CircuitView } from './circuitView.js';
+import { buildWorldCupView, type WorldCupView } from './worldCupView.js';
 import { randomBytes } from 'node:crypto';
 
 export interface LiveServerOpts {
@@ -133,6 +134,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const auth = new AuthService(new MemoryAccountStore(), randomBytes(32).toString('hex'), clock);
   const circuitSeed = opts.seed ?? 7;
   let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
+  let worldCupCache: WorldCupView | undefined;   // the World Cup, recomputed each season
   // the transfer market: a free-agent board built once (stable) + a `sold` set of
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
@@ -658,6 +660,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'circuit' && path.length === 1) {
       if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
       return json(res, 200, circuit);
+    }
+    // GET /worldcup  → the World Cup (national teams by nationality; full-sims the final).
+    // Cached per season (the squads shift as the world's talent develops/moves).
+    if (path[0] === 'worldcup' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      if (!worldCupCache || worldCupCache.season !== w.season) worldCupCache = buildWorldCupView(w, navOf);
+      return json(res, 200, worldCupCache);
     }
     // GET /world  → the shard summary (region, clock, the division pyramid + the
     // live broadcast cursor so the client streams the right match-day)

@@ -55,6 +55,15 @@ export interface CircuitView {
   final: { a: IntlSide; b: IntlSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput; prize: number };
 }
 
+export interface WCSide { code: string; country: string; flag: string }
+export interface WCPlayer { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }
+export interface WorldCupView {
+  season: number;
+  squads: { code: string; country: string; flag: string; strength: number; pool: number; five: WCPlayer[] }[];
+  bracket: { field: WCSide[]; rounds: { round: number; a: WCSide; b: WCSide; winner: WCSide }[][]; champion: WCSide };
+  final: { a: WCSide; b: WCSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput };
+}
+
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
   return r.json() as Promise<T>;
@@ -66,6 +75,8 @@ export class AceServer {
 
   world(): Promise<WorldSummary> { return fetch(`${this.base}/world`).then(r => j<WorldSummary>(r)); }
   circuit(): Promise<CircuitView> { return fetch(`${this.base}/circuit`).then(r => j<CircuitView>(r)); }
+  /** The World Cup — national teams by nationality, the bracket, the full-simmed final. */
+  worldCup(): Promise<WorldCupView> { return fetch(`${this.base}/worldcup`).then(r => j<WorldCupView>(r)); }
   /** The Hall of Fame — season champions + all-time title leaders (the legacy engine). */
   honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }> {
     return fetch(`${this.base}/honors`).then(r => j<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>(r));

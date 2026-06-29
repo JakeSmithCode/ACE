@@ -1042,6 +1042,29 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .cir-champreg{font-family:var(--label);font-size:12px;letter-spacing:.08em;color:var(--ch,var(--text));text-transform:uppercase}
 .cir-watch{margin-left:auto;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.4);color:var(--brand);font-family:var(--label);font-weight:600;font-size:13px;letter-spacing:.04em;padding:11px 22px;cursor:pointer;clip-path:var(--bevel)}
 .cir-watch:hover{background:rgba(34,211,238,.22)}
+/* World Cup squads (the identity payoff: national fives as real people) */
+.wc-champ{background:linear-gradient(110deg,rgba(229,181,103,.12),var(--bg-2) 60%);border-left-color:var(--gold)}
+.wc-squadh{font-family:var(--label);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 11px}
+.wc-squads{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+@media(max-width:1100px){.wc-squads{grid-template-columns:repeat(2,1fr)}}
+.wc-squad{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:11px 12px}
+.wc-squad.champ{border-color:rgba(229,181,103,.5);box-shadow:0 0 0 1px rgba(229,181,103,.3) inset}
+.wc-sqhead{display:flex;align-items:center;gap:9px;padding-bottom:9px;margin-bottom:7px;border-bottom:1px solid var(--line)}
+.wc-flag{font-size:24px}
+.wc-sqid{display:flex;flex-direction:column;gap:1px;min-width:0}
+.wc-sqid b{font-family:var(--display);font-size:15px;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-sqid i{font-family:var(--label);font-style:normal;font-size:9px;letter-spacing:.05em;color:var(--muted-2)}
+.wc-sqstr{margin-left:auto;font-family:var(--display);font-size:22px;line-height:1;color:var(--gold);text-align:right}
+.wc-sqstr span{display:block;font-family:var(--label);font-size:8px;letter-spacing:.1em;color:var(--muted-2)}
+.wc-player{display:grid;grid-template-columns:30px 1fr auto auto auto;align-items:center;gap:7px;padding:4px 0}
+.wc-pid{display:flex;flex-direction:column;gap:1px;min-width:0}
+.wc-pid b{font-size:12.5px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.wc-igl{font-size:8px;padding:1px 3px}
+.wc-pname{font-size:9.5px;color:var(--muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-pagent{font-family:var(--label);font-size:9px;letter-spacing:.03em;color:var(--brand)}
+.wc-psolo{font-family:var(--label);font-size:8.5px;letter-spacing:.02em;padding:1px 5px;border:1px solid currentColor;border-radius:3px;opacity:.85}
+.wc-povr{font-family:var(--display);font-size:15px;min-width:22px;text-align:right}
+.wc-bflag{font-size:13px;font-style:normal;margin-right:2px}
 .cir-regions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
 .cir-region{background:var(--bg-2);border:1px solid var(--line);border-top:2px solid var(--rg);clip-path:var(--bevel);padding:13px 15px}
 .cir-regh{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.06em;color:var(--rg)}

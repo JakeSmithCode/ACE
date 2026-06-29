@@ -67,7 +67,13 @@ const NATIONS: Nation[] = [
     first: ['Carlos', 'Diego', 'Luis', 'Emilio', 'Santiago', 'Ángel', 'Mateo', 'Iker', 'Rodrigo', 'Cristian'],
     last: ['Reyes', 'Hernández', 'García', 'Ramírez', 'Flores', 'Vásquez', 'Morales', 'Castillo', 'Mendoza', 'Ortiz'] },
 ];
-export interface Person { first: string; last: string; name: string; birthday: { month: number; day: number }; nation: { country: string; flag: string } }
+// 3-letter country codes (national-team tags for the World Cup)
+const CODE: Record<string, string> = {
+  USA: 'USA', Korea: 'KOR', Brazil: 'BRA', Sweden: 'SWE', Japan: 'JPN', Germany: 'GER',
+  France: 'FRA', 'United Kingdom': 'GBR', China: 'CHN', 'Türkiye': 'TUR', Canada: 'CAN',
+  Spain: 'ESP', Denmark: 'DEN', Poland: 'POL', Finland: 'FIN', Australia: 'AUS', Indonesia: 'IDN', Mexico: 'MEX',
+};
+export interface Person { first: string; last: string; name: string; birthday: { month: number; day: number }; nation: { country: string; flag: string; code: string } }
 
 /** A 32-bit FNV-1a hash of an id with an optional salt — deterministic, no rng. */
 function h32(id: string, salt: number): number {
@@ -87,7 +93,7 @@ export function personOf(id: string): Person {
   const MONTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   let d = doy + 1, m = 0;
   while (d > MONTHS[m]) { d -= MONTHS[m]; m++; }
-  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d }, nation: { country: nation.country, flag: nation.flag } };
+  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d }, nation: { country: nation.country, flag: nation.flag, code: CODE[nation.country] ?? nation.country.slice(0, 3).toUpperCase() } };
 }
 
 /** The age to SHOW: the engine's integer age is "age at the season's start"; the player

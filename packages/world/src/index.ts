@@ -13,6 +13,7 @@ export * from './resolve.js';
 export * from './state.js';
 export * from './owner.js';
 export * from './circuit.js';
+export * from './nationalteams.js';
 export * from './develop.js';
 export * from './facilities.js';
 export * from './academy.js';
