@@ -7,8 +7,11 @@
 // so a region can prove itself against the world. Pure + deterministic from one
 // circuit seed; the engine never sees any of this, so seed 42 is untouched.
 import { Rng } from '@ace/engine';
+import type { Player, PatchState } from '@ace/shared';
 import { fixtureSeed } from './season.js';
-import { createWorld, divisionTable, type WorldState } from './state.js';
+import { createWorld, divisionTable, startingFive, type WorldState, type WorldClub } from './state.js';
+import { overall, squadRating } from './develop.js';
+import { playerValue } from './market.js';
 
 /** The real circuit's regional shards (DESIGN §9). A circuit can run any subset. */
 export const REGIONS = ['AMER', 'EMEA', 'PACIFIC', 'CHINA'] as const;
@@ -116,6 +119,80 @@ export const DEFAULT_INTL_PRIZE: IntlPrize = { champion: 250_000, finalist: 120_
  *  bracket finish (champion > finalist > semifinalist > appearance). Pure — returns
  *  new shard states (balances bumped), so it's opt-in and the no-circuit CLIs +
  *  seed 42 are untouched. The server applies this at the off-season seam. */
+// ── The international transfer window (cross-region transfers, DESIGN §9) ──────────────
+// After the Masters, the qualifiers — flush with prize money and proven on the world stage
+// — raid the best AFFORDABLE upgrade from ANOTHER region. It's a SWAP (same role, so every
+// roster stays a valid five): the buyer's weakest same-role starter goes the other way, and
+// the fee (the value difference) is paid buyer→seller. Pure + deterministic; a moved player's
+// id is re-tagged to the new club and his handle is kept unique within the destination shard
+// (the engine assumes unique handles per match). Cross-region only — talent flows to money.
+export interface CrossMove {
+  player: string; role: string; overall: number; fee: number;
+  from: { region: string; tag: string }; to: { region: string; tag: string };
+}
+const clampStrength = (s: number) => Math.max(0.3, Math.min(0.95, s));
+const restrength = (c: WorldClub): number => clampStrength(squadRating({ id: c.id, tag: c.tag, name: c.name, players: startingFive(c.roster) }) / 100);
+/** Re-tag a player onto a destination club + shard: new id, handle kept unique in that
+ *  shard (suffix on collision), tenure reset (a fresh signing hasn't gelled). */
+function retagCross(p: Player, dest: WorldClub, destWorld: WorldState, excludeId: string): Player {
+  const taken = new Set(destWorld.clubs.flatMap(c => c.roster).filter(x => x.id !== excludeId).map(x => x.handle));
+  let handle = p.handle;
+  while (taken.has(handle)) handle += '·';
+  return { ...p, id: `${dest.id}-${handle.toLowerCase()}`, handle, tenure: 0 };
+}
+export function internationalTransfers(
+  worlds: WorldState[], qualifiers: IntlEntry[], opts: { patch?: PatchState; max?: number; minUpgrade?: number } = {},
+): { worlds: WorldState[]; moves: CrossMove[] } {
+  const max = opts.max ?? 6, minUpgrade = opts.minUpgrade ?? 2;
+  // a mutable working copy of every shard's clubs (rosters copied so we can swap players)
+  const shards = worlds.map(w => ({ ...w, clubs: w.clubs.map(c => ({ ...c, roster: [...c.roster] })) }));
+  const regionIdx = new Map(shards.map((w, i) => [w.region, i]));
+  const moves: CrossMove[] = [];
+  // buyers = the qualifier clubs, richest first (they earned the prize money to spend)
+  const buyers = qualifiers
+    .map(q => ({ wi: regionIdx.get(q.region)!, ci: q.club }))
+    .filter(b => b.wi != null)
+    .sort((a, b) => shards[b.wi].clubs[b.ci].balance - shards[a.wi].clubs[a.ci].balance);
+  const locked = new Set<string>();   // a player moves at most once per window (no same-window re-flips)
+  for (const { wi, ci } of buyers) {
+    if (moves.length >= max) break;
+    const buyer = shards[wi].clubs[ci];
+    const five = startingFive(buyer.roster);
+    let best: { tWi: number; tCi: number; target: Player; weak: Player; gain: number; fee: number } | null = null;
+    for (let wj = 0; wj < shards.length; wj++) {
+      if (wj === wi) continue;   // cross-region only
+      for (let cj = 0; cj < shards[wj].clubs.length; cj++) {
+        for (const target of startingFive(shards[wj].clubs[cj].roster)) {
+          if (locked.has(target.id)) continue;
+          const sameRole = five.filter(p => p.role === target.role && !locked.has(p.id));
+          if (!sameRole.length) continue;
+          const weak = sameRole.reduce((a, b) => (overall(a) <= overall(b) ? a : b));
+          const gain = overall(target) - overall(weak);
+          if (gain < minUpgrade) continue;
+          const fee = Math.max(0, Math.round(playerValue(target, opts.patch) - playerValue(weak, opts.patch)));
+          if (fee > buyer.balance) continue;
+          // deterministic pick: biggest upgrade, then cheapest, then stable id order
+          if (!best || gain > best.gain || (gain === best.gain && (fee < best.fee || (fee === best.fee && target.id < best.target.id)))) {
+            best = { tWi: wj, tCi: cj, target, weak, gain, fee };
+          }
+        }
+      }
+    }
+    if (!best) continue;
+    const seller = shards[best.tWi].clubs[best.tCi];
+    const incoming = retagCross(best.target, buyer, shards[wi], best.weak.id);          // target → buyer's shard
+    const outgoing = retagCross(best.weak, seller, shards[best.tWi], best.target.id);    // weak → seller's shard
+    buyer.roster = buyer.roster.map(p => (p.id === best!.weak.id ? incoming : p));
+    seller.roster = seller.roster.map(p => (p.id === best!.target.id ? outgoing : p));
+    locked.add(incoming.id); locked.add(outgoing.id);   // both swapped players are now settled for the window
+    buyer.balance -= best.fee; seller.balance += best.fee;
+    buyer.strength = restrength(buyer); seller.strength = restrength(seller);
+    moves.push({ player: best.target.handle, role: best.target.role, overall: overall(best.target), fee: best.fee,
+      from: { region: shards[best.tWi].region, tag: seller.tag }, to: { region: shards[wi].region, tag: buyer.tag } });
+  }
+  return { worlds: shards, moves };
+}
+
 export function awardInternational(worlds: WorldState[], result: IntlResult, prize: IntlPrize = DEFAULT_INTL_PRIZE): WorldState[] {
   const payout = new Map<string, number>();   // `${region}|${club}` → prize
   result.placement.forEach((e, rank) => {

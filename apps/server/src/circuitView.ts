@@ -4,7 +4,7 @@
 // the FINAL is full-simmed with the real engine so it's watchable — the champion is
 // the engine's verdict, and the snapshot ships so the client re-sims it in the viewer.
 // Pure + deterministic from one seed; cached per seed (it's a few shard-seasons of work).
-import { createCircuit, simulateSeason, internationalEvent, divisionTable, buildMatchInput, clubTeam, fixtureMap, DEFAULT_INTL_PRIZE, type WorldState, type IntlEntry } from '@ace/world';
+import { createCircuit, simulateSeason, internationalEvent, awardInternational, internationalTransfers, divisionTable, buildMatchInput, clubTeam, fixtureMap, DEFAULT_INTL_PRIZE, type WorldState, type IntlEntry, type CrossMove } from '@ace/world';
 import { simulateMatch } from '@ace/engine';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
@@ -21,12 +21,16 @@ export interface CircuitView {
     champion: { region: string; tag: string; name: string };
   };
   final: { a: { region: string; tag: string }; b: { region: string; tag: string }; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput; prize: number };
+  transfers: CrossMove[];   // the international transfer window — talent flows cross-region to the qualifiers' winnings
 }
 
 export function buildCircuitView(seed: number, navOf: (m: MapId) => Navmesh): CircuitView {
   const worlds = createCircuit(seed, { regions: REGIONS, tiers: 3, size: 6, promo: 1 }).map(simulateSeason);
   const wOf = (region: string): WorldState => worlds.find(w => w.region === region)!;
   const ev = internationalEvent(worlds, { seed, slots: 2 });
+  // the international transfer window: prize money funds cross-region raids by the qualifiers
+  const paid = awardInternational(worlds, ev);
+  const { moves } = internationalTransfers(paid, ev.field, { patch: worlds[0].patch, max: 6, minUpgrade: 2 });
 
   // group the bracket matches into rounds for display
   const byRound = new Map<number, CircuitView['bracket']['rounds'][number]>();
@@ -58,5 +62,6 @@ export function buildCircuitView(seed: number, navOf: (m: MapId) => Navmesh): Ci
     }),
     bracket: { field: ev.field.map(label), rounds, champion: { region: championEntry.region, tag: championEntry.tag, name: championClub.name } },
     final: { a: label(last.a), b: label(last.b), map, score, seed: last.seed, snapshot, prize: DEFAULT_INTL_PRIZE.champion },
+    transfers: moves,
   };
 }
