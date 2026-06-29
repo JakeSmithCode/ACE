@@ -5,7 +5,7 @@
 // Prospects are the foggiest reads in the game: a wide ceiling band you only resolve
 // by giving the kid reps. Some bust; the one that hits is worth ten times his wage.
 import type { Player } from '@ace/shared';
-import { ACADEMY_MAX, overall, soloRank, scoutedStars, scoutedRange, phaseOf } from '@ace/world';
+import { ACADEMY_MAX, overall, soloRank, scoutedStars, scoutedRange, phaseOf, personOf, displayAge } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
@@ -43,7 +43,8 @@ const prospects = () => [...w.academy.value.prospects].sort((a, b) => overall(b)
       <div v-for="p in prospects()" :key="p.id" class="ac-row" :class="phaseOf(p)">
         <div class="rs-id">
           <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
-          <div class="rs-name">{{ p.handle }} <i class="ac-age">age {{ p.age }}</i></div>
+          <div class="rs-name">{{ p.handle }} <i class="ac-age">age {{ displayAge(p.age, personOf(p.id).birthday, w.today.value) }}</i></div>
+          <div class="rs-realname">{{ personOf(p.id).name }} · {{ personOf(p.id).nation.flag }}</div>
           <div class="rs-rank" :class="'rk-' + rank(p).tier.toLowerCase()"><i class="rs-rankdot"></i>{{ rank(p).label }}</div>
         </div>
         <div class="rs-ovr"><div class="rs-ovrn">{{ overall(p) }}</div><div class="rs-ovrl">OVR</div></div>

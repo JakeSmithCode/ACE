@@ -21,7 +21,7 @@ import {
   staffMarket, staffEffect, withStaffBoost, staffWageBill, STAFF_ROLES,
   sponsorOffers, sponsorGoalMet, sponsorGoalText, type SponsorOffer, type ActiveSponsor,
   traitKeyOf,
-  matchDate, seasonLength, dayOfSeason, fmtDate, type GameDate,
+  matchDate, seasonLength, dayOfSeason, fmtDate, personOf, displayAge, birthdayPassed, type GameDate,
   type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
@@ -548,6 +548,7 @@ const today = computed<GameDate>(() => matchDate(season.value, Math.min(dayIdx.v
 const seasonDays = computed(() => seasonLength(total.value));
 const dayNo = computed(() => Math.min(dayOfSeason(dayIdx.value), seasonDays.value));
 const todayLabel = computed(() => fmtDate(today.value));
+const lastBirthdays = ref<{ handle: string; name: string; age: number }[]>([]);   // birthdays from the last match-day (banner)
 const myTeam = computed(() => clubs.value[myClub.value].team);
 // rank is WITHIN a club's own division
 const rankOf = (i: number) => tableOf(division.value[i]).findIndex(s => s.club === i) + 1;
@@ -739,7 +740,14 @@ function resolveDay() {
     lastDerby.value = { won: !!myWon, opp: clubs.value[oppIdx].team.tag };
   } else lastDerby.value = null;
   updateMorale(fiveIds, myWon, derby);
+  // birthdays: any of your players whose birthday falls between the last match-day and this
+  // one turns a year older — a banner shouts them out (pure flavor over the calendar).
+  const beforeDate = matchDate(season.value, dayIdx.value);
   dayIdx.value++;
+  const afterDate = matchDate(season.value, Math.min(dayIdx.value, total.value - 1));
+  lastBirthdays.value = myRoster.value
+    .filter(p => { const bd = personOf(p.id).birthday; return !birthdayPassed(bd, beforeDate) && birthdayPassed(bd, afterDate); })
+    .map(p => ({ handle: handleOf(p.id, p.handle), name: personOf(p.id).name, age: displayAge(p.age, personOf(p.id).birthday, afterDate) }));
   syncLineup();        // re-derive your five + strength from the developed roster (injured now excluded)
   resolveListings();   // the market is always live — your listed players may sell each match-day
   resolveAiMarket();   // ...and AI clubs sign players on their own — gems get snapped up
@@ -1345,7 +1353,7 @@ export function useWorld() {
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
     table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
-    today, todayLabel, seasonDays, dayNo,
+    today, todayLabel, seasonDays, dayNo, lastBirthdays,
     objective, objectiveMet, objectiveRank, objectiveOutcome,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
     myPlayerOf, value, canAfford, isStarter, isListed, canSell, acquire, sellPlayer, toggleList,

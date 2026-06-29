@@ -15,6 +15,17 @@ const draft = ref('');
 const gamertag = (p: Player) => w.handleOf(p.id, p.handle);
 async function startEdit(p: Player) { editing.value = p.id; draft.value = gamertag(p); await nextTick(); (document.getElementById('rs-edit-' + p.id) as HTMLInputElement)?.select(); }
 function commitEdit(p: Player) { if (editing.value === p.id) { w.renamePlayer(p.id, draft.value); editing.value = null; } }
+// player profile card (a full dossier on one of your players)
+const profile = ref<Player | null>(null);
+const awardsFor = (p: Player) => {
+  const tag = gamertag(p), out: { kind: string; season: number; note?: string }[] = [];
+  for (const a of w.awardsHistory.value) {
+    if (a.mvp?.mine && a.mvp.handle === tag) out.push({ kind: 'Division MVP', season: a.season });
+    if (a.young?.mine && a.young.handle === tag) out.push({ kind: 'Young Gun', season: a.season });
+    if (a.improved?.mine && a.improved.handle === tag) out.push({ kind: 'Most Improved', season: a.season, note: a.improved.note });
+  }
+  return out;
+};
 const ATTRS: { k: keyof Attributes; label: string }[] = [
   { k: 'aim', label: 'AIM' }, { k: 'movement', label: 'MOV' }, { k: 'gameSense', label: 'GS' },
   { k: 'utility', label: 'UTL' }, { k: 'clutch', label: 'CLT' }, { k: 'entry', label: 'ENT' },
@@ -68,7 +79,7 @@ const hadBday = (p: Player) => birthdayPassed(person(p).birthday, w.today.value)
           <button v-if="w.isStarter(p.id)" class="rs-capt" :class="{ on: w.isCaptain(p.id) }" @click="w.setCaptain(p.id)"
             :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>
         </div>
-        <div class="rs-realname">{{ person(p).name }}</div>
+        <div class="rs-realname clickable" @click="profile = p" :title="`open ${person(p).name}'s profile`">{{ person(p).nation.flag }} {{ person(p).name }} <i class="rs-cardlink">▸ card</i></div>
         <div class="rs-meta">age {{ ageOf(p) }} · <span class="rs-bday" :class="{ on: hadBday(p) }" :title="hadBday(p) ? `turned ${ageOf(p)} on ${bday(p)} this season` : `birthday ${bday(p)} — turns ${ageOf(p) + 1}`">🎂 {{ bday(p) }}</span> · <span class="rs-phase" :class="phaseOf(p)">{{ phaseOf(p) }}</span><span v-if="chem(p) < 100" class="rs-gel" :title="`gelling with the squad — ${chem(p)}% chemistry (a fresh signing hasn't clicked yet)`"> · gelling {{ chem(p) }}%</span></div>
         <div class="rs-tags">
           <span v-if="traitOf(p.id)" class="rs-trait" :class="'tr-' + traitOf(p.id)!.key" :title="traitOf(p.id)!.blurb">✦ {{ traitOf(p.id)!.label }}</span>
@@ -123,6 +134,57 @@ const hadBday = (p: Player) => birthdayPassed(person(p).birthday, w.today.value)
         <button class="rs-sell" :disabled="!w.canSell(p.id)" @click="w.sellPlayer(p.id)">sell</button>
       </div>
     </div>
-    <div class="hq-compnote"><b>Click a skill</b> to set a <b>training focus ◎</b> — that player's reps target it (faster growth there, a touch slower elsewhere): sharpen a prospect's spike or shore up a weakness. Every player is on a <b>contract</b> — a wage <b>locked</b> for its term (you pay it even as he ages), counting down each season. A player in his <b>final year</b> shows <b class="rs-deal expiring">renew</b>: re-sign him at his current market wage, or he walks <b>free</b> at season's end. Potential is a <b>scouted</b> read; <b>start</b>/<b>bench</b> to override; sell to offload a deal (the buyer takes the wage).</div>
+    <div class="hq-compnote"><b>Click a skill</b> to set a <b>training focus ◎</b> — that player's reps target it (faster growth there, a touch slower elsewhere): sharpen a prospect's spike or shore up a weakness. Every player is on a <b>contract</b> — a wage <b>locked</b> for its term (you pay it even as he ages), counting down each season. A player in his <b>final year</b> shows <b class="rs-deal expiring">renew</b>: re-sign him at his current market wage, or he walks <b>free</b> at season's end. Potential is a <b>scouted</b> read; <b>start</b>/<b>bench</b> to override; sell to offload a deal (the buyer takes the wage). Click a player's <b>name</b> for his full <b>profile card</b>.</div>
+
+    <!-- player profile card -->
+    <Teleport to="body">
+      <div v-if="profile" class="pc-overlay" @click.self="profile = null">
+        <div class="pc-card" :class="phaseOf(profile)">
+          <button class="lv-clubx" @click="profile = null">✕</button>
+          <div class="pc-head">
+            <span class="rs-role" :class="profile.role">{{ profile.role.slice(0, 3).toUpperCase() }}</span>
+            <div class="pc-headmeta">
+              <b class="pc-tag">{{ gamertag(profile) }}<i v-if="w.isCaptain(profile.id)" class="pc-c">C</i><i v-if="profile.igl" class="rs-igl">IGL</i></b>
+              <span class="pc-name">{{ person(profile).nation.flag }} {{ person(profile).name }} · {{ person(profile).nation.country }}</span>
+            </div>
+            <div class="pc-ovr"><b>{{ overall(profile) }}</b><span>OVR</span></div>
+          </div>
+          <div class="pc-bio">
+            <span><i>Age</i> {{ ageOf(profile) }}</span>
+            <span :class="{ gold: hadBday(profile) }"><i>Birthday</i> 🎂 {{ bday(profile) }}</span>
+            <span><i>Phase</i> {{ phaseOf(profile) }}</span>
+            <span :class="'rk-' + rank(profile).tier.toLowerCase()"><i>Solo rank</i> {{ rank(profile).label }}</span>
+            <span><i>Contract</i> {{ w.yearsLeft(profile) }}y · {{ money(w.wageOf(profile)) }}/y</span>
+            <span v-if="traitOf(profile.id)"><i>Trait</i> ✦ {{ traitOf(profile.id)!.label }}</span>
+          </div>
+          <div class="pc-section">Attributes <span class="pc-ceilkey">current ↗ scouted ceiling</span></div>
+          <div class="pc-attrs">
+            <div v-for="a in ATTRS" :key="a.k" class="pc-attr">
+              <span class="pc-al">{{ a.label }}</span>
+              <span class="pc-abar"><i :class="{ mech: isMech(a.k) }" :style="{ width: rnd(profile.attr[a.k]) + '%' }"></i><span class="pc-tick" :style="{ left: aceilR(profile, a.k) + '%' }"></span></span>
+              <span class="pc-av"><b>{{ rnd(profile.attr[a.k]) }}</b><em v-if="aceilR(profile, a.k) > rnd(profile.attr[a.k])">↗{{ aceilR(profile, a.k) }}</em></span>
+            </div>
+          </div>
+          <div class="pc-cols">
+            <div class="pc-col">
+              <div class="pc-section">Agent pool</div>
+              <div v-for="ag in [...profile.agents].sort((x, y) => y.level - x.level)" :key="ag.agent" class="pc-agent"><span>{{ ag.agent }}</span><b>{{ ag.level }}</b></div>
+            </div>
+            <div class="pc-col">
+              <div class="pc-section">Condition</div>
+              <div class="pc-cond"><i>Fatigue</i><span :class="{ hi: w.fatigueOf(profile.id) >= 60 }">{{ w.fatigueOf(profile.id) }}%</span></div>
+              <div class="pc-cond"><i>Morale</i><span :class="moodClass(profile)">{{ Math.round(w.moraleOf(profile.id)) }}</span></div>
+              <div v-if="w.injuryOf(profile.id)" class="pc-cond"><i>Status</i><span class="lo">⚕ OUT {{ w.injuryOf(profile.id) }}d</span></div>
+              <div v-if="w.isMentor(profile)" class="pc-cond"><i>Role</i><span>🎓 mentor</span></div>
+              <div v-else-if="w.isMentee(profile)" class="pc-cond"><i>Role</i><span>↑ mentored</span></div>
+            </div>
+          </div>
+          <div v-if="awardsFor(profile).length" class="pc-honours">
+            <div class="pc-section">🏅 Honours</div>
+            <span v-for="(aw, i) in awardsFor(profile)" :key="i" class="pc-medal">{{ aw.kind }} <em>S{{ aw.season }}{{ aw.note ? ` · ${aw.note}` : '' }}</em></span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

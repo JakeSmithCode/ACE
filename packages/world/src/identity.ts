@@ -17,7 +17,16 @@ const LAST = ['Novak', 'Berg', 'Costa', 'Park', 'Vasquez', 'Lindqvist', 'Mori', 
   'Kowalski', 'Santos', 'Choi', 'Andersen', 'Romano', 'Petrov', 'Haidar', 'Murphy', 'Wagner', 'Ozturk', 'Silva',
   'Nakamura', 'Becker', 'Moreau', 'Khan', 'Larsson', 'Greco', 'Ibrahim', 'Sorensen'];
 
-export interface Person { first: string; last: string; name: string; birthday: { month: number; day: number } }
+// esports is global — a spread of the scenes that produce pros, with flags
+const NATIONS = [
+  { country: 'USA', flag: '🇺🇸' }, { country: 'Korea', flag: '🇰🇷' }, { country: 'Brazil', flag: '🇧🇷' },
+  { country: 'Sweden', flag: '🇸🇪' }, { country: 'Japan', flag: '🇯🇵' }, { country: 'Germany', flag: '🇩🇪' },
+  { country: 'France', flag: '🇫🇷' }, { country: 'United Kingdom', flag: '🇬🇧' }, { country: 'China', flag: '🇨🇳' },
+  { country: 'Türkiye', flag: '🇹🇷' }, { country: 'Canada', flag: '🇨🇦' }, { country: 'Spain', flag: '🇪🇸' },
+  { country: 'Denmark', flag: '🇩🇰' }, { country: 'Poland', flag: '🇵🇱' }, { country: 'Finland', flag: '🇫🇮' },
+  { country: 'Australia', flag: '🇦🇺' }, { country: 'Indonesia', flag: '🇮🇩' }, { country: 'Mexico', flag: '🇲🇽' },
+];
+export interface Person { first: string; last: string; name: string; birthday: { month: number; day: number }; nation: { country: string; flag: string } }
 
 /** A 32-bit FNV-1a hash of an id with an optional salt — deterministic, no rng. */
 function h32(id: string, salt: number): number {
@@ -34,7 +43,8 @@ export function personOf(id: string): Person {
   const MONTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   let d = doy + 1, m = 0;
   while (d > MONTHS[m]) { d -= MONTHS[m]; m++; }
-  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d } };
+  const nation = NATIONS[h32(id, 0x6b) % NATIONS.length];
+  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d }, nation };
 }
 
 /** The age to SHOW: the engine's integer age is "age at the season's start"; the player

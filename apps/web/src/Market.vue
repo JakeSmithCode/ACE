@@ -5,7 +5,7 @@
 // mains a buffed agent is dearer, a nerfed one cheaper. Filter by role.
 import { computed, ref } from 'vue';
 import type { Player, Role } from '@ace/shared';
-import { overall, scoutedStars, scoutedRange, soloRank } from '@ace/world';
+import { overall, scoutedStars, scoutedRange, soloRank, personOf, displayAge } from '@ace/world';
 import { useWorld, type MarketEntry } from './world';
 
 const w = useWorld();
@@ -86,7 +86,7 @@ function cancelBid() { bidId.value = null; bidMsg.value = ''; }
           <i v-if="w.isContested(e)" class="mk-fire" title="contested — rival clubs are bidding">🔥</i>
         </span>
         <span class="src" :class="{ club: e.from !== -1 }">{{ sourceOf(e) }}</span>
-        <span>{{ e.player.age }}</span>
+        <span :title="`${personOf(e.player.id).name} · 🎂 ${personOf(e.player.id).birthday.day}/${personOf(e.player.id).birthday.month}`">{{ displayAge(e.player.age, personOf(e.player.id).birthday, w.today.value) }}</span>
         <span class="ovr">{{ overall(e.player) }}</span>
         <span class="mk-pot"><span class="rs-stars"><i v-for="n in 5" :key="n" :class="{ on: n <= scoutedStars(e.player, false) }">★</i></span><i class="mk-ceil">{{ ceil(e.player) }}</i></span>
         <span class="fe" :class="metaClass(e.player)">{{ money(w.value(e.player)) }}</span>

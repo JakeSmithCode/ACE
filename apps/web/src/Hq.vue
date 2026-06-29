@@ -54,6 +54,8 @@ const headliner = computed(() => wave.value[0]);
 const injury = computed(() => w.lastInjury.value);
 // a derby result from the last match-day (vs your rival)
 const derby = computed(() => w.lastDerby.value);
+// players who had a birthday on the last match-day
+const birthdays = computed(() => w.lastBirthdays.value);
 // last season's division awards (shown at the rollover)
 const awards = computed(() => w.lastAwards.value);
 // last season's sponsor payout (for the finance ledger line)
@@ -245,6 +247,11 @@ onUnmounted(() => { viewer?.destroy(); });
     <div v-if="derby && dayIdx < total" class="hq-retbanner derby" :class="{ won: derby.won }">
       <span class="hq-reth">⚔ Derby {{ derby.won ? 'won' : 'lost' }}</span>
       <span class="hq-retmine"><span class="hq-retbye">{{ derby.won ? `bragging rights over ${derby.opp} — the squad's buzzing` : `${derby.opp} take the bragging rights — the room's flat` }}</span></span>
+    </div>
+    <!-- birthdays — players who aged up since the last match-day -->
+    <div v-if="birthdays.length && dayIdx < total" class="hq-retbanner bday">
+      <span class="hq-reth">🎂 Birthday{{ birthdays.length > 1 ? 's' : '' }}</span>
+      <span v-for="bd in birthdays" :key="bd.handle" class="hq-retmine"><b>{{ bd.handle }}</b> <span class="hq-retbye">{{ bd.name }} turns {{ bd.age }}</span></span>
     </div>
     <!-- injury — a player picked one up last match-day (rotate depth in) -->
     <div v-if="injury && dayIdx < total" class="hq-retbanner injury">
