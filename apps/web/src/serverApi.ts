@@ -4,7 +4,7 @@
 // result embargo, then by re-simming the snapshot once revealed (the engine runs
 // client-side, so watching still costs the server ~nothing). Read-only here; the
 // ownership write-path (claim/plan) rides the same base.
-import type { MatchInput, MapId, Tactics } from '@ace/shared';
+import type { MatchInput, MapId, Tactics, MatchTimeline } from '@ace/shared';
 
 export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number; broadcastDay: number; lastDay: number; kickoffAt: number; revealAt: number; now: number }
 export interface StandingRow { club: string; played: number; won: number; lost: number; diff: number; points: number }
@@ -15,6 +15,7 @@ export interface LiveFixture {
   final: [number, number] | null; home: ClubLabel; away: ClubLabel; map: MapId | null;
 }
 export interface ReplayPayload { seed: number; snapshot: MatchInput | null; score: [number, number] }
+export interface LiveTimeline { status: 'scheduled' | 'live' | 'resolved'; frac: number; completed: number; total: number; resolved: boolean; timeline: MatchTimeline | null }
 export interface FixturePublic { status: 'scheduled' | 'live' | 'resolved'; frac: number; score?: [number, number]; home: ClubLabel; away: ClubLabel; map: MapId | null }
 export interface Session { accountId: string; accessToken: string; refreshToken: string }
 /** Register also returns the email-verification token. In production it's emailed (a
@@ -128,6 +129,12 @@ export class AceServer {
   async replay(season: number, day: number, slot: number): Promise<ReplayPayload | null> {
     const r = await fetch(`${this.base}/fixtures/${season}/${day}/${slot}/replay`);
     return r.status === 425 ? null : await j<ReplayPayload>(r);
+  }
+  /** The live-watch source: the timeline gated to the broadcast position (completed
+   *  rounds only, spoiler-safe), or the full timeline once resolved. Poll it while
+   *  watching live — `completed` grows as rounds finish; `resolved` flips at reveal. */
+  liveTimeline(season: number, day: number, slot: number): Promise<LiveTimeline> {
+    return fetch(`${this.base}/fixtures/${season}/${day}/${slot}/live`).then(r => j<LiveTimeline>(r));
   }
 
   // ── identity + ownership (self-owned auth → claim a club → author its plan) ──

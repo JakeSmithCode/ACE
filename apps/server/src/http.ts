@@ -14,7 +14,7 @@ import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, seasonLength } from './tick.js';
 import { navOf } from './nav.js';
-import { publicView, liveMatchState, fixtureStatus } from './live.js';
+import { publicView, liveMatchState, fixtureStatus, liveFrac } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
@@ -401,6 +401,28 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!f) return json(res, 404, { error: 'no such fixture' });
       if (fixtureStatus(f, now) !== 'resolved') return json(res, 425, { error: 'too early — match still live', status: fixtureStatus(f, now) });
       return json(res, 200, { seed: f.seed, snapshot: f.inputSnapshot ?? null, score: [f.homeScore, f.awayScore] });
+    }
+    // GET /fixtures/:season/:day/:slot/live  → the timeline GATED to the live broadcast
+    // position: COMPLETED rounds only (never the round being decided, never the final), so
+    // a client can watch the match unfold round-by-round but cannot see ahead. This is the
+    // live-watch source — the snapshot/replay path stays sealed (425) until reveal precisely
+    // because handing over the snapshot would let a client re-sim the ENTIRE match early.
+    // On resolve it ships the full timeline + final (the embargo is over). The server derives
+    // the position from its OWN clock, so the gate can't be bypassed by the caller.
+    if (path[0] === 'fixtures' && path.length === 5 && path[4] === 'live') {
+      const f = await fixtureAt(+path[1], +path[2], +path[3]);
+      if (!f) return json(res, 404, { error: 'no such fixture' });
+      const tl = timelines.get(key(f));
+      if (!tl) return json(res, 404, { error: 'not a watched fixture' });
+      const st = fixtureStatus(f, now), resolved = st === 'resolved';
+      const frac = liveFrac(f, now);
+      // liveMatchState.round is the index of the round currently being decided → exactly the
+      // count of COMPLETED rounds. Resolved → the whole match (and the real final).
+      const completed = resolved ? tl.rounds.length : (st === 'scheduled' ? 0 : liveMatchState(tl, frac).round);
+      const timeline = completed === 0 ? null
+        : resolved ? tl
+        : { ...tl, rounds: tl.rounds.slice(0, completed), finalScore: [0, 0] as [number, number] };
+      return json(res, 200, { status: st, frac: +frac.toFixed(3), completed, total: tl.rounds.length, resolved, timeline });
     }
     // GET /live/:season/:day  → SSE: the synced live match-center for that day
     if (path[0] === 'live' && path.length === 3) {

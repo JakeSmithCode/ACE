@@ -142,11 +142,12 @@ export class Viewer {
   private endCard!: HTMLElement;                                     // round-result card shown when playback ends
   private mapSvg!: SVGSVGElement;                                    // the map svg (re-faded on each new round)
   private sideTags: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team ATK/DEF this round
-  private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; // true-odds chart
+  private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; private oddsChart!: HTMLElement; // true-odds chart
+  private live = false; private liveWaiting = false;   // live-watch: parked at the last completed round, awaiting more
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
 
-  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null) {
-    this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav;
+  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean } = {}) {
+    this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav; this.live = !!opts.live;
     tl.teams.forEach((tm, i) => tm.players.forEach(p => this.teamOf.set(p.handle, i as 0 | 1)));
     this.build();
     this.loadRound(0);
@@ -248,24 +249,8 @@ export class Viewer {
     const odds = el('div', 'ace-panel');
     odds.innerHTML = `<h3><span class="b"></span>True Odds <span class="oddsub">${this.tl.rounds[0]?.['winPct'] != null ? '· 120× re-sim/round' : ''}</span></h3><div class="oddsnow" id="ace-oddsnow"></div>`;
     const chart = el('div', 'oddschart');
-    this.tl.rounds.forEach((r, i) => {
-      const p0 = (r.attacker === 0 ? r.winPct : 1 - r.winPct);        // team-0 (att-colour) win chance
-      const won0 = r.winner === 0;
-      const favored0 = p0 >= 0.5;
-      const upset = favored0 !== won0;
-      const col = el('div', 'ocol' + (upset ? ' upset' : ''));
-      col.title = `Round ${r.n}`;
-      // bar grows from the 50% midline toward the favoured team
-      const mag = Math.round(Math.abs(p0 - 0.5) * 200);               // 0..100 (% of half-height)
-      const bar = el('div', 'obar ' + (favored0 ? 'a' : 'd'));
-      bar.style.height = mag + '%';
-      bar.style[favored0 ? 'bottom' : 'top'] = '50%';
-      const cap = el('div', 'ocap ' + (won0 ? 'a' : 'd'));            // who actually won
-      col.append(bar, cap);
-      col.onclick = () => this.loadRound(i);
-      chart.appendChild(col);
-      this.oddsBars.push(col);
-    });
+    this.oddsChart = chart;
+    this.rebuildOdds();
     odds.appendChild(chart);
     rail.appendChild(odds);
     this.oddsNow = odds.querySelector('#ace-oddsnow') as HTMLElement;
@@ -302,17 +287,68 @@ export class Viewer {
     window.addEventListener('mousemove', e => { if (drag) seekTo(e.clientX); });
     window.addEventListener('mouseup', () => { drag = false; this.last = null; });
 
-    // round strip
+    this.rebuildStrip();
+  }
+
+  /** Rebuild the round strip from the current timeline (idempotent — used on the
+   *  initial build AND when live playback unlocks new rounds). */
+  private rebuildStrip() {
+    this.strip.innerHTML = '';
     this.tl.rounds.forEach((r, i) => {
       const pip = el('span', 'pip ' + (r.winner === 0 ? 'w0' : 'w1'));
       pip.title = `Round ${r.n}`;
       pip.onclick = () => this.loadRound(i);
       this.strip.appendChild(pip);
     });
+    Array.from(this.strip.children).forEach((c, idx) => c.classList.toggle('cur', idx === this.roundIdx));
+  }
+
+  /** Rebuild the True-Odds chart from the current timeline (same idempotency). */
+  private rebuildOdds() {
+    this.oddsChart.innerHTML = '';
+    this.oddsBars = [];
+    this.tl.rounds.forEach((r, i) => {
+      const p0 = (r.attacker === 0 ? r.winPct : 1 - r.winPct);        // team-0 (att-colour) win chance
+      const won0 = r.winner === 0;
+      const favored0 = p0 >= 0.5;
+      const upset = favored0 !== won0;
+      const col = el('div', 'ocol' + (upset ? ' upset' : ''));
+      col.title = `Round ${r.n}`;
+      // bar grows from the 50% midline toward the favoured team
+      const mag = Math.round(Math.abs(p0 - 0.5) * 200);               // 0..100 (% of half-height)
+      const bar = el('div', 'obar ' + (favored0 ? 'a' : 'd'));
+      bar.style.height = mag + '%';
+      bar.style[favored0 ? 'bottom' : 'top'] = '50%';
+      const cap = el('div', 'ocap ' + (won0 ? 'a' : 'd'));            // who actually won
+      col.append(bar, cap);
+      col.onclick = () => this.loadRound(i);
+      this.oddsChart.appendChild(col);
+      this.oddsBars.push(col);
+    });
+  }
+
+  /** Swap in a longer timeline mid-watch WITHOUT resetting playback — the live-watch
+   *  feed: the server ships more completed rounds as the broadcast plays out. Rebuilds
+   *  the strip + odds, clamps the current round, and resumes from a live-tail hold if
+   *  fresh rounds arrived. `live=false` (the resolve flip) re-enables the match-final
+   *  card so the finale plays normally. */
+  setTimeline(tl: MatchTimeline, opts: { live?: boolean } = {}) {
+    const grew = tl.rounds.length > this.tl.rounds.length;
+    this.tl = tl;
+    this.live = !!opts.live;
+    tl.teams.forEach((tm, i) => tm.players.forEach(p => this.teamOf.set(p.handle, i as 0 | 1)));
+    this.rebuildStrip();
+    this.rebuildOdds();
+    this.roundIdx = Math.min(this.roundIdx, tl.rounds.length - 1);
+    // if we were parked at the live tail (last completed round done, waiting), and new
+    // rounds have unlocked, roll on into the next one.
+    if (grew && this.liveWaiting) { this.liveWaiting = false; this.hideEndCard(); this.loadRound(this.roundIdx + 1); }
+    else this.roundChrome(this.roundIdx);
   }
 
   private loadRound(i: number) {
     this.roundIdx = i;
+    this.liveWaiting = false;   // navigating into a round means we're no longer parked at the live tail
     const r = this.tl.rounds[i];
     this.clearAdvance();
     this.T = 0; this.fired = -1; this.ended = false; this.playing = true; this.last = null;
@@ -452,6 +488,14 @@ export class Viewer {
     this.endCard.innerHTML = `<div class="ec-label">Match Final</div><div class="ec-tag">${this.tl.teams[win].tag}</div>`
       + `<div class="ec-score"><span class="att">${a}</span><span class="ec-dash">—</span><span class="def">${b}</span></div>`
       + `<div class="ec-method">${this.tl.teams[win].name} win${topH ? ` · top frag ${topH} ${topK}` : ''}</div>`;
+  }
+
+  /** Live tail: we've watched every round broadcast so far and are caught up to the
+   *  live feed — hold here (no spoiler) until the next round is decided on air. */
+  private showLiveTail() {
+    this.endCard.className = 'ace-endcard show live';
+    this.endCard.innerHTML = `<div class="ec-label">● LIVE</div><div class="ec-win">Caught up to the broadcast</div>`
+      + `<div class="ec-method">Round ${this.tl.rounds.length + 1} is being decided…</div>`;
   }
 
   private scrubTo(frac: number) {
@@ -700,8 +744,11 @@ export class Viewer {
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
       if (this.T >= 1) {
         this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶';
-        // last round → the match-final card; otherwise the round card + auto-advance
+        // last round → the match-final card; otherwise the round card + auto-advance.
+        // In LIVE mode the "last round" is just the last one BROADCAST so far — don't
+        // reveal a final; park at the live tail and wait for setTimeline to bring more.
         if (this.roundIdx < this.tl.rounds.length - 1) { this.showEndCard(); this.advanceTimer = setTimeout(() => this.loadRound(this.roundIdx + 1), 2400); }
+        else if (this.live) { this.liveWaiting = true; this.showLiveTail(); }
         else this.showMatchCard();
       }
       this.render();

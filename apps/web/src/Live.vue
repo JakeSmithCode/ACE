@@ -406,7 +406,7 @@ async function loadStats() { if (server.value) try { statRows.value = (await ser
 async function toggleStats() { statsOpen.value = !statsOpen.value; if (statsOpen.value) await loadStats(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
-interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number }
+interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number; live?: boolean }
 const host = ref<HTMLElement | null>(null);
 const watching = ref<Watched | null>(null);
 const loadingWatch = ref(false);
@@ -450,7 +450,45 @@ async function watchAt(s: number, d: number, slot: number) {
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
-function closeWatch() { watching.value = null; boxScore.value = null; viewer?.destroy(); viewer = null; }
+// --- watch a match LIVE, in the viewer, synced to the broadcast (no spoilers) ---
+// The server ships the timeline gated to COMPLETED rounds only; we poll, and feed each
+// freshly-broadcast round into the viewer (which holds at the "live tail" until more
+// arrive). On reveal the full timeline + final drop in and the box score appears.
+let livePoll: ReturnType<typeof setInterval> | null = null;
+function stopLivePoll() { if (livePoll) { clearInterval(livePoll); livePoll = null; } }
+async function watchLive(fx: LiveFixture) {
+  if (!server.value) return;
+  loadingWatch.value = true;
+  try {
+    const lt = await server.value.liveTimeline(season.value, DAY.value, fx.slot);
+    if (!lt.timeline || lt.completed < 1) { errMsg.value = 'round 1 is still being decided — try again in a moment'; return; }
+    const map = lt.timeline.map;
+    const nav = await ensureNav(map);
+    const tl = lt.timeline;
+    watching.value = { home: fx.home, away: fx.away, final: lt.resolved ? tl.finalScore : null, map, season: season.value, day: DAY.value, slot: fx.slot, live: !lt.resolved };
+    boxScore.value = null;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, tl, `/${map}.png`, nav, { live: !lt.resolved }); });
+    if (lt.resolved) computeBox(tl);
+    else startLivePoll(fx.slot);
+  } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
+}
+function startLivePoll(slot: number) {
+  stopLivePoll();
+  livePoll = setInterval(async () => {
+    if (!server.value || !viewer) { stopLivePoll(); return; }
+    try {
+      const lt = await server.value.liveTimeline(season.value, DAY.value, slot);
+      if (!lt.timeline) return;
+      viewer.setTimeline(lt.timeline, { live: !lt.resolved });
+      if (lt.resolved) {
+        stopLivePoll();
+        computeBox(lt.timeline);
+        if (watching.value) watching.value = { ...watching.value, live: false, final: lt.timeline.finalScore };
+      }
+    } catch { /* transient — keep polling */ }
+  }, 2500);
+}
+function closeWatch() { stopLivePoll(); watching.value = null; boxScore.value = null; viewer?.destroy(); viewer = null; }
 /** A shareable deep-link to the watched replay — opening it auto-connects + plays. */
 function shareWatch() {
   if (!watching.value) return;
@@ -469,7 +507,7 @@ async function openClub(slug: string) {
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 
 onMounted(connect);
-onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); viewer?.destroy(); });
+onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); });
 </script>
 
 <template>
@@ -804,6 +842,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               <span class="lv-tname">{{ f.away.name }}</span>
             </div>
             <button v-if="f.status === 'resolved'" class="lv-watch" :disabled="loadingWatch" @click="watch(f)">▷ watch</button>
+            <button v-else-if="f.status === 'live' && f.round >= 2" class="lv-watch live" :disabled="loadingWatch" @click="watchLive(f)" title="watch live in the viewer — synced to the broadcast, no spoilers">▷ watch live</button>
             <div v-else class="lv-locked" title="sealed until the broadcast finishes">🔒</div>
           </div>
           <div v-if="!fixtures.length" class="lv-empty">waiting for the match-day to go live…</div>
@@ -813,9 +852,12 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
       <!-- the watched match -->
       <div v-if="watching" class="lv-watchwrap">
         <div class="lv-watchhead">
-          <b>{{ watching.home.tag }}</b> {{ watching.final?.[0] }} – {{ watching.final?.[1] }} <b>{{ watching.away.tag }}</b>
-          · <span class="hq-rmap">{{ watching.map }}</span> · re-simmed from the server snapshot
-          <button class="lv-share" @click="shareWatch">{{ shareCopied ? '✓ link copied' : '⤴ share' }}</button>
+          <b>{{ watching.home.tag }}</b>
+          <span v-if="watching.live" class="lv-livetag">● LIVE</span>
+          <template v-else> {{ watching.final?.[0] }} – {{ watching.final?.[1] }} </template>
+          <b>{{ watching.away.tag }}</b>
+          · <span class="hq-rmap">{{ watching.map }}</span> · {{ watching.live ? 'live — synced to the broadcast, no spoilers ahead' : 're-simmed from the server snapshot' }}
+          <button v-if="!watching.live" class="lv-share" @click="shareWatch">{{ shareCopied ? '✓ link copied' : '⤴ share' }}</button>
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>
