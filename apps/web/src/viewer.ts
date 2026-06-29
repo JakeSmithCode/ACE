@@ -81,6 +81,8 @@ function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, pro
   return hold;
 }
 
+// the IGL's economic call, labelled for the broadcast (eco reads as a disciplined "SAVE")
+const BUY_LABEL: Record<string, string> = { full: 'FULL BUY', force: 'FORCE', eco: 'SAVE', pistol: 'PISTOL' };
 const SVG = 'http://www.w3.org/2000/svg';
 const el = (t: string, cls?: string) => { const e = document.createElement(t); if (cls) e.className = cls; return e; };
 const svg = (t: string) => document.createElementNS(SVG, t);
@@ -401,13 +403,15 @@ export class Viewer {
     for (let ri = 0; ri < i; ri++) (this.tl.rounds[ri].winner === 0 ? s0++ : s1++);
     this.scoreA.textContent = String(s0); this.scoreB.textContent = String(s1);
 
-    // each team's buy this round
+    // each team's buy this round — an IN-GAME call made by the in-game leader
     ([0, 1] as const).forEach(ti => {
       const b = r.economy?.buy?.[String(ti) as '0' | '1'];
       const e = this.buyEls[ti];
-      if (!b) { e.textContent = ''; return; }
-      e.textContent = b.toUpperCase();
+      if (!b) { e.textContent = ''; e.removeAttribute('title'); return; }
+      e.textContent = BUY_LABEL[b] ?? b.toUpperCase();
       e.className = 'bbuy ' + b;
+      const igl = this.tl.teams[ti].players.find(p => p.igl);
+      e.title = igl ? `${BUY_LABEL[b] ?? b} — the IGL's call (${igl.handle} runs the economy)` : (BUY_LABEL[b] ?? b);
     });
 
     if (r.winPct == null) { this.oddsNow.textContent = ''; return; }

@@ -5,16 +5,21 @@ const FORCE_FLOOR = 2000; // enough to put together a meaningful half-buy
 const NEAR_FULL = 3300;   // close enough to a full that you just commit
 export type Buy = 'full' | 'force' | 'eco' | 'pistol';
 
-/** Buy decision for a non-pistol round, reading our bank, the enemy's, and our
- *  loss streak. The key realism is *saving*: when a real buy is out of reach and
- *  we're not desperate, bank the credits instead of half-buying into rifles. */
-export function decideBuy(creds: number, opp: number, lossStreak: number): Buy {
+/** Buy decision for a non-pistol round — an IN-GAME call made by the in-game leader,
+ *  reading our bank, the enemy's, and our loss streak. The key realism is *saving*:
+ *  when a real buy is out of reach and we're not desperate, bank the credits instead
+ *  of half-buying into rifles. `iql` is the IGL's economic acumen (−1..+1, 0 = neutral):
+ *  a WEAK caller wastes the save by half-buying into a marginal force (bleeding the
+ *  bank) — a roster gap you fix by fielding a better leader, never a mugging.
+ *  `iql = 0` (no leader / neutral) reduces EXACTLY to the original logic. */
+export function decideBuy(creds: number, opp: number, lossStreak: number, iql = 0): Buy {
   if (creds >= FULL) return 'full';
   if (creds >= FORCE_FLOOR) {
     if (creds >= NEAR_FULL) return 'force';   // basically a full — just commit
     if (lossStreak >= 2) return 'force';      // can't afford to keep saving, must contest
     if (opp < FORCE_FLOOR) return 'force';    // enemy is on an eco — punish it
-    return 'eco';                             // save toward a real buy next round
+    if (iql < -0.33) return 'force';          // a weak caller half-buys when he should save — bleeds the bank
+    return 'eco';                             // a disciplined save toward a real buy next round
   }
   return 'eco';
 }

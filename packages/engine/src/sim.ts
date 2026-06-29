@@ -103,6 +103,18 @@ function iglRotateMul(team: Team): number {
   return 1 + Math.max(-0.15, Math.min(0.20, (sense - 70) / 100));  // 50→0.85 .. 90→1.20
 }
 
+/** The in-game leader's ECONOMIC acumen — the buy is an IN-GAME call, made by the IGL,
+ *  not the manager. Quality scales with the IGL's cerebral stats (gameSense + clutch),
+ *  centred at 70: a sharp caller saves with discipline (banks toward a guaranteed full
+ *  buy), a weak one half-buys when he should save and bleeds the economy. Bounded
+ *  [-1, +1]; no IGL = neutral 0 (so the buy logic is unchanged without a leader). */
+function iglEco(team: Team): number {
+  const igl = team.players.find(p => p.igl);
+  if (!igl) return 0;
+  const sense = (igl.attr.gameSense + igl.attr.clutch) / 2;        // 0..100
+  return Math.max(-1, Math.min(1, (sense - 70) / 25));             // 45→-1 .. 70→0 .. 95→+1
+}
+
 /** A kill-point trigger with a death's player id resolved to a handle (the form
  *  the engine fires on). Returns null if the named teammate doesn't exist. */
 type ResolvedTrig = { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number };
@@ -423,9 +435,11 @@ function simulateRound(
   const scale = mapScale(A);   // normalize movement to Ascent's timing (1.0 on Ascent)
   const pistol = n === 1 || n === 13;
 
+  // the buy is the IN-GAME LEADER's call (not the manager's) — its quality scales with
+  // the IGL's economic acumen, so a sharp caller's team runs a tighter economy.
   const buy: Record<'0' | '1', Buy> = {
-    '0': pistol ? 'pistol' : decideBuy(creds['0'], creds['1'], lossStreak['0']),
-    '1': pistol ? 'pistol' : decideBuy(creds['1'], creds['0'], lossStreak['1']),
+    '0': pistol ? 'pistol' : decideBuy(creds['0'], creds['1'], lossStreak['0'], iglEco(input.teams[0])),
+    '1': pistol ? 'pistol' : decideBuy(creds['1'], creds['0'], lossStreak['1'], iglEco(input.teams[1])),
   };
 
   // attackers pick a site (A/B, or A/B/C on a three-site map), weighted by their
