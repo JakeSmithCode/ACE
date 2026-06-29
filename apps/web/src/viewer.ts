@@ -144,6 +144,7 @@ export class Viewer {
   private sideTags: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team ATK/DEF this round
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; private oddsChart!: HTMLElement; // true-odds chart
   private live = false; private liveWaiting = false;   // live-watch: parked at the last completed round, awaiting more
+  private heatLayer!: SVGGElement; private heatBtn!: HTMLElement; private heatLegend!: HTMLElement; private showHeat = false;
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
 
   constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean } = {}) {
@@ -187,22 +188,35 @@ export class Viewer {
     // left: map + controls
     const left = el('div', 'ace-left');
     const wrap = el('div', 'ace-mapwrap');
-    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-endcard" id="ace-endcard"></div>`;
+    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-endcard" id="ace-endcard"></div><div class="ace-heatkey" id="ace-heatkey"></div>`;
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox()); this.mapSvg = s as unknown as SVGSVGElement;
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
     this.abLayer = svg('g') as SVGGElement; this.abLayer.setAttribute('class', 'ace-abils');
     this.coneLayer = svg('g') as SVGGElement; this.coneLayer.setAttribute('class', 'ace-cones');
-    this.trLayer = svg('g') as SVGGElement;
+    this.trLayer = svg('g') as SVGGElement; this.trLayer.setAttribute('class', 'ace-trails');
     this.spike = svg('g') as SVGGElement; this.spike.setAttribute('class', 'ace-spike');
     this.spike.innerHTML = `<circle class="sp-ring" r="13"></circle><rect class="sp-core" x="-6" y="-6" width="12" height="12" transform="rotate(45)"></rect>`;
-    this.agLayer = svg('g') as SVGGElement;
+    this.agLayer = svg('g') as SVGGElement; this.agLayer.setAttribute('class', 'ace-agents');
+    // match heatmap: an aggregate density of where each side dies across the WHOLE match
+    // (the interrogability x-ray). Soft radial blobs, team-tinted, screen-blended so
+    // overlaps brighten into hotspots. Hidden until toggled; sits on top of everything.
+    const defs = svg('defs');
+    defs.innerHTML = `
+      <radialGradient id="heat0" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.55"/><stop offset="55%" stop-color="#22d3ee" stop-opacity="0.16"/><stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="heat1" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ff5c6e" stop-opacity="0.55"/><stop offset="55%" stop-color="#ff5c6e" stop-opacity="0.16"/><stop offset="100%" stop-color="#ff5c6e" stop-opacity="0"/>
+      </radialGradient>`;
+    this.heatLayer = svg('g') as SVGGElement; this.heatLayer.setAttribute('class', 'ace-heat');
     // utility (smokes/flashes/traps) sits on the map surface, cones above it, then trails/agents
-    s.append(img, scrim, this.abLayer, this.coneLayer, this.trLayer, this.spike, this.agLayer);
+    s.append(defs, img, scrim, this.abLayer, this.coneLayer, this.trLayer, this.spike, this.agLayer, this.heatLayer);
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
     this.endCard = wrap.querySelector('#ace-endcard') as HTMLElement;
+    this.heatLegend = wrap.querySelector('#ace-heatkey') as HTMLElement;
 
     const ctl = el('div', 'ace-controls');
     ctl.innerHTML = `
@@ -215,6 +229,7 @@ export class Viewer {
         <button class="speed" id="ace-speed">1×</button>
         <button class="speed vis on" id="ace-vis" title="Toggle vision cones">◔ Vision</button>
         <button class="speed vis on" id="ace-util" title="Toggle utility (smokes / flashes / traps)">✦ Utility</button>
+        <button class="speed heat" id="ace-heat" title="Match heatmap — where each side dies across the whole match">▦ Heatmap</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -272,13 +287,15 @@ export class Viewer {
     this.strip = ctl.querySelector('#ace-strip') as HTMLElement;
     this.feed = rail.querySelector('#ace-feed') as HTMLElement;
 
-    this.playBtn.onclick = () => { if (this.ended) this.scrubTo(0); this.playing = !this.playing; this.playBtn.textContent = this.playing ? '❚❚' : '▶'; this.last = null; };
+    this.playBtn.onclick = () => { if (this.showHeat) this.toggleHeat(); if (this.ended) this.scrubTo(0); this.playing = !this.playing; this.playBtn.textContent = this.playing ? '❚❚' : '▶'; this.last = null; };
     (ctl.querySelector('#ace-speed') as HTMLElement).onclick = (e) => { this.speed = this.speed === 1 ? 2 : 1; (e.target as HTMLElement).textContent = this.speed + '×'; };
     this.coneBtn = ctl.querySelector('#ace-vis') as HTMLElement;
     this.coneBtn.onclick = () => { this.showCones = !this.showCones; this.coneBtn.classList.toggle('on', this.showCones); this.render(); };
     if (!this.nav) { this.showCones = false; this.coneBtn.classList.remove('on'); this.coneBtn.style.display = 'none'; }
     this.utilBtn = ctl.querySelector('#ace-util') as HTMLElement;
     this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.render(); };
+    this.heatBtn = ctl.querySelector('#ace-heat') as HTMLElement;
+    this.heatBtn.onclick = () => this.toggleHeat();
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
     (ctl.querySelector('#ace-next') as HTMLElement).onclick = () => this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
     const seekTo = (clientX: number) => { const r = this.seek.getBoundingClientRect(); this.scrubTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width))); };
@@ -327,6 +344,47 @@ export class Viewer {
     });
   }
 
+  /** Match heatmap: aggregate WHERE each side dies across every round into a density
+   *  field. A kill's death-spot is the victim's reconstructed position at the kill `t`
+   *  (the same posWithDepart the playback uses), tinted by the victim's side. Built fresh
+   *  each toggle so it reflects the current (possibly still-live, completed-rounds-only)
+   *  timeline — never a spoiler. */
+  private buildHeat() {
+    this.heatLayer.innerHTML = '';
+    const HEAT_R = 46;
+    let n0 = 0, n1 = 0;
+    for (const r of this.tl.rounds) {
+      const moves = new Map<string, { path: Vec2[]; departT: number; arrive: number }>();
+      for (const e of r.events) if (e.kind === 'move') moves.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive });
+      for (const e of r.events) {
+        if (e.kind !== 'kill') continue;
+        const v = moves.get(e.victim);
+        if (!v) continue;
+        const p = posWithDepart(v.path, v.departT, v.arrive, e.t);
+        const side = this.teamOf.get(e.victim) ?? 0;
+        side === 0 ? n0++ : n1++;
+        const c = svg('circle');
+        c.setAttribute('cx', String(p[0])); c.setAttribute('cy', String(p[1])); c.setAttribute('r', String(HEAT_R));
+        c.setAttribute('fill', `url(#heat${side})`);
+        this.heatLayer.appendChild(c);
+      }
+    }
+    this.heatLegend.innerHTML = `<div class="hk-h">▦ where each side died · ${this.tl.rounds.length} rounds</div>`
+      + `<div class="hk-row"><i class="hk-dot a"></i>${this.tl.teams[0].tag}<b>${n0}</b></div>`
+      + `<div class="hk-row"><i class="hk-dot d"></i>${this.tl.teams[1].tag}<b>${n1}</b></div>`
+      + `<div class="hk-sub">brighter = more kills there</div>`;
+  }
+
+  /** Toggle the match heatmap — an analysis overlay, so it pauses playback and hides the
+   *  live agents/cones/utility (CSS, via `heat-on`) to read the density cleanly. */
+  private toggleHeat() {
+    this.showHeat = !this.showHeat;
+    this.heatBtn.classList.toggle('on', this.showHeat);
+    this.mapSvg.classList.toggle('heat-on', this.showHeat);
+    this.heatLegend.classList.toggle('show', this.showHeat);
+    if (this.showHeat) { this.playing = false; this.playBtn.textContent = '▶'; this.clearAdvance(); this.hideEndCard(); this.buildHeat(); }
+  }
+
   /** Swap in a longer timeline mid-watch WITHOUT resetting playback — the live-watch
    *  feed: the server ships more completed rounds as the broadcast plays out. Rebuilds
    *  the strip + odds, clamps the current round, and resumes from a live-tail hold if
@@ -347,6 +405,7 @@ export class Viewer {
   }
 
   private loadRound(i: number) {
+    if (this.showHeat) this.toggleHeat();   // leaving the aggregate view back into round playback
     this.roundIdx = i;
     this.liveWaiting = false;   // navigating into a round means we're no longer parked at the live tail
     const r = this.tl.rounds[i];
