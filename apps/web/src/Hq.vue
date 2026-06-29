@@ -348,7 +348,7 @@ onUnmounted(() => { viewer?.destroy(); });
               <i class="hq-objicon">⌖</i>
               <div class="hq-objtext">
                 <b>{{ objective.label }}</b>
-                <span>{{ objective.kind === 'promote' ? `finish top ${objective.needRank}` : objective.kind === 'tophalf' ? `finish in the top ${objective.needRank}` : `stay out of the bottom ${PROMO}` }}</span>
+                <span>{{ objective.kind === 'title' ? `make the top-${objective.needRank} playoff` : objective.kind === 'promote' ? `finish top ${objective.needRank}` : objective.kind === 'tophalf' ? `finish in the top ${objective.needRank}` : `stay out of the bottom ${PROMO}` }}</span>
               </div>
               <span class="hq-objtrack" :class="objectiveMet ? 'on' : 'off'">{{ objectiveMet ? '● on track' : '○ off pace' }}</span>
             </div>

@@ -529,12 +529,16 @@ const myResults = computed(() => results.value.filter(r => r.home === myClub.val
 // the top half, an underdog to survive. Meeting it pays a board bonus; it's never a
 // punishment beyond the standing itself (DESIGN §18 — pressure, not a mugging). Snapshotted
 // so it stays a fixed target even as rosters drift through the season.
-type Objective = { kind: 'promote' | 'tophalf' | 'survive'; label: string; needRank: number; bonus: number; seed: number };
+type Objective = { kind: 'title' | 'promote' | 'tophalf' | 'survive'; label: string; needRank: number; bonus: number; seed: number };
 function computeObjective(): Objective {
   const d = division.value[myClub.value];
   const members = clubs.value.map((c, i) => ({ i, s: c.strength })).filter(m => division.value[m.i] === d).sort((a, b) => b.s - a.s);
   const seed = members.findIndex(m => m.i === myClub.value) + 1;   // 1 = strongest in the tier
-  if (seed <= PROMO) return { kind: 'promote', label: 'Win promotion', needRank: PROMO, bonus: 9000, seed };
+  // a title-favourite is told to win promotion — EXCEPT in the top tier, where there's
+  // nowhere to climb, so the brief is to challenge for the title (make the top-4 playoff).
+  if (seed <= PROMO) return d === 0
+    ? { kind: 'title', label: 'Challenge for the title', needRank: 4, bonus: 9000, seed }
+    : { kind: 'promote', label: 'Win promotion', needRank: PROMO, bonus: 9000, seed };
   if (seed <= DIV_SIZE / 2) return { kind: 'tophalf', label: 'Finish top half', needRank: DIV_SIZE / 2, bonus: 4500, seed };
   return { kind: 'survive', label: 'Avoid relegation', needRank: DIV_SIZE - PROMO, bonus: 2500, seed };
 }
@@ -741,9 +745,13 @@ function advanceSeason() {
   const objBonus = objMet ? objective.value.bonus : 0;
   objectiveOutcome.value = { met: objMet, label: objective.value.label, bonus: objBonus, finish: objFinish };
   // board confidence: how you met the brief moves it — exceed it and they back you, miss it
-  // and pressure mounts. reqGap > 0 = you beat the required finish; < 0 = you fell short.
+  // and pressure mounts. reqGap > 0 = you beat the required finish; < 0 = you fell short. The
+  // curve is FORGIVING (DESIGN §18 — pressure, not a mugging): a near-miss costs little and is
+  // recoverable; only a real collapse (finishing far below the brief) threatens the job.
   const reqGap = objective.value.needRank - objFinish;
-  const confDelta = objMet ? 8 + Math.min(12, reqGap * 3) : -10 + Math.max(-15, reqGap * 3);
+  const confDelta = objMet
+    ? 6 + Math.min(9, Math.max(0, reqGap) * 3)        // met: +6 (scraped it) .. +15 (smashed it)
+    : Math.max(-16, -3 + reqGap * 3);                 // missed: −6 a near-miss, capped −16 a disaster
   boardConfidence.value = Math.max(0, Math.min(100, boardConfidence.value + confDelta));
   if (boardConfidence.value <= 0) sacked.value = true;   // the board has seen enough
   // end-of-season awards for your division (uses the season's division + the start baseline,
