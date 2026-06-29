@@ -3,11 +3,18 @@
 // shown as a SCOUTED estimate (fogged stars + a confidence that's higher for
 // older players you own), never the true ceiling. Start a reserve / bench a
 // starter to override the auto lineup; sell or list to manage depth.
+import { ref, nextTick } from 'vue';
 import type { Attributes, Player } from '@ace/shared';
 import { overall, phaseOf, scoutedStars, scoutConfidence, scoutedRange, scoutedAttr, soloRank, traitOf, personOf, displayAge, fmtDayMonth, birthdayPassed } from '@ace/world';
 import { useWorld } from './world';
 
 const w = useWorld();
+// rename a player's gamertag (in-game name)
+const editing = ref<string | null>(null);
+const draft = ref('');
+const gamertag = (p: Player) => w.handleOf(p.id, p.handle);
+async function startEdit(p: Player) { editing.value = p.id; draft.value = gamertag(p); await nextTick(); (document.getElementById('rs-edit-' + p.id) as HTMLInputElement)?.select(); }
+function commitEdit(p: Player) { if (editing.value === p.id) { w.renamePlayer(p.id, draft.value); editing.value = null; } }
 const ATTRS: { k: keyof Attributes; label: string }[] = [
   { k: 'aim', label: 'AIM' }, { k: 'movement', label: 'MOV' }, { k: 'gameSense', label: 'GS' },
   { k: 'utility', label: 'UTL' }, { k: 'clutch', label: 'CLT' }, { k: 'entry', label: 'ENT' },
@@ -51,7 +58,12 @@ const hadBday = (p: Player) => birthdayPassed(person(p).birthday, w.today.value)
     <div v-for="p in sorted()" :key="p.id" class="rs-row" :class="[phaseOf(p), { reserve: !w.isStarter(p.id), listed: w.isListed(p.id) }]">
       <div class="rs-id">
         <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
-        <div class="rs-name">{{ p.handle }}
+        <div class="rs-name">
+          <template v-if="editing === p.id">
+            <input :id="'rs-edit-' + p.id" v-model="draft" class="rs-edit" maxlength="12" spellcheck="false"
+              @keyup.enter="commitEdit(p)" @keyup.esc="editing = null" @blur="commitEdit(p)" />
+          </template>
+          <template v-else>{{ gamertag(p) }}<button class="rs-rename" title="rename in-game gamertag" @click="startEdit(p)">✎</button></template>
           <i v-if="w.isStarter(p.id)" class="rs-start">XI</i><i v-else class="rs-res">RES</i>
           <button v-if="w.isStarter(p.id)" class="rs-capt" :class="{ on: w.isCaptain(p.id) }" @click="w.setCaptain(p.id)"
             :title="w.isCaptain(p.id) ? 'captain — a strong leader steadies the room (click to revert to auto)' : 'name as captain (a leadership morale lever)'">C</button>

@@ -498,10 +498,34 @@ function startingFive(roster: Player[]): Player[] {
   });
   return five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
 }
+// ── Custom in-game names (rename a player's gamertag) ────────────────────────────────
+// The handle is the competitive identity the engine + viewer show. The manager can rename
+// any of their players (it's their roster). Stored by id; the engine assumes unique handles
+// per match, so renames are deduped within the fielded five (and cross-team in buildInput).
+const customHandles = ref<Map<string, string>>(new Map());
+const handleOf = (id: string, def: string) => customHandles.value.get(id) ?? def;
+/** Clean a typed name to a valid gamertag (uppercase, alphanumeric, ≤12). Empty → clear. */
+function renamePlayer(id: string, raw: string) {
+  const clean = (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  const m = new Map(customHandles.value);
+  if (clean) m.set(id, clean); else m.delete(id);
+  customHandles.value = m;
+  syncLineup();
+}
+/** Apply custom handles to a fielded five, deduping collisions (engine needs them unique). */
+function withHandles(five: Player[]): Player[] {
+  const seen = new Set<string>();
+  return five.map(p => {
+    let h = handleOf(p.id, p.handle);
+    while (seen.has(h)) h += '2';
+    seen.add(h);
+    return h === p.handle ? p : { ...p, handle: h };
+  });
+}
 // re-derive your club's fielded team from the roster (called after any roster change)
 function syncLineup() {
   pruneForced();
-  const team = { ...clubs.value[myClub.value].team, players: startingFive(myRoster.value) };
+  const team = { ...clubs.value[myClub.value].team, players: withHandles(startingFive(myRoster.value)) };
   clubs.value = clubs.value.map((c, i) => i === myClub.value ? { ...c, team, strength: clampStr(squadRating(team) / 100) } : c);
 }
 const isStarter = (id: string) => clubs.value[myClub.value].team.players.some(p => p.id === id);
@@ -652,9 +676,15 @@ function buildInput(fx: { home: number; away: number }, seed: number, map: MapId
       return { ...p, attr };
     }) };
   };
+  // safety: a custom handle could collide with an opponent's — the engine assumes unique
+  // handles per match, so dedupe across BOTH fives (suffix the away-side duplicate).
+  const dedupeCross = (home: Team, away: Team): [Team, Team] => {
+    const taken = new Set(home.players.map(p => p.handle));
+    return [home, { ...away, players: away.players.map(p => { let h = p.handle; while (taken.has(h)) h += '2'; taken.add(h); return h === p.handle ? p : { ...p, handle: h }; }) }];
+  };
+  const [home, away] = dedupeCross(fit(fx.home, withAffinity(clubs.value[fx.home].team, map)), fit(fx.away, withAffinity(clubs.value[fx.away].team, map)));
   return buildMatchInput({
-    seed, map, patch: patch.value,
-    home: fit(fx.home, withAffinity(clubs.value[fx.home].team, map)), away: fit(fx.away, withAffinity(clubs.value[fx.away].team, map)),
+    seed, map, patch: patch.value, home, away,
     tactics: [tac(fx.home), tac(fx.away)], comp: [cmp(fx.home), cmp(fx.away)],
   });
 }
@@ -868,7 +898,7 @@ function selectClub(i: number) {
   ledger.value = null;
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
-  forcedStart.value = new Set(); forcedBench.value = new Set();
+  forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
   playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
@@ -889,7 +919,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   balances.value = clubs.value.map(c => startingBalance(c.strength));
   ledger.value = null;
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
-  forcedStart.value = new Set(); forcedBench.value = new Set();
+  forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
   playoffs.value = null; titles.value = clubs.value.map(() => 0);
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
@@ -1234,7 +1264,7 @@ function snapshot() {
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
-    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], facilities: facilities.value, academy: academy.value,
+    forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], customHandles: [...customHandles.value.entries()], facilities: facilities.value, academy: academy.value,
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
     focuses: [...focuses.value.entries()],
@@ -1261,6 +1291,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
   patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs;
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
+  customHandles.value = new Map((o as { customHandles?: [string, string][] }).customHandles ?? []);
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
   academy.value = o.academy ?? defaultAcademy();            // default for pre-academy saves
   retirements.value = o.retirements ?? [];
@@ -1301,7 +1332,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1332,5 +1363,6 @@ export function useWorld() {
     tacticPresets, saveTacticPreset, loadTacticPreset, deleteTacticPreset,
     wageOf, renewCost, yearsLeft, isExpiring, renewPlayer, myWageBill, contractDepartures, marketWave,
     canBench, isBenched, isStarterPinned, startReserve, benchStarter,
+    handleOf, renamePlayer,
   };
 }
