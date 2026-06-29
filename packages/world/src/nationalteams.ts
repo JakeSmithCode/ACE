@@ -20,32 +20,57 @@ export interface NationSquad {
   pool: number;          // how many players of this nationality exist (depth)
 }
 
+/** The full eligible pool of every nation, keyed by country CODE — everyone of that
+ *  nationality across the world (the manager's selection pool). */
+export function nationPools(w: WorldState): Map<string, Player[]> {
+  const byCode = new Map<string, Player[]>();
+  for (const c of w.clubs) for (const p of c.roster) {
+    const code = personOf(p.id).nation.code;
+    let arr = byCode.get(code);
+    if (!arr) { arr = []; byCode.set(code, arr); }
+    arr.push(p);
+  }
+  return byCode;
+}
+
+const withIgl = (five: Player[]): Player[] => five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
+export const fiveStrength = (five: Player[]): number => five.reduce((s, p) => s + overall(p), 0) / Math.max(1, five.length);
+
+/** A nation's best VALID five from its pool (2 duelist + 1 each, best by overall),
+ *  or null if a role can't be filled (the nation can't field a team). */
+export function bestFive(pool: Player[]): Player[] | null {
+  const five: Player[] = [];
+  for (const role of ['duelist', 'initiator', 'controller', 'sentinel'] as const) {
+    const inRole = pool.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a) || a.id.localeCompare(b.id));
+    if (inRole.length < ROLE_NEED[role]) return null;
+    five.push(...inRole.slice(0, ROLE_NEED[role]));
+  }
+  return withIgl(five);
+}
+
+/** A manager-chosen five from a pool by player id — returns it only if the picks form a
+ *  VALID comp drawn from the pool (2 duelist + 1 init/ctrl/sentinel), else null (so a
+ *  stale/invalid selection safely falls back to the best five). */
+export function pickFive(pool: Player[], ids: string[]): Player[] | null {
+  const chosen = ids.map(id => pool.find(p => p.id === id)).filter((p): p is Player => !!p);
+  if (chosen.length !== 5) return null;
+  for (const role of ['duelist', 'initiator', 'controller', 'sentinel'] as const) {
+    if (chosen.filter(p => p.role === role).length !== ROLE_NEED[role]) return null;
+  }
+  return withIgl(chosen);
+}
+
 /** Assemble each nation's best VALID five from every player of that nationality across
  *  the whole world. A nation that can't field a full comp (a role with nobody) doesn't
  *  enter — like a country that can't qualify. Sorted strongest-first, ties by code so
  *  it's deterministic. */
 export function nationalSquads(w: WorldState): NationSquad[] {
-  const byNation = new Map<string, Player[]>();
-  for (const c of w.clubs) for (const p of c.roster) {
-    const country = personOf(p.id).nation.country;
-    let arr = byNation.get(country);
-    if (!arr) { arr = []; byNation.set(country, arr); }
-    arr.push(p);
-  }
   const squads: NationSquad[] = [];
-  for (const players of byNation.values()) {
+  for (const players of nationPools(w).values()) {
+    const five = bestFive(players);
+    if (!five) continue;
     const nat = personOf(players[0].id).nation;
-    const five: Player[] = [];
-    let ok = true;
-    (['duelist', 'initiator', 'controller', 'sentinel'] as const).forEach(role => {
-      const inRole = players.filter(p => p.role === role).sort((a, b) => overall(b) - overall(a) || a.id.localeCompare(b.id));
-      if (inRole.length < ROLE_NEED[role]) ok = false;
-      five.push(...inRole.slice(0, ROLE_NEED[role]));
-    });
-    if (!ok || five.length !== 5) continue;
-    const fielded = five.map(p => ({ ...p, igl: p.role === 'sentinel' }));
-    const strength = fielded.reduce((s, p) => s + overall(p), 0) / 5;
-    squads.push({ country: nat.country, flag: nat.flag, code: nat.code, five: fielded, strength, pool: players.length });
+    squads.push({ country: nat.country, flag: nat.flag, code: nat.code, five, strength: fiveStrength(five), pool: players.length });
   }
   return squads.sort((a, b) => b.strength - a.strength || a.code.localeCompare(b.code));
 }

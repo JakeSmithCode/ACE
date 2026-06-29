@@ -1089,6 +1089,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .wc-trow input[type=range]{width:100%;accent-color:var(--brand)}
 .wc-trow i{font-style:normal;text-align:right;color:var(--text);font-variant-numeric:tabular-nums}
 .wc-save{margin-top:5px;width:100%;font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.04em;color:#04121a;background:var(--brand);border:none;padding:5px;cursor:pointer;clip-path:var(--bevel)}
+.wc-plan.custom{color:var(--gold);border-color:rgba(245,200,92,.4)}
+.wc-tach i{float:right;color:var(--muted-2);font-style:normal}.wc-tach i.ok{color:var(--win)}
+/* the manager's XI picker (a real second team) */
+.wc-pick{margin-top:8px}
+.wc-pickrole{display:flex;align-items:flex-start;gap:7px;padding:3px 0}
+.wc-prole{flex:0 0 auto;font-size:8px;padding:2px 5px;align-self:flex-start}
+.wc-pickopts{display:flex;flex-wrap:wrap;gap:3px;min-width:0}
+.wc-pickp{font-family:var(--label);font-size:9.5px;letter-spacing:.02em;color:var(--muted);background:var(--bg-3);border:1px solid var(--line-2);padding:2px 6px;cursor:pointer;clip-path:var(--bevel);display:flex;align-items:center;gap:4px}
+.wc-pickp i{font-style:normal;color:var(--muted-2);font-size:8.5px}
+.wc-pickp:hover{border-color:var(--brand)}
+.wc-pickp.on{background:rgba(34,211,238,.15);border-color:var(--brand);color:var(--text)}
+.wc-pickp.on i{color:var(--brand)}
+.wc-save:disabled{opacity:.45;cursor:default}
 .wc-votemsg{margin:-10px 0 18px;font-family:var(--label);font-size:11px;letter-spacing:.03em;color:var(--brand)}
 .cir-regions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
 .cir-region{background:var(--bg-2);border:1px solid var(--line);border-top:2px solid var(--rg);clip-path:var(--bevel);padding:13px 15px}

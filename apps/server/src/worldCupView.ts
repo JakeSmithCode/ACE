@@ -2,11 +2,11 @@
 // nationality, run a single-elim bracket for the world title, and FULL-SIM the final with
 // the real engine so it's watchable (the champion is the engine's verdict). Mirrors the
 // circuit view's shape; pure + deterministic from the world + a seed, cached per season.
-import { nationalSquads, nationalTeam, worldCup, buildMatchInput, fixtureMap, overall, soloRank, personOf, type WorldState, type NationSquad } from '@ace/world';
+import { nationalSquads, worldCup, buildMatchInput, fixtureMap, overall, soloRank, personOf, nationPools, pickFive, fiveStrength, type WorldState, type NationSquad } from '@ace/world';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import type { Navmesh } from '@ace/maps';
-import type { MatchInput, MapId, Tactics } from '@ace/shared';
+import type { MatchInput, MapId, Tactics, Team, Player } from '@ace/shared';
 
 const side = (s: NationSquad) => ({ code: s.code, country: s.country, flag: s.flag });
 /** A player's highest-mastery agent (the engine's default pick; name tiebreak). */
@@ -16,7 +16,7 @@ const topAgentOf = (p: { agents: { agent: string; level: number }[] }) =>
 export interface WorldCupView {
   season: number;
   squads: {
-    code: string; country: string; flag: string; strength: number; pool: number; manager: string | null;
+    code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; custom: boolean;
     five: { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }[];
   }[];
   bracket: {
@@ -27,14 +27,30 @@ export interface WorldCupView {
   final: { a: { code: string; country: string; flag: string }; b: { code: string; country: string; flag: string }; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput };
 }
 
-/** An elected manager's authored tactics + display name for a nation (injected by the
- *  server's election layer; defaults make the no-manager World Cup byte-identical). */
-export interface WorldCupHooks { tacticsOf?: (code: string) => Tactics | undefined; managerOf?: (code: string) => string | null }
+/** An elected manager's authored plan for a nation — tactics, the chosen five (lineup),
+ *  and a display name (injected by the server's election layer; defaults make the
+ *  no-manager World Cup byte-identical). */
+export interface WorldCupHooks {
+  tacticsOf?: (code: string) => Tactics | undefined;
+  managerOf?: (code: string) => string | null;
+  lineupOf?: (code: string) => string[] | undefined;
+}
 
 export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, hooks: WorldCupHooks = {}): WorldCupView {
   const seed = (w.seed ^ (w.season * 0x9e3779b1)) >>> 0;
   const squads = nationalSquads(w);
   const ev = worldCup(squads, { seed, slots: 8 });
+  const pools = nationPools(w);
+
+  // the five a nation actually fields: the elected manager's chosen lineup if it's a valid
+  // pick from the pool, else the default best five (so seeding stays on the talent ceiling
+  // but the manager selects the XI within it — a real "second team" to run).
+  const fieldedOf = (s: NationSquad): { five: Player[]; custom: boolean } => {
+    const ids = hooks.lineupOf?.(s.code);
+    const picked = ids ? pickFive(pools.get(s.code) ?? [], ids) : null;
+    return picked ? { five: picked, custom: true } : { five: s.five, custom: false };
+  };
+  const teamOf = (s: NationSquad, five: Player[]): Team => ({ id: `NT-${s.code}`, tag: s.code, name: s.country, players: five });
 
   // group bracket matches into display rounds
   const byRound = new Map<number, WorldCupView['bracket']['rounds'][number]>();
@@ -53,9 +69,10 @@ export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, h
   // and your nation plays your plan (no manager → the neutral default).
   const tacA = hooks.tacticsOf?.(last.a.code) ?? DEFAULT_TACTICS;
   const tacB = hooks.tacticsOf?.(last.b.code) ?? DEFAULT_TACTICS;
+  const fA = fieldedOf(last.a), fB = fieldedOf(last.b);
   const snapshot = buildMatchInput({
     seed: last.seed, map, patch: w.patch,
-    home: nationalTeam(last.a), away: nationalTeam(last.b),
+    home: teamOf(last.a, fA.five), away: teamOf(last.b, fB.five),
     tactics: [tacA, tacB], comp: [{}, {}],
   });
   const score = simulateMatch(snapshot, navOf(map), 0).finalScore;
@@ -63,14 +80,17 @@ export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, h
 
   return {
     season: w.season,
-    squads: ev.field.map(s => ({
-      code: s.code, country: s.country, flag: s.flag, strength: Math.round(s.strength), pool: s.pool,
-      manager: hooks.managerOf?.(s.code) ?? null,
-      five: s.five.map(p => {
-        const sr = soloRank(Math.round(overall(p)));
-        return { handle: p.handle, name: personOf(p.id).name, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl, agent: topAgentOf(p), solo: sr.label, soloTier: sr.tier };
-      }),
-    })),
+    squads: ev.field.map(s => {
+      const { five, custom } = fieldedOf(s);
+      return {
+        code: s.code, country: s.country, flag: s.flag, strength: Math.round(fiveStrength(five)), pool: s.pool,
+        manager: hooks.managerOf?.(s.code) ?? null, custom,
+        five: five.map(p => {
+          const sr = soloRank(Math.round(overall(p)));
+          return { handle: p.handle, name: personOf(p.id).name, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl, agent: topAgentOf(p), solo: sr.label, soloTier: sr.tier };
+        }),
+      };
+    }),
     bracket: { field: ev.field.map(side), rounds, champion: side(champ) },
     final: { a: side(last.a), b: side(last.b), map, score, seed: last.seed, snapshot },
   };

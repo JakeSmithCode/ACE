@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -140,7 +140,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // to manage a nation, others vote, and the winner authors the nation's tactics — which
   // drive the engine-simmed final. In-memory per server (Pg follow-up like the other
   // per-account state). Keyed by 3-letter country code.
-  interface NationElection { candidates: string[]; votes: Map<string, string>; tactics?: Tactics }
+  interface NationElection { candidates: string[]; votes: Map<string, string>; tactics?: Tactics; lineup?: string[] }
   const elections = new Map<string, NationElection>();
   const electionOf = (code: string): NationElection => {
     let e = elections.get(code);
@@ -162,6 +162,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const mgr = electedManager(code); if (!mgr) return undefined;
     return elections.get(code)?.tactics;
   };
+  // the manager's chosen XI (player ids); only applies while there's a sitting manager
+  const nationLineup = (code: string): string[] | undefined => {
+    const mgr = electedManager(code); if (!mgr) return undefined;
+    return elections.get(code)?.lineup;
+  };
+  const wcHooks = (w: WorldState) => ({
+    tacticsOf: nationTactics, lineupOf: nationLineup,
+    managerOf: (code: string) => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; },
+  });
   const bustWorldCup = () => { worldCupCache = undefined; };   // an election change re-sims the final
   // the transfer market: a free-agent board built once (stable) + a `sold` set of
   // handles already signed this session (a regenerated board would shift, so cache it)
@@ -695,7 +704,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'worldcup' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       if (!worldCupCache || worldCupCache.season !== w.season) {
-        worldCupCache = buildWorldCupView(w, navOf, { tacticsOf: nationTactics, managerOf: code => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; } });
+        worldCupCache = buildWorldCupView(w, navOf, wcHooks(w));
       }
       return json(res, 200, worldCupCache);
     }
@@ -704,21 +713,33 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'worldcup' && path[1] === 'elections' && path.length === 2 && req.method === 'GET') {
       const w = (await store.loadWorld(id))!;
       if (!worldCupCache || worldCupCache.season !== w.season) {
-        worldCupCache = buildWorldCupView(w, navOf, { tacticsOf: nationTactics, managerOf: code => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; } });
+        worldCupCache = buildWorldCupView(w, navOf, wcHooks(w));
       }
       const myTag = account ? clubTagOf(w, account) : null;
+      const pools = nationPools(w);
       const nations = worldCupCache.squads.map(s => {
         const e = electionOf(s.code), mgr = electedManager(s.code);
         const candidates = e.candidates.map(a => ({ tag: clubTagOf(w, a) ?? '—', votes: tallyVotes(e, a), you: a === account }))
           .sort((x, y) => y.votes - x.votes || x.tag.localeCompare(y.tag));
+        const youManager = account != null && mgr === account;
+        // the manager sees the full eligible pool to pick the XI from + the fielded ids
+        let pool: { id: string; handle: string; name: string; role: string; overall: number }[] | undefined;
+        let fielded: string[] | undefined;
+        if (youManager) {
+          const ps = pools.get(s.code) ?? [];
+          pool = ps.map(p => ({ id: p.id, handle: p.handle, name: personOf(p.id).name, role: p.role, overall: Math.round(overall(p)) }))
+            .sort((a, b) => b.overall - a.overall);
+          fielded = ((e.lineup && pickFive(ps, e.lineup)) || bestFive(ps) || []).map(p => p.id);
+        }
         return {
           code: s.code, country: s.country, flag: s.flag,
           manager: mgr ? clubTagOf(w, mgr) : null,
-          candidates, hasTactics: !!e.tactics && mgr != null,
+          candidates, hasTactics: !!e.tactics && mgr != null, custom: !!e.lineup && mgr != null,
           youCandidate: account != null && e.candidates.includes(account),
-          youManager: account != null && mgr === account,
+          youManager,
           yourVoteTag: account ? (e.votes.has(account) ? (clubTagOf(w, e.votes.get(account)!) ?? null) : null) : null,
-          tactics: (account != null && mgr === account) ? (e.tactics ?? DEFAULT_TACTICS) : undefined,
+          tactics: youManager ? (e.tactics ?? DEFAULT_TACTICS) : undefined,
+          pool, fielded,
         };
       });
       return json(res, 200, { nations, you: myTag });
@@ -754,6 +775,21 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const body = (await readBody(req)) as { tactics?: Tactics };
       if (!body.tactics) return json(res, 422, { error: 'no tactics' });
       electionOf(code).tactics = body.tactics;
+      bustWorldCup();
+      return json(res, 200, { ok: true });
+    }
+    // PATCH /worldcup/:code/lineup  { lineup: id[] }  → the elected manager selects the XI
+    // from the nation's eligible pool. Rejected unless it's a valid five (2 duelist + 1
+    // each) drawn from the pool — managing a nation is a real second team to pick.
+    if (path[0] === 'worldcup' && path.length === 3 && path[2] === 'lineup' && req.method === 'PATCH') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const code = path[1].toUpperCase();
+      if (electedManager(code) !== account) return json(res, 403, { error: 'only the elected manager can pick the five' });
+      const w = (await store.loadWorld(id))!;
+      const body = (await readBody(req)) as { lineup?: string[] };
+      const ids = body.lineup ?? [];
+      if (!pickFive(nationPools(w).get(code) ?? [], ids)) return json(res, 422, { error: 'not a valid five (need 2 duelists + 1 initiator/controller/sentinel, all eligible)' });
+      electionOf(code).lineup = ids;
       bustWorldCup();
       return json(res, 200, { ok: true });
     }

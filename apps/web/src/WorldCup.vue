@@ -6,7 +6,7 @@
 import { onMounted, onUnmounted, ref, reactive } from 'vue';
 import { simulateMatch } from '@ace/engine';
 import { Viewer } from './viewer';
-import { AceServer, type WorldCupView, type WCSide, type ElectionsView, type NationElection } from './serverApi';
+import { AceServer, type WorldCupView, type WCSide, type ElectionsView, type NationElection, type PoolPlayer } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -24,7 +24,7 @@ async function loadElections() {
   if (!server) return;
   try {
     elections.value = await server.worldCupElections(token.value ?? undefined);
-    for (const n of elections.value.nations) if (n.youManager) ensureDraft(n);
+    for (const n of elections.value.nations) if (n.youManager) { ensureDraft(n); ensureLine(n); }
   } catch { /* offline */ }
 }
 async function runFor(code: string) {
@@ -47,6 +47,30 @@ async function saveTactics(n: NationElection) {
   const d = draft[n.code];
   const tactics = { ...n.tactics, attack: { ...n.tactics.attack, siteBias: d.siteBias, tempo: d.tempo }, defense: { ...n.tactics.defense, read: d.read, aggression: d.aggression } };
   try { await server.setNationTactics(n.code, tactics, token.value); voteMsg.value = `${n.code} tactics saved — your plan drives the final.`; await reload(); }
+  catch (e) { voteMsg.value = (e as Error).message; }
+}
+// the manager's XI selection (a real second team): pick 2 duelists + 1 init/ctrl/sentinel
+// from the nation's full eligible pool. Click-to-swap within each role's cap.
+const ROLES = ['duelist', 'initiator', 'controller', 'sentinel'] as const;
+const roleCap = (r: string) => (r === 'duelist' ? 2 : 1);
+const lineDraft = reactive<Record<string, string[]>>({});
+function ensureLine(n: NationElection) { if (!lineDraft[n.code] && n.fielded) lineDraft[n.code] = [...n.fielded]; }
+const poolByRole = (n: NationElection, role: string): PoolPlayer[] => (n.pool ?? []).filter(p => p.role === role);
+const roleOf = (n: NationElection, id: string) => n.pool?.find(p => p.id === id)?.role;
+const isPicked = (code: string, id: string) => (lineDraft[code] ?? []).includes(id);
+const pickedCount = (n: NationElection, role: string) => (lineDraft[n.code] ?? []).filter(id => roleOf(n, id) === role).length;
+function togglePick(n: NationElection, p: PoolPlayer) {
+  const arr = lineDraft[n.code] ?? (lineDraft[n.code] = []);
+  const i = arr.indexOf(p.id);
+  if (i >= 0) { arr.splice(i, 1); return; }
+  const sameRole = arr.filter(id => roleOf(n, id) === p.role);
+  if (sameRole.length >= roleCap(p.role)) arr.splice(arr.indexOf(sameRole[0]), 1);   // swap out the earliest of that role
+  arr.push(p.id);
+}
+const lineValid = (n: NationElection) => (lineDraft[n.code] ?? []).length === 5 && ROLES.every(r => pickedCount(n, r) === roleCap(r));
+async function saveLineup(n: NationElection) {
+  if (!server || !token.value || !lineValid(n)) return;
+  try { await server.setNationLineup(n.code, lineDraft[n.code], token.value); voteMsg.value = `${n.code} XI selected — your five plays the final.`; await reload(); }
   catch (e) { voteMsg.value = (e as Error).message; }
 }
 
@@ -142,7 +166,8 @@ onUnmounted(() => viewer?.destroy());
               <span class="wc-mgrk">⚑ Manager</span>
               <b v-if="s.manager" class="wc-mgrtag" :class="{ mine: elFor(s.code)!.youManager }">{{ s.manager }}<i v-if="elFor(s.code)!.youManager"> · you</i></b>
               <span v-else class="wc-mgrnone">— vacant</span>
-              <span v-if="elFor(s.code)!.hasTactics" class="wc-plan" title="the manager has authored a plan that drives the final">✎ plan set</span>
+              <span v-if="elFor(s.code)!.hasTactics" class="wc-plan" title="the manager has authored a plan that drives the final">✎ plan</span>
+              <span v-if="s.custom" class="wc-plan custom" title="the manager hand-picked this XI">✶ XI</span>
             </div>
             <!-- candidates + vote buttons -->
             <div v-if="elFor(s.code)!.candidates.length" class="wc-cands">
@@ -165,6 +190,18 @@ onUnmounted(() => viewer?.destroy());
               <label class="wc-trow">Def read<input type="range" min="0" max="1" step="0.05" v-model.number="draft[s.code].read" /><i>{{ draft[s.code].read.toFixed(2) }}</i></label>
               <label class="wc-trow">Aggression<input type="range" min="0" max="1" step="0.05" v-model.number="draft[s.code].aggression" /><i>{{ draft[s.code].aggression.toFixed(2) }}</i></label>
               <button class="wc-save" @click="saveTactics(elFor(s.code)!)">save plan</button>
+            </div>
+            <!-- the manager's XI selection (a real second team — pick from the whole nation) -->
+            <div v-if="elFor(s.code)!.youManager && elFor(s.code)!.pool" class="wc-tac wc-pick">
+              <div class="wc-tach">select your five <i :class="{ ok: lineValid(elFor(s.code)!) }">{{ (lineDraft[s.code] || []).length }}/5</i></div>
+              <div v-for="role in ROLES" :key="role" class="wc-pickrole">
+                <span class="rs-role wc-prole" :class="role">{{ role.slice(0, 3).toUpperCase() }} {{ pickedCount(elFor(s.code)!, role) }}/{{ roleCap(role) }}</span>
+                <div class="wc-pickopts">
+                  <button v-for="p in poolByRole(elFor(s.code)!, role)" :key="p.id" class="wc-pickp" :class="{ on: isPicked(s.code, p.id) }"
+                    @click="togglePick(elFor(s.code)!, p)" :title="`${p.name} · ${p.overall} OVR`">{{ p.handle }}<i>{{ p.overall }}</i></button>
+                </div>
+              </div>
+              <button class="wc-save" :disabled="!lineValid(elFor(s.code)!)" @click="saveLineup(elFor(s.code)!)">save five</button>
             </div>
           </div>
         </div>

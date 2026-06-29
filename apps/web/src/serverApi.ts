@@ -59,17 +59,20 @@ export interface WCSide { code: string; country: string; flag: string }
 export interface WCPlayer { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }
 export interface WorldCupView {
   season: number;
-  squads: { code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; five: WCPlayer[] }[];
+  squads: { code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; custom: boolean; five: WCPlayer[] }[];
   bracket: { field: WCSide[]; rounds: { round: number; a: WCSide; b: WCSide; winner: WCSide }[][]; champion: WCSide };
   final: { a: WCSide; b: WCSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput };
 }
+export interface PoolPlayer { id: string; handle: string; name: string; role: string; overall: number }
 export interface NationElection {
   code: string; country: string; flag: string;
   manager: string | null;                                   // the elected manager's club tag
   candidates: { tag: string; votes: number; you: boolean }[];
-  hasTactics: boolean; youCandidate: boolean; youManager: boolean;
+  hasTactics: boolean; custom: boolean; youCandidate: boolean; youManager: boolean;
   yourVoteTag: string | null;                               // who you backed
   tactics?: Tactics;                                        // present only if you're the manager
+  pool?: PoolPlayer[];                                       // the eligible pool (manager only)
+  fielded?: string[];                                        // the current fielded five's ids (manager only)
 }
 export interface ElectionsView { nations: NationElection[]; you: string | null }
 
@@ -97,6 +100,10 @@ export class AceServer {
   /** As the elected manager, author the nation's tactics (drives the engine-simmed final). */
   setNationTactics(code: string, tactics: Tactics, token: string): Promise<{ ok: boolean }> {
     return fetch(`${this.base}/worldcup/${code}/tactics`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ tactics }) }).then(r => j<{ ok: boolean }>(r));
+  }
+  /** As the elected manager, pick the XI from the eligible pool (a valid five). */
+  setNationLineup(code: string, lineup: string[], token: string): Promise<{ ok: boolean }> {
+    return fetch(`${this.base}/worldcup/${code}/lineup`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ lineup }) }).then(r => j<{ ok: boolean }>(r));
   }
   /** The Hall of Fame — season champions + all-time title leaders (the legacy engine). */
   honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }> {
