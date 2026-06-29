@@ -8,7 +8,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { MatchTimeline } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -185,6 +185,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     notifs.set(account, list);
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
+  const notifiedBdays = new Set<string>();   // season:day:playerId birthdays already shouted out
   // owner-to-owner mail (human-to-human, DESIGN §16 social) — real CONVERSATIONS: every
   // message is delivered to BOTH participants' mailboxes (sender's copy read, recipient's
   // unread) and tagged with a `threadId` so a reply continues the thread. `mine` is set
@@ -301,6 +302,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
             notifiedResults.add(k);
             const us = f.home === ci ? f.homeScore : f.awayScore, them = f.home === ci ? f.awayScore : f.homeScore;
             notify(c.owner, 'result', `${us > them ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`, wn.season, f.day);
+          }
+        }
+        // birthdays: any roster player whose birthday falls between the last match-day and
+        // this one turns a year older — shout them out (mirrors the single-player banner).
+        if (liveDay >= 1) {
+          const today = matchDate(wn.season, liveDay), prev = matchDate(wn.season, liveDay - 1);
+          for (const p of c.roster) {
+            const bd = personOf(p.id).birthday;
+            if (!(birthdayPassed(bd, today) && !birthdayPassed(bd, prev))) continue;
+            const bk = `${wn.season}:${liveDay}:${p.id}`;
+            if (notifiedBdays.has(bk)) continue;
+            notifiedBdays.add(bk);
+            notify(c.owner, 'system', `🎂 ${p.handle} (${personOf(p.id).name}) turns ${displayAge(p.age, bd, today)} today`, wn.season, liveDay);
           }
         }
         await persistAccount(c.owner);   // durable: the owner's freshly-pushed notifications
