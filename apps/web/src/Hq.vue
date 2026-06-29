@@ -12,6 +12,7 @@ import Market from './Market.vue';
 import Facilities from './Facilities.vue';
 import Academy from './Academy.vue';
 import Staff from './Staff.vue';
+import Trophies from './Trophies.vue';
 import Rankings from './Rankings.vue';
 import { useWorld } from './world';
 
@@ -61,7 +62,7 @@ const sponsorPay = computed(() => w.lastSponsorPay.value);
 const talkTones = ['calm', 'rally', 'demand'] as const;
 const readLabel = (f: string) => f === 'great' ? '✓ reads the room' : f === 'poor' ? '✗ wrong tone' : '~ a safe call';
 
-const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'staff' | 'rankings'>('season');
+const hqTab = ref<'season' | 'squad' | 'market' | 'hq' | 'academy' | 'staff' | 'rankings' | 'trophies'>('season');
 
 const club = (i: number) => clubs.value[i];
 const tagOf = (i: number) => club(i).team.tag;
@@ -143,6 +144,7 @@ onUnmounted(() => { viewer?.destroy(); });
         <button :class="{ on: hqTab === 'academy' }" @click="hqTab = 'academy'">Academy</button>
         <button :class="{ on: hqTab === 'staff' }" @click="hqTab = 'staff'">Staff</button>
         <button :class="{ on: hqTab === 'rankings' }" @click="hqTab = 'rankings'">Rankings</button>
+        <button :class="{ on: hqTab === 'trophies' }" @click="hqTab = 'trophies'">🏆 Trophies</button>
       </div>
       <div class="hq-actions">
         <button v-if="!done" class="hq-go" @click="w.resolveDay()">▶ Resolve match-day</button>
@@ -160,6 +162,7 @@ onUnmounted(() => { viewer?.destroy(); });
     <Academy v-else-if="hqTab === 'academy'" />
     <Staff v-else-if="hqTab === 'staff'" />
     <Rankings v-else-if="hqTab === 'rankings'" />
+    <Trophies v-else-if="hqTab === 'trophies'" />
 
     <!-- SQUAD & COMP -->
     <div v-else-if="hqTab === 'squad'" class="hq-squad">
