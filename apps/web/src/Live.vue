@@ -8,7 +8,7 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS } from '@ace/world';
+import { RANK_TIERS, personOf } from '@ace/world';
 import { Viewer } from './viewer';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow } from './serverApi';
 const SCOUT_MAX = 3;
@@ -414,7 +414,7 @@ const loadingWatch = ref(false);
 // the post-match box score — derived client-side from the re-simmed timeline's kill
 // events (the engine keys kills by player handle). Each player's K/D, first bloods,
 // and a Player of the Match (most kills, K−D tiebreak). The watch view is the product.
-interface BoxRow { handle: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; mvp: boolean }
+interface BoxRow { handle: string; name?: string; flag?: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; mvp: boolean }
 const boxScore = ref<{ teams: [BoxRow[], BoxRow[]]; mvp: string } | null>(null);
 function computeBox(tl: import('@ace/shared').MatchTimeline) {
   const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {};
@@ -422,7 +422,7 @@ function computeBox(tl: import('@ace/shared').MatchTimeline) {
     const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
     ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; });
   }
-  const rowsOf = (t: number): BoxRow[] => tl.teams[t].players.map(p => ({ handle: p.handle, role: p.role, agent: p.agent, igl: p.igl, kills: kills[p.handle] || 0, deaths: deaths[p.handle] || 0, fb: fb[p.handle] || 0, mvp: false }))
+  const rowsOf = (t: number): BoxRow[] => tl.teams[t].players.map(p => { const person = personOf(p.id); return { handle: p.handle, name: person.name, flag: person.nation.flag, role: p.role, agent: p.agent, igl: p.igl, kills: kills[p.handle] || 0, deaths: deaths[p.handle] || 0, fb: fb[p.handle] || 0, mvp: false }; })
     .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths));
   const all = [...rowsOf(0), ...rowsOf(1)];
   const mvp = all.slice().sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
@@ -829,7 +829,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             </div>
             <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span></div>
             <div v-for="p in team" :key="p.handle" class="lv-boxrow" :class="{ mvp: p.mvp }">
-              <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
+              <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><span v-if="p.flag" class="lv-boxflag" :title="p.name">{{ p.flag }}</span><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
               <span>{{ p.kills }}</span><span>{{ p.deaths }}</span>
               <span :class="p.kills - p.deaths >= 0 ? 'pos' : 'neg'">{{ p.kills - p.deaths >= 0 ? '+' : '' }}{{ p.kills - p.deaths }}</span>
               <span>{{ p.fb }}</span>
@@ -887,7 +887,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <div v-for="p in leaders" :key="p.handle" class="lv-ldrow">
               <span class="lv-ldrank" :class="{ top: p.rank <= 3 }">{{ p.rank }}</span>
               <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
-              <b class="lv-ldhandle">{{ p.handle }}</b>
+              <b class="lv-ldhandle">{{ p.handle }}<i v-if="p.name" class="lv-ldperson" :title="p.name">{{ p.flag }} {{ p.name }}</i></b>
               <span class="lv-ldovr">{{ p.overall }} <i>OVR</i></span>
               <span class="lv-ldsolo" :class="'rk-' + p.soloTier.toLowerCase()">{{ p.soloLabel }}</span>
               <span class="lv-ldclub"><i class="hq-dot" :style="{ background: `hsl(${hue(p.clubTag)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(p.clubTag)">{{ p.clubTag }}</span> · {{ tierName(p.tier) }}<i v-if="p.owned" class="lv-youtag sm">OWNED</i></span>
@@ -966,7 +966,10 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
         <div class="lv-clubfive">
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
-            <span class="lv-fivehandle"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span></span>
+            <span class="lv-fivehandle">
+              <span class="lv-fivetop"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span></span>
+              <span v-if="p.name" class="lv-fiveperson" :title="p.country"><span class="lv-flag">{{ p.flag }}</span> {{ p.name }}<i v-if="p.age"> · {{ p.age }}</i></span>
+            </span>
             <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>
             <span v-if="p.solo" class="lv-ldsolo" :class="'rk-' + (p.soloTier || '').toLowerCase()">{{ p.solo }}</span>
             <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>

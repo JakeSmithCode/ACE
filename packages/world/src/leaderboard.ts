@@ -5,10 +5,11 @@
 // never sees it.
 import { overall, soloRank, squadRating, clubPhase, type ClubPhase } from './develop.js';
 import { clubInfra } from './facilities.js';
+import { personOf } from './identity.js';
 import { clubTeam, type WorldState } from './state.js';
 
 export interface LeaderRow {
-  rank: number; handle: string; role: string; age: number; overall: number;
+  rank: number; handle: string; name: string; flag: string; role: string; age: number; overall: number;
   soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean;
 }
 
@@ -21,9 +22,9 @@ export function topPlayers(w: WorldState, count = 25, role?: string): LeaderRow[
     .sort((a, b) => b.ovr - a.ovr || a.p.handle.localeCompare(b.p.handle))
     .slice(0, count)
     .map((r, i) => {
-      const sr = soloRank(r.ovr);
+      const sr = soloRank(r.ovr), person = personOf(r.p.id);
       return {
-        rank: i + 1, handle: r.p.handle, role: r.p.role, age: r.p.age, overall: Math.round(r.ovr),
+        rank: i + 1, handle: r.p.handle, name: person.name, flag: person.nation.flag, role: r.p.role, age: r.p.age, overall: Math.round(r.ovr),
         soloLabel: sr.label, soloTier: sr.tier, club: r.c.name, clubTag: r.c.tag, tier: r.c.tier, owned: r.c.owner != null,
       };
     });

@@ -7,24 +7,65 @@
 import type { GameDate } from './calendar.js';
 import { birthdayPassed } from './calendar.js';
 
-// broad international pools (esports is global) — kept deliberately diverse
-const FIRST = ['Marek', 'Tomas', 'Aleksander', 'Dae-hyun', 'Lucas', 'Mateus', 'Niko', 'Erik', 'Hiroshi', 'Owen',
-  'Diego', 'Felix', 'Sven', 'Kai', 'Ravi', 'Anders', 'Pablo', 'Yuki', 'Liam', 'Bohdan', 'Mehmet', 'Jakub', 'Andre',
-  'Sung-min', 'Theo', 'Mikkel', 'Carlos', 'Wei', 'Noah', 'Emir', 'Tariq', 'Joon-ho', 'Ethan', 'Luca', 'Dmitri',
-  'Samir', 'Oscar', 'Hassan', 'Finn', 'Renato'];
-const LAST = ['Novak', 'Berg', 'Costa', 'Park', 'Vasquez', 'Lindqvist', 'Mori', 'Kovac', 'Schmidt', 'Reyes',
-  'Volkov', 'Tan', 'Halls', 'Adeyemi', 'Rossi', 'Dubois', 'Nilsen', 'Walsh', 'Ferreira', 'Singh', 'Yilmaz',
-  'Kowalski', 'Santos', 'Choi', 'Andersen', 'Romano', 'Petrov', 'Haidar', 'Murphy', 'Wagner', 'Ozturk', 'Silva',
-  'Nakamura', 'Becker', 'Moreau', 'Khan', 'Larsson', 'Greco', 'Ibrahim', 'Sorensen'];
-
-// esports is global — a spread of the scenes that produce pros, with flags
-const NATIONS = [
-  { country: 'USA', flag: '🇺🇸' }, { country: 'Korea', flag: '🇰🇷' }, { country: 'Brazil', flag: '🇧🇷' },
-  { country: 'Sweden', flag: '🇸🇪' }, { country: 'Japan', flag: '🇯🇵' }, { country: 'Germany', flag: '🇩🇪' },
-  { country: 'France', flag: '🇫🇷' }, { country: 'United Kingdom', flag: '🇬🇧' }, { country: 'China', flag: '🇨🇳' },
-  { country: 'Türkiye', flag: '🇹🇷' }, { country: 'Canada', flag: '🇨🇦' }, { country: 'Spain', flag: '🇪🇸' },
-  { country: 'Denmark', flag: '🇩🇰' }, { country: 'Poland', flag: '🇵🇱' }, { country: 'Finland', flag: '🇫🇮' },
-  { country: 'Australia', flag: '🇦🇺' }, { country: 'Indonesia', flag: '🇮🇩' }, { country: 'Mexico', flag: '🇲🇽' },
+// esports is global — a spread of the scenes that produce Valorant pros, each with its
+// OWN name pools so the name reads coherent with the flag (a 🇰🇷 player has a Korean name,
+// not a random international draw). Pools are first/last drawn independently within a nation.
+interface Nation { country: string; flag: string; first: string[]; last: string[] }
+const NATIONS: Nation[] = [
+  { country: 'USA', flag: '🇺🇸',
+    first: ['Tyler', 'Ethan', 'Jordan', 'Mason', 'Caleb', 'Logan', 'Brandon', 'Aaron', 'Devon', 'Trent'],
+    last: ['Carter', 'Reyes', 'Brooks', 'Hayes', 'Parker', 'Mitchell', 'Foster', 'Coleman', 'Pierce', 'Walsh'] },
+  { country: 'Korea', flag: '🇰🇷',
+    first: ['Dae-hyun', 'Sung-min', 'Joon-ho', 'Min-jae', 'Ji-hoon', 'Seung-woo', 'Hyun-woo', 'Jae-won', 'Tae-yang', 'Do-yoon'],
+    last: ['Park', 'Kim', 'Lee', 'Choi', 'Jung', 'Kang', 'Yoon', 'Han', 'Seo', 'Oh'] },
+  { country: 'Brazil', flag: '🇧🇷',
+    first: ['Lucas', 'Mateus', 'Gabriel', 'Rafael', 'Felipe', 'Bruno', 'Thiago', 'Andre', 'Renato', 'Caio'],
+    last: ['Silva', 'Costa', 'Santos', 'Ferreira', 'Oliveira', 'Souza', 'Rocha', 'Almeida', 'Pereira', 'Lima'] },
+  { country: 'Sweden', flag: '🇸🇪',
+    first: ['Erik', 'Anders', 'Sven', 'Oscar', 'Gustav', 'Emil', 'Viktor', 'Albin', 'Hampus', 'Linus'],
+    last: ['Berg', 'Lindqvist', 'Larsson', 'Nilsson', 'Eklund', 'Holm', 'Sandberg', 'Forsberg', 'Lund', 'Ahlberg'] },
+  { country: 'Japan', flag: '🇯🇵',
+    first: ['Hiroshi', 'Yuki', 'Kenji', 'Sora', 'Ren', 'Haruto', 'Riku', 'Takumi', 'Daiki', 'Kaito'],
+    last: ['Nakamura', 'Mori', 'Sato', 'Tanaka', 'Yamamoto', 'Kobayashi', 'Ito', 'Watanabe', 'Suzuki', 'Takahashi'] },
+  { country: 'Germany', flag: '🇩🇪',
+    first: ['Felix', 'Kai', 'Jonas', 'Niklas', 'Lukas', 'Maximilian', 'Tim', 'Leon', 'Florian', 'Moritz'],
+    last: ['Becker', 'Schmidt', 'Wagner', 'Müller', 'Fischer', 'Weber', 'Hoffmann', 'Schulz', 'Bauer', 'Richter'] },
+  { country: 'France', flag: '🇫🇷',
+    first: ['Théo', 'Lucas', 'Hugo', 'Nathan', 'Enzo', 'Antoine', 'Mathis', 'Clément', 'Adrien', 'Baptiste'],
+    last: ['Dubois', 'Moreau', 'Laurent', 'Lefebvre', 'Girard', 'Bernard', 'Rousseau', 'Fontaine', 'Mercier', 'Henry'] },
+  { country: 'United Kingdom', flag: '🇬🇧',
+    first: ['Owen', 'Liam', 'Harry', 'Jack', 'Callum', 'Oliver', 'George', 'Charlie', 'Finn', 'Reece'],
+    last: ['Halls', 'Walsh', 'Murphy', 'Hughes', 'Wright', 'Clarke', 'Hudson', 'Reid', 'Barker', 'Shaw'] },
+  { country: 'China', flag: '🇨🇳',
+    first: ['Wei', 'Hao', 'Jian', 'Yang', 'Lei', 'Feng', 'Chen', 'Bo', 'Kun', 'Tao'],
+    last: ['Tan', 'Wang', 'Li', 'Zhang', 'Liu', 'Chen', 'Yang', 'Huang', 'Zhao', 'Wu'] },
+  { country: 'Türkiye', flag: '🇹🇷',
+    first: ['Mehmet', 'Emir', 'Kaan', 'Arda', 'Burak', 'Cem', 'Deniz', 'Efe', 'Mert', 'Yusuf'],
+    last: ['Yılmaz', 'Öztürk', 'Demir', 'Kaya', 'Şahin', 'Çelik', 'Aydın', 'Arslan', 'Doğan', 'Koç'] },
+  { country: 'Canada', flag: '🇨🇦',
+    first: ['Noah', 'Liam', 'Cole', 'Nathan', 'Tyler', 'Riley', 'Aiden', 'Hunter', 'Dawson', 'Carson'],
+    last: ['Tremblay', 'Roy', 'Gagnon', 'Wilson', 'MacDonald', 'Bouchard', 'Côté', 'Reid', 'Fortin', 'Bennett'] },
+  { country: 'Spain', flag: '🇪🇸',
+    first: ['Pablo', 'Diego', 'Carlos', 'Álvaro', 'Sergio', 'Javier', 'Marcos', 'Adrián', 'Rubén', 'Iván'],
+    last: ['Vásquez', 'Reyes', 'García', 'Martínez', 'López', 'Sánchez', 'Romero', 'Navarro', 'Torres', 'Gil'] },
+  { country: 'Denmark', flag: '🇩🇰',
+    first: ['Mikkel', 'Anders', 'Frederik', 'Lasse', 'Magnus', 'Kasper', 'Emil', 'Oliver', 'Mads', 'Rasmus'],
+    last: ['Andersen', 'Nielsen', 'Sørensen', 'Jensen', 'Pedersen', 'Christensen', 'Larsen', 'Hansen', 'Møller', 'Holm'] },
+  { country: 'Poland', flag: '🇵🇱',
+    first: ['Jakub', 'Marek', 'Tomasz', 'Bartosz', 'Kamil', 'Wojciech', 'Mateusz', 'Filip', 'Szymon', 'Paweł'],
+    last: ['Kowalski', 'Nowak', 'Wiśniewski', 'Wójcik', 'Kamiński', 'Lewandowski', 'Zieliński', 'Szymański', 'Woźniak', 'Kozłowski'] },
+  { country: 'Finland', flag: '🇫🇮',
+    first: ['Niko', 'Eetu', 'Onni', 'Aleksi', 'Joona', 'Veeti', 'Leevi', 'Elias', 'Miro', 'Rasmus'],
+    last: ['Virtanen', 'Korhonen', 'Mäkinen', 'Nieminen', 'Heikkinen', 'Laine', 'Koskinen', 'Järvinen', 'Lehtonen', 'Salminen'] },
+  { country: 'Australia', flag: '🇦🇺',
+    first: ['Liam', 'Jack', 'Cooper', 'Mason', 'Hayden', 'Lachlan', 'Bailey', 'Jett', 'Riley', 'Kai'],
+    last: ['Walsh', 'Murphy', 'Thompson', 'Reid', 'Mitchell', 'Bennett', 'Carter', 'Hayes', 'Ryan', 'Foster'] },
+  { country: 'Indonesia', flag: '🇮🇩',
+    first: ['Adi', 'Bagus', 'Dimas', 'Rizki', 'Eko', 'Putra', 'Fajar', 'Yoga', 'Bayu', 'Reza'],
+    last: ['Wijaya', 'Santoso', 'Pratama', 'Halim', 'Saputra', 'Kusuma', 'Gunawan', 'Hidayat', 'Nugroho', 'Lestari'] },
+  { country: 'Mexico', flag: '🇲🇽',
+    first: ['Carlos', 'Diego', 'Luis', 'Emilio', 'Santiago', 'Ángel', 'Mateo', 'Iker', 'Rodrigo', 'Cristian'],
+    last: ['Reyes', 'Hernández', 'García', 'Ramírez', 'Flores', 'Vásquez', 'Morales', 'Castillo', 'Mendoza', 'Ortiz'] },
 ];
 export interface Person { first: string; last: string; name: string; birthday: { month: number; day: number }; nation: { country: string; flag: string } }
 
@@ -35,16 +76,18 @@ function h32(id: string, salt: number): number {
   return h >>> 0;
 }
 
-/** The person behind a player id — real name + birthday, derived (no rng, no contract change). */
+/** The person behind a player id — real name + birthday, derived (no rng, no contract change).
+ *  Nation is chosen first, then the name is drawn from THAT nation's pools, so the name reads
+ *  coherent with the flag (a 🇰🇷 player is "Min-jae Park", not a random international mix). */
 export function personOf(id: string): Person {
-  const first = FIRST[h32(id, 0x1f) % FIRST.length];
-  const last = LAST[h32(id, 0x2c) % LAST.length];
+  const nation = NATIONS[h32(id, 0x6b) % NATIONS.length];
+  const first = nation.first[h32(id, 0x1f) % nation.first.length];
+  const last = nation.last[h32(id, 0x2c) % nation.last.length];
   const doy = h32(id, 0x9d) % 365;                 // birthday as a day-of-year → month/day
   const MONTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   let d = doy + 1, m = 0;
   while (d > MONTHS[m]) { d -= MONTHS[m]; m++; }
-  const nation = NATIONS[h32(id, 0x6b) % NATIONS.length];
-  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d }, nation };
+  return { first, last, name: `${first} ${last}`, birthday: { month: m + 1, day: d }, nation: { country: nation.country, flag: nation.flag } };
 }
 
 /** The age to SHOW: the engine's integer age is "age at the season's start"; the player
