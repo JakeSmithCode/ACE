@@ -10,7 +10,7 @@ import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS, personOf } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -278,6 +278,8 @@ async function advance() {
     if (r.rollover && r.season && r.champion) { champBanner.value = { season: r.season - 1, champion: r.champion }; loadBoard(); await loadHonors(); }
     await loadNews();
     if (statsOpen.value) await loadStats();
+    if (r.rollover) cupView.value = null;            // a new season → a fresh cup
+    if (cupOpen.value) await loadCup();
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
@@ -404,6 +406,28 @@ const PHASE_LABEL: Record<string, string> = { rebuilding: 'rebuild', rising: 'ri
 async function loadPower() { if (server.value) try { powerClubs.value = (await server.value.powerRankings()).clubs; } catch { /* transient */ } }
 async function togglePower() { powerOpen.value = !powerOpen.value; if (powerOpen.value && !powerClubs.value.length) await loadPower(); }
 
+// the domestic ACE Cup — every club entered, open draw, full-simmed on the watchable ties
+// (Premier / owned). The whole world is in it, so a minnow can knock out a giant.
+const cupView = ref<CupView | null>(null);
+const cupOpen = ref(false);
+async function loadCup() { if (server.value) try { cupView.value = await server.value.cup(); } catch { /* transient */ } }
+async function toggleCup() { cupOpen.value = !cupOpen.value; if (cupOpen.value && !cupView.value) await loadCup(); }
+const cupLateRounds = computed(() => (cupView.value?.rounds ?? []).filter(r => r.ties.length <= 8));   // QF onward
+async function watchCupTie(t: CupTieView) {
+  if (!server.value || !t.watchable) return;
+  loadingWatch.value = true;
+  try {
+    const rep = await server.value.cupReplay(t.id);
+    if (!rep?.snapshot) return;
+    const map = rep.snapshot.map;
+    const nav = await ensureNav(map);
+    const out = simulateMatch(rep.snapshot, nav, 50);
+    watching.value = { home: { tag: t.home.tag, name: t.home.name }, away: { tag: t.away.tag, name: t.away.name }, final: t.score, map, season: cupView.value?.season ?? 0, day: -1, slot: -1, cup: true };
+    computeBox(out);
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
+  } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
+}
+
 // season stat leaders — top fraggers from the watched (Premier) matches that have played
 const statRows = ref<StatRow[]>([]);
 const statsOpen = ref(false);
@@ -411,7 +435,7 @@ async function loadStats() { if (server.value) try { statRows.value = (await ser
 async function toggleStats() { statsOpen.value = !statsOpen.value; if (statsOpen.value) await loadStats(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
-interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number; live?: boolean }
+interface Watched { home: { tag: string; name: string }; away: { tag: string; name: string }; final: [number, number] | null; map: string | null; season: number; day: number; slot: number; live?: boolean; cup?: boolean }
 const host = ref<HTMLElement | null>(null);
 const watching = ref<Watched | null>(null);
 const loadingWatch = ref(false);
@@ -866,7 +890,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <template v-else> {{ watching.final?.[0] }} – {{ watching.final?.[1] }} </template>
           <b>{{ watching.away.tag }}</b>
           · <span class="hq-rmap">{{ watching.map }}</span> · {{ watching.live ? 'live — synced to the broadcast, no spoilers ahead' : 're-simmed from the server snapshot' }}
-          <button v-if="!watching.live" class="lv-share" @click="shareWatch">{{ shareCopied ? '✓ link copied' : '⤴ share' }}</button>
+          <button v-if="!watching.live && !watching.cup" class="lv-share" @click="shareWatch">{{ shareCopied ? '✓ link copied' : '⤴ share' }}</button>
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>
@@ -991,6 +1015,34 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             </div>
             <div v-if="!statRows.length" class="lv-empty">no matches resolved yet — advance a match-day</div>
           </div>
+        </template>
+      </div>
+
+      <!-- the ACE Cup — every club in the world, open draw; a minnow can knock out a giant -->
+      <div class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="toggleCup">🏆 ACE Cup <i class="lv-disc" :class="{ open: cupOpen }">▾</i></button>
+          <span class="lv-note">every club in the world · open draw · giant-killing welcome</span>
+        </div>
+        <template v-if="cupOpen">
+          <div v-if="!cupView" class="lv-empty">loading…</div>
+          <template v-else>
+            <div v-if="cupView.champion" class="lv-cupchamp" :class="{ mine: mine(cupView.champion.tag) }">🏆 {{ cupView.champion.tag }} · {{ cupView.champion.name }} <i>{{ tierName(cupView.champion.tier) }}</i> — ACE Cup winners</div>
+            <div v-if="cupView.upsets.length" class="lv-cupupsets">
+              <span class="lv-cupuh">⚡ Giant-killings</span>
+              <span v-for="(u, i) in cupView.upsets" :key="i" class="lv-cupupset"><b class="clickable" @click="openClub(u.w.tag)">{{ u.w.tag }}</b> <em>{{ tierName(u.w.tier) }}</em> ▸ {{ u.l.tag }} <em>{{ tierName(u.l.tier) }}</em></span>
+            </div>
+            <div v-for="rd in cupLateRounds" :key="rd.round" class="lv-cupround">
+              <div class="lv-cuproundh">{{ rd.name }}</div>
+              <div v-for="t in rd.ties" :key="t.id" class="lv-cuptie" :class="{ mine: mine(t.home.tag) || mine(t.away.tag) }">
+                <span class="lv-cupside" :class="{ win: t.winner === t.home.idx }"><i class="hq-dot" :style="{ background: `hsl(${hue(t.home.tag)} 65% 55%)` }"></i><b class="clickable" @click="openClub(t.home.tag)">{{ t.home.tag }}</b> <em>{{ tierName(t.home.tier) }}</em></span>
+                <b class="lv-cupscore">{{ t.score[0] }}–{{ t.score[1] }}</b>
+                <span class="lv-cupside rt" :class="{ win: t.winner === t.away.idx }"><em>{{ tierName(t.away.tier) }}</em> <b class="clickable" @click="openClub(t.away.tag)">{{ t.away.tag }}</b><i class="hq-dot" :style="{ background: `hsl(${hue(t.away.tag)} 65% 55%)` }"></i></span>
+                <button v-if="t.watchable" class="lv-watch sm" :disabled="loadingWatch" @click="watchCupTie(t)" title="watch this tie">▷</button>
+                <span v-else class="lv-cupq" title="quick-resolved — not a watched tie">·</span>
+              </div>
+            </div>
+          </template>
         </template>
       </div>
     </template>

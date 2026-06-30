@@ -33,7 +33,7 @@ export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lin
 export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface Dossier { attack: string; defense: string; lurk: boolean; counter: string }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number } }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; cupTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number } }
 
 export interface LeaderRow { rank: number; handle: string; name?: string; flag?: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
@@ -87,6 +87,15 @@ export interface WorldCupHonors {
   nations: { code: string; country: string; flag: string; titles: number }[];
 }
 export interface ElectionsView { nations: NationElection[]; you: string | null }
+// the domestic ACE Cup (every club, open draw, full-simmed on the watchable ties)
+export interface CupClubRef { idx: number; tag: string; name: string; tier: number }
+export interface CupTieView { id: string; home: CupClubRef; away: CupClubRef; score: [number, number]; map: MapId; winner: number; watchable: boolean }
+export interface CupView {
+  season: number;
+  rounds: { round: number; name: string; ties: CupTieView[]; byes: CupClubRef[] }[];
+  champion: CupClubRef | null;
+  upsets: { w: CupClubRef; l: CupClubRef }[];
+}
 
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).error ?? m; } catch { /* non-json */ } throw new Error(m); }
@@ -103,6 +112,10 @@ export class AceServer {
   worldCup(): Promise<WorldCupView> { return fetch(`${this.base}/worldcup`).then(r => j<WorldCupView>(r)); }
   /** A watchable World Cup game's snapshot by id (group/knockout/third/final) — re-sim it. */
   worldCupReplay(gameId: string): Promise<{ snapshot: MatchInput }> { return fetch(`${this.base}/worldcup/replay/${encodeURIComponent(gameId)}`).then(r => j<{ snapshot: MatchInput }>(r)); }
+  /** The domestic ACE Cup — every club entered, open draw, full-simmed on the watchable ties. */
+  cup(): Promise<CupView> { return fetch(`${this.base}/cup`).then(r => j<CupView>(r)); }
+  /** A watchable cup tie's snapshot by id — re-sim it in the viewer. */
+  cupReplay(tieId: string): Promise<{ snapshot: MatchInput }> { return fetch(`${this.base}/cup/replay/${encodeURIComponent(tieId)}`).then(r => j<{ snapshot: MatchInput }>(r)); }
   /** National-team manager elections (with a Bearer, includes your own status). */
   worldCupElections(token?: string): Promise<ElectionsView> {
     return fetch(`${this.base}/worldcup/elections`, token ? { headers: { authorization: `Bearer ${token}` } } : {}).then(r => j<ElectionsView>(r));

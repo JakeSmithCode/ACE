@@ -21,6 +21,7 @@ import { AuthService, MemoryAccountStore } from './accounts.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
 import { buildCircuitView, type CircuitView } from './circuitView.js';
 import { buildWorldCupView, type WorldCupView } from './worldCupView.js';
+import { buildCupView, type CupView } from './cupView.js';
 import { randomBytes } from 'node:crypto';
 
 export interface LiveServerOpts {
@@ -190,6 +191,20 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     managerOf: (code: string) => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; },
   });
   const bustWorldCup = () => { worldCupCache = undefined; };   // an election change re-sims the final
+  // the domestic ACE Cup: every club entered, open draw, full-simmed on the watchable ties
+  // (Premier / human-owned). Recomputed each season; the Premier (division 0) is watchable.
+  let cupCache: CupView | undefined;
+  let cupGames = new Map<string, MatchInput>();
+  const ensureCupView = (w: WorldState): CupView => {
+    if (!cupCache || cupCache.season !== w.season) {
+      const built = buildCupView(w, navOf, { full: d => d === 0 });
+      cupCache = built.view; cupGames = built.games;
+    }
+    return cupCache;
+  };
+  // cup legacy: the season's winners, recorded at each rollover (drives the news + honors).
+  interface CupTitle { season: number; tag: string; name: string; tier: number }
+  const cupHistory: CupTitle[] = [];
   // the transfer market: a free-agent board built once (stable) + a `sold` set of
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
@@ -391,11 +406,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const wcMgrAccount = electedManager(wcChampCode);
     const wcMgrTag = wcMgrAccount ? clubTagOf(w, wcMgrAccount) : null;
     worldCupHistory.push({ season: w.season, code: wcChampCode, country: wcv.bracket.champion.country, flag: wcv.bracket.champion.flag, managerTag: wcMgrTag, managerAccount: wcMgrAccount });
+    // domestic cup: crown the finishing season's winners from the pre-rollover world too
+    const cupV = ensureCupView(w);
+    if (cupV.champion) cupHistory.push({ season: w.season, tag: cupV.champion.tag, name: cupV.champion.name, tier: cupV.champion.tier });
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
+    if (cupV.champion) {
+      pushNews('champion', `🏆 ${cupV.champion.tag} lift the Season ${roll.season} ACE Cup`, roll.season, liveDay);
+      const champClub = w.clubs.find(c => c.tag === cupV.champion!.tag);
+      if (champClub?.owner) { notify(champClub.owner, 'award', `🏆 ${cupV.champion.tag} won the Season ${roll.season} ACE Cup!`, roll.season, liveDay); await persistAccount(champClub.owner); }
+    }
     if (wcMgrAccount) { notify(wcMgrAccount, 'award', `🏆🌍 You led ${wcv.bracket.champion.country} to the Season ${roll.season} World Cup title!`, roll.season, liveDay); await persistAccount(wcMgrAccount); }
     pushNews('season', `Season ${roll.season + 1} begins`, roll.season + 1, 0);
     // season-end notifications per owner: final placement (from the finished season, using
@@ -546,6 +569,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         powerRank: row?.rank ?? null, totalClubs: w.clubs.length,
         infra: row?.infra ?? 0,
         wcTitles: worldCupHistory.filter(t => t.managerTag === c.tag).length,
+        cupTitles: cupHistory.filter(t => t.tag === c.tag).length,
         form, record: { w: wins, l: played.length - wins }, standing: standing || null, divSize: table.length,
         vsYou,
       });
@@ -759,6 +783,20 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'circuit' && path.length === 1) {
       if (!circuit) circuit = buildCircuitView(circuitSeed, navOf);
       return json(res, 200, circuit);
+    }
+    // GET /cup  → the domestic ACE Cup (every club entered, open draw). Full-sims the
+    // watchable ties (Premier / human-owned); cached per season. The client highlights its
+    // own club and re-sims any watchable tie via /cup/replay/:id.
+    if (path[0] === 'cup' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      return json(res, 200, ensureCupView(w));
+    }
+    // GET /cup/replay/:id  → a watchable cup tie's snapshot, re-simmed in the viewer.
+    if (path[0] === 'cup' && path[1] === 'replay' && path.length === 3) {
+      const w = (await store.loadWorld(id))!;
+      ensureCupView(w);
+      const snap = cupGames.get(decodeURIComponent(path[2]));
+      return snap ? json(res, 200, { snapshot: snap }) : json(res, 404, { error: 'no such tie' });
     }
     // GET /worldcup  → the World Cup (national teams by nationality; full-sims the final).
     // Cached per season (the squads shift as the world's talent develops/moves); the
