@@ -7,10 +7,10 @@
 import type { Player, Tactics, Comp, Team, PatchState } from '@ace/shared';
 import { Rng, PATCH } from '@ace/engine';
 import { makeLeague, ROLE_AGENTS } from './clubs.js';
-import { divisionSchedule, funnelPromoteRelegate, snakeGroup, type DivMove } from './divisions.js';
+import { divisionSchedule, funnelPromoteRelegate, promoteRelegate, snakeGroup, type DivMove } from './divisions.js';
 import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
-import { runPlayoffs, finishOf } from './playoffs.js';
+import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './playoffs.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
@@ -229,12 +229,29 @@ export function advanceWorld(w: WorldState): Rollover {
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0) };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
-  // the funnel: promote/relegate across all boundaries + regroup each tier (reduces
-  // to plain promote/relegate when every tier is one group — the flat world)
-  const fr = funnelPromoteRelegate({
-    tiers: clubs.map(c => c.tier), groups: clubs.map(c => c.group), layout: w.layout, k: w.promo,
-    tableOf, strengthOf: i => w.clubs[i].strength,
-  });
-  clubs = clubs.map((c, i) => ({ ...c, tier: fr.tiers[i], group: fr.groups[i] }));
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [] }, champion, moves: fr.moves, notes: meta.changes };
+  // promote/relegate. A FLAT world (every tier one group — the single-player + PvP
+  // shape) also runs a promotion PLAYOFF per boundary: the clubs just below the auto
+  // line challenge those just above the drop zone for the contested spots (quick-resolved
+  // here — strength is map-agnostic, like the Premier bracket above). A GROUPED pyramid
+  // (the circuit/fan-out) keeps the straight funnel, which the flat case reduces to.
+  let moves: DivMove[];
+  if (w.layout.every(g => g === 1)) {
+    const division = w.clubs.map(c => c.tier);
+    const tablesByTier = Array.from({ length: w.layout.length }, (_, t) => tableOf(t, 0));
+    const pr = promoteRelegate(division, tablesByTier, w.promo, (boundary, upper, lower) => {
+      const pp = runPromotionPlayoff(upper, lower, w.promo, PLAYOFF_SLOTS, boundary, w.seed, w.season, ['ascent'], () => 0,
+        (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
+      return pp ? { up: pp.up, down: pp.down } : null;
+    });
+    clubs = clubs.map((c, i) => ({ ...c, tier: pr.division[i], group: 0 }));
+    moves = pr.moves;
+  } else {
+    const fr = funnelPromoteRelegate({
+      tiers: clubs.map(c => c.tier), groups: clubs.map(c => c.group), layout: w.layout, k: w.promo,
+      tableOf, strengthOf: i => w.clubs[i].strength,
+    });
+    clubs = clubs.map((c, i) => ({ ...c, tier: fr.tiers[i], group: fr.groups[i] }));
+    moves = fr.moves;
+  }
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [] }, champion, moves, notes: meta.changes };
 }

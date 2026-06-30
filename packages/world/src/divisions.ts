@@ -36,8 +36,18 @@ export interface DivMove { club: number; from: number; to: number }
 /** Apply promotion/relegation: the bottom `k` of each higher division swap with
  *  the top `k` of the division below. `tables[d]` is division d's final
  *  standings (best-first). Returns the new division map and the moves made (for
- *  a season-end summary). */
-export function promoteRelegate(division: number[], tables: Standing[][], k: number): { division: number[]; moves: DivMove[] } {
+ *  a season-end summary).
+ *
+ *  Optionally, a **promotion playoff** contests more spots: `playoff(boundary, upper,
+ *  lower)` (injected so the caller resolves the actual matches) returns the clubs that
+ *  end `up` (in the upper tier) and `down` (in the lower) at that boundary — additional
+ *  swaps layered on top of the auto k. Each boundary's playoff is net-zero for tier
+ *  populations, so sizes stay conserved. Omitting `playoff` is byte-identical to the
+ *  plain swap (the world/season CLIs are unchanged). */
+export function promoteRelegate(
+  division: number[], tables: Standing[][], k: number,
+  playoff?: (boundary: number, upper: Standing[], lower: Standing[]) => { up: number[]; down: number[] } | null,
+): { division: number[]; moves: DivMove[] } {
   const next = [...division];
   const moves: DivMove[] = [];
   for (let d = 0; d < tables.length - 1; d++) {
@@ -45,6 +55,14 @@ export function promoteRelegate(division: number[], tables: Standing[][], k: num
     const relegated = tables[d].slice(-k).map(s => s.club);         // bottom k here → down
     for (const c of promoted) { next[c] = d; moves.push({ club: c, from: d + 1, to: d }); }
     for (const c of relegated) { next[c] = d + 1; moves.push({ club: c, from: d, to: d + 1 }); }
+    // contested spots: a promotion playoff can move additional clubs across this boundary.
+    // A challenger (originally in d+1) that wins goes up; a defender (originally in d) that
+    // loses goes down — emit a move only when the club's tier actually changes.
+    const pp = playoff?.(d, tables[d], tables[d + 1]);
+    if (pp) {
+      for (const c of pp.up) if (division[c] === d + 1) { next[c] = d; moves.push({ club: c, from: d + 1, to: d }); }
+      for (const c of pp.down) if (division[c] === d) { next[c] = d + 1; moves.push({ club: c, from: d, to: d + 1 }); }
+    }
   }
   return { division: next, moves };
 }

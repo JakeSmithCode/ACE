@@ -865,6 +865,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-prmine{font-family:var(--display);font-weight:700;font-size:16px;padding:4px 12px}
 .hq-prmine.up{color:var(--win);background:rgba(59,209,127,.12)}
 .hq-prmine.down{color:var(--def);background:rgba(255,92,110,.1)}
+.hq-prmine.held{color:var(--gold);background:rgba(229,181,103,.12)}
+.hq-prmine.miss{color:var(--muted);background:rgba(255,255,255,.04)}
+/* promotion/relegation playoff — accent the bracket gold (a contest, not the title) */
+.hq-promobracket{border-color:rgba(229,181,103,.28)}
+.hq-promobracket>h3 .b{background:var(--gold)}
+.hq-promobracket .hq-prmine{margin-bottom:10px}
+.pp-leg{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:none;color:var(--muted-2);margin-left:6px}
+.pp-side{display:inline-block;width:13px;text-align:center;font-size:10px;margin-right:3px}
+.pp-side.hold{color:var(--gold)}
+.pp-side.climb{color:var(--acc)}
 .hq-prlist{display:flex;align-items:center;flex-wrap:wrap;gap:9px;font-family:var(--label);font-size:11px;color:var(--muted)}
 .hq-prh{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-2)}
 .hq-prmove i{font-style:normal}

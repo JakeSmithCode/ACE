@@ -18,7 +18,7 @@ import { useWorld } from './world';
 
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
-  total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, titles,
+  total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, myPromoPlayoff, titles,
   myDivision, division, lastMoves, objective, objectiveMet, objectiveRank, objectiveOutcome } = w;
 const N = w.N;
 const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_SIZE;
@@ -26,6 +26,17 @@ const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_
 // playoff helpers
 const seedNo = (c: number) => (playoffs.value ? playoffs.value.qualified.indexOf(c) + 1 : 0);
 const titleCount = (i: number) => titles.value[i] ?? 0;
+
+// promotion-playoff outcome relative to YOUR club (set during the off-season rollover)
+const ppOutcome = computed(() => {
+  const pp = myPromoPlayoff.value; if (!pp) return null;
+  const won = pp.up.includes(myClub.value);
+  const moved = lastMoves.value.find(m => m.club === myClub.value);
+  if (won && moved && moved.to < moved.from) return { cls: 'up', text: `▲ Won promotion to ${DIV_NAMES[pp.boundary]} through the playoff!` };
+  if (won) return { cls: 'held', text: `✓ Survived — you held your ${DIV_NAMES[pp.boundary]} place in the playoff` };
+  if (moved && moved.to > moved.from) return { cls: 'down', text: `▼ Relegated to ${DIV_NAMES[pp.boundary + 1]} via the playoff` };
+  return { cls: 'miss', text: `✗ Fell short in the promotion playoff — another season in ${DIV_NAMES[pp.boundary + 1]}` };
+});
 
 // --- club showcase readouts (mirror the public profile: how good + how you rank) ---
 const myPower = computed(() => Math.round(w.powerOf(myClub.value)));
@@ -301,6 +312,42 @@ onUnmounted(() => { viewer?.destroy(); });
         </div>
       </div>
       <div class="hq-compnote">The top four seed a single-elim bracket — <b>Bo3</b> semis, a <b>Bo5</b> final. Each series opens with a <b>map veto</b> (each club bans its weak maps and picks its comfort ones from the pool) — and clubs play a touch better on the maps they like. Click any <b>G</b> to watch that game on its map. Win it for the title; then <b>Advance</b> to settle the books.</div>
+    </div>
+
+    <!-- promotion/relegation playoff — your boundary's contest at the rollover (watchable) -->
+    <div v-if="myPromoPlayoff && !playoffs && dayIdx < total" class="hq-panel hq-bracket hq-promobracket">
+      <h3><span class="b"></span>Promotion Playoff <span class="rs-sub">{{ DIV_NAMES[myPromoPlayoff.boundary] }} ⇄ {{ DIV_NAMES[myPromoPlayoff.boundary + 1] }} · 2 contested spots · Bo3 semis · map veto</span></h3>
+      <div v-if="ppOutcome" class="hq-prmine" :class="ppOutcome.cls">{{ ppOutcome.text }}</div>
+      <div class="po-cols">
+        <div class="po-col">
+          <div class="po-colh">Semifinals <span class="pp-leg">winner up · loser down</span></div>
+          <div v-for="(s, si) in myPromoPlayoff.ties" :key="'ppsf'+si" class="po-series">
+            <div class="po-team" :class="{ win: s.winner === s.hi, me: s.hi === myClub, out: s.winner != null && s.winner !== s.hi }">
+              <span class="pp-side hold" title="defending the upper tier">▲</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.hi)} 65% 55%)` }"></i>{{ tagOf(s.hi) }}<b>{{ s.wins[0] }}</b>
+            </div>
+            <div class="po-team" :class="{ win: s.winner === s.lo, me: s.lo === myClub, out: s.winner != null && s.winner !== s.lo }">
+              <span class="pp-side climb" title="challenging from below">▽</span><i class="hq-dot" :style="{ background: `hsl(${hue(s.lo)} 65% 55%)` }"></i>{{ tagOf(s.lo) }}<b>{{ s.wins[1] }}</b>
+            </div>
+            <div class="po-veto"><span class="po-need">Bo{{ s.need * 2 - 1 }}</span><span v-for="(v, vi) in s.veto" :key="vi" class="po-vstep" :class="v.action">{{ tagOf(v.team === 'hi' ? s.hi : s.lo) }}<i>{{ v.action === 'ban' ? '✕' : v.action === 'pick' ? '✓' : '◆' }}</i>{{ v.map }}</span></div>
+            <div class="po-games"><button v-for="(g, gi) in s.games" :key="gi" class="po-game" @click="watch(g, s.maps[gi])" :title="`watch game ${gi + 1} · ${s.maps[gi]}`">G{{ gi + 1 }} <i>{{ s.maps[gi] }}</i></button></div>
+          </div>
+        </div>
+        <div v-if="myPromoPlayoff.final" class="po-col">
+          <div class="po-colh">Final <span class="pp-leg">playoff trophy</span></div>
+          <div class="po-series po-final">
+            <div class="po-team" :class="{ win: myPromoPlayoff.final.winner === myPromoPlayoff.final.hi, me: myPromoPlayoff.final.hi === myClub, out: myPromoPlayoff.final.winner != null && myPromoPlayoff.final.winner !== myPromoPlayoff.final.hi }">
+              <i class="hq-dot" :style="{ background: `hsl(${hue(myPromoPlayoff.final.hi)} 65% 55%)` }"></i>{{ tagOf(myPromoPlayoff.final.hi) }}<b>{{ myPromoPlayoff.final.wins[0] }}</b>
+            </div>
+            <div class="po-team" :class="{ win: myPromoPlayoff.final.winner === myPromoPlayoff.final.lo, me: myPromoPlayoff.final.lo === myClub, out: myPromoPlayoff.final.winner != null && myPromoPlayoff.final.winner !== myPromoPlayoff.final.lo }">
+              <i class="hq-dot" :style="{ background: `hsl(${hue(myPromoPlayoff.final.lo)} 65% 55%)` }"></i>{{ tagOf(myPromoPlayoff.final.lo) }}<b>{{ myPromoPlayoff.final.wins[1] }}</b>
+            </div>
+            <div class="po-veto"><span class="po-need">Bo{{ myPromoPlayoff.final.need * 2 - 1 }}</span><span v-for="(v, vi) in myPromoPlayoff.final.veto" :key="vi" class="po-vstep" :class="v.action">{{ tagOf(v.team === 'hi' ? myPromoPlayoff.final.hi : myPromoPlayoff.final.lo) }}<i>{{ v.action === 'ban' ? '✕' : v.action === 'pick' ? '✓' : '◆' }}</i>{{ v.map }}</span></div>
+            <div class="po-games"><button v-for="(g, gi) in myPromoPlayoff.final.games" :key="gi" class="po-game" @click="watch(g, myPromoPlayoff.final.maps[gi])" :title="`watch game ${gi + 1} · ${myPromoPlayoff.final.maps[gi]}`">G{{ gi + 1 }} <i>{{ myPromoPlayoff.final.maps[gi] }}</i></button></div>
+          </div>
+          <div v-if="myPromoPlayoff.champion != null" class="po-champ" :class="{ me: myPromoPlayoff.champion === myClub }">🏆 {{ cname(myPromoPlayoff.champion) }} — playoff champion</div>
+        </div>
+      </div>
+      <div class="hq-compnote">After the title playoffs, the <b>3rd–4th</b> of {{ DIV_NAMES[myPromoPlayoff.boundary + 1] }} challenge the <b>13th–14th</b> of {{ DIV_NAMES[myPromoPlayoff.boundary] }} for the last two spots up top. <b>Both semifinal winners go up; both losers go down</b> (the final is for the playoff trophy). Click any <b>G</b> to watch — your tactics drove your games.</div>
     </div>
 
     <div class="hq-grid">

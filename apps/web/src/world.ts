@@ -11,7 +11,7 @@ import {
   makeLeague, standings, developLeague, developPlayer, developInSeason, SEASON_SHARE, makePlayer, HANDLES,
   shouldRetire, clubPhase, clubAgeChar,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, aiRating, SCOUT_MAX,
-  ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, finishOf, playoffPrize,
+  ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf, playoffPrize,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity, MAP_POOL, fixtureMap,
   contractWage, demandWage, newContract, CONTRACT_YEARS,
@@ -22,7 +22,7 @@ import {
   sponsorOffers, sponsorGoalMet, sponsorGoalText, type SponsorOffer, type ActiveSponsor,
   traitKeyOf,
   matchDate, seasonLength, dayOfSeason, fmtDate, personOf, displayAge, birthdayPassed, type GameDate,
-  type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type DivMove, type Standing,
+  type MetaChange, type Club, type MatchResult, type Matchday, type SeasonLedger, type Bracket, type PromoPlayoff, type DivMove, type Standing,
   type Facilities, type FacilityId, type Academy, type StaffHires, type StaffRole, type StaffMember,
 } from '@ace/world';
 
@@ -102,6 +102,7 @@ const myListed = ref<Set<string>>(new Set());          // your player ids put up
 const patch = ref<PatchState>(fullPatch(PATCH, ALL_AGENTS));   // the live agent meta
 const metaChanges = ref<MetaChange[]>([]);             // last off-season's patch notes
 const playoffs = shallowRef<Bracket | null>(null);    // this season's bracket (null until the regular season ends)
+const myPromoPlayoff = shallowRef<PromoPlayoff | null>(null);  // your promotion/relegation playoff at last rollover (watchable)
 const titles = ref<number[]>(clubs.value.map(() => 0));  // career championships per club
 const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned to the XI
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
@@ -816,8 +817,20 @@ function advanceSeason() {
   } else lastSponsorPay.value = null;
   balances.value = balances.value.map((b, i) =>
     i === myClub.value ? b + ledger.value!.net + objBonus + sponsorPay : b + settle(i, squadWageBill(clubs.value[i].team.players, patch.value)).net);
-  // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below
-  const pr = promoteRelegate(division.value, tables, PROMO);
+  // promotion/relegation: bottom PROMO of each tier swap with the top PROMO below, PLUS a
+  // promotion PLAYOFF for the next contested spots (lower #3/#4 vs upper #13/#14). Quick-
+  // resolved across the league; YOUR boundary full-sims (so it's watchable + your tactics
+  // drive it), and we stash that bracket for the season-rollover view.
+  const ppAffinity = (c: number, m: MapId) => mapAffinity(clubs.value[c].team.id, m);
+  myPromoPlayoff.value = null;
+  const pr = promoteRelegate(division.value, tables, PROMO, (boundary, upper, lower) => {
+    const pp = runPromotionPlayoff(upper, lower, PROMO, PLAYOFF_SLOTS, boundary, seasonSeed.value, season.value, MAP_POOL, ppAffinity,
+      (home, away, seed, map) => (home === myClub.value || away === myClub.value)
+        ? simFixture({ home, away }, seed, map)
+        : quickResultPure(home, away, clubs.value[home].strength, clubs.value[away].strength, seed));
+    if (pp && (pp.up.includes(myClub.value) || pp.down.includes(myClub.value))) myPromoPlayoff.value = pp;
+    return pp ? { up: pp.up, down: pp.down } : null;
+  });
   division.value = pr.division; lastMoves.value = pr.moves;
   schedules.value = divSchedules(division.value);
   // record this season for the Trophy Room (now that promotion/relegation is known)
@@ -907,7 +920,7 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
-  playoffs.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
+  playoffs.value = null; myPromoPlayoff.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
@@ -928,7 +941,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   ledger.value = null;
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
-  playoffs.value = null; titles.value = clubs.value.map(() => 0);
+  playoffs.value = null; myPromoPlayoff.value = null; titles.value = clubs.value.map(() => 0);
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
@@ -1271,7 +1284,7 @@ function snapshot() {
     results: results.value, balances: balances.value, ledger: ledger.value,
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
-    patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value,
+    patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value, myPromoPlayoff: myPromoPlayoff.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], customHandles: [...customHandles.value.entries()], facilities: facilities.value, academy: academy.value,
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
@@ -1297,7 +1310,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   balances.value = o.balances; ledger.value = o.ledger; titles.value = o.titles;
   myComp.value = o.myComp; myTactics.value = o.myTactics; myRoster.value = o.myRoster;
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
-  patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs;
+  patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs; myPromoPlayoff.value = o.myPromoPlayoff ?? null;
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
   customHandles.value = new Map((o as { customHandles?: [string, string][] }).customHandles ?? []);
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
@@ -1340,7 +1353,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, myPromoPlayoff, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1348,7 +1361,7 @@ export function useWorld() {
   return {
     N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, MAP_POOL, fixtureMap, navOf, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
-    playoffs, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
+    playoffs, myPromoPlayoff, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
