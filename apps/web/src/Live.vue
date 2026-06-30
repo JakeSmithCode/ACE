@@ -240,6 +240,8 @@ async function connect() {
     DAY.value = world.value.broadcastDay ?? 0;
     table.value = (await s.standings(world.value.season, 0, 0)).table;
     server.value = s; status.value = 'live';
+    const saved = localStorage.getItem('ace.token');   // stay signed in across refresh
+    if (saved && !token.value) token.value = saved;
     await refreshMe();
     await loadHonors();
     await loadNews();
@@ -504,7 +506,7 @@ const clubModal = ref<ClubPage | null>(null);
 const clubBusy = ref(false);
 async function openClub(slug: string) {
   if (!server.value) return; clubBusy.value = true;
-  try { clubModal.value = await server.value.club(slug); }
+  try { clubModal.value = await server.value.club(slug, token.value ?? undefined); }
   catch (e) { errMsg.value = (e as Error).message; } finally { clubBusy.value = false; }
 }
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
@@ -1012,6 +1014,14 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             </div>
             <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>
           </div>
+        </div>
+        <!-- VS YOU: how you stack up against the club you're scouting -->
+        <div v-if="clubModal.vsYou" class="lv-vsyou">
+          <span class="lv-vslbl">⚔ VS YOU</span>
+          <span class="lv-vsmine">{{ clubModal.vsYou.tag }} <i>{{ clubModal.vsYou.power }}</i></span>
+          <span class="lv-vsdelta" :class="clubModal.vsYou.power - (clubModal.power ?? 0) >= 0 ? 'up' : 'down'">{{ clubModal.vsYou.power - (clubModal.power ?? 0) >= 0 ? '+' : '' }}{{ clubModal.vsYou.power - (clubModal.power ?? 0) }} OVR</span>
+          <span v-if="clubModal.vsYou.played" class="lv-vsh2h">series {{ clubModal.vsYou.w }}–{{ clubModal.vsYou.l }}</span>
+          <span v-else class="lv-vsh2h none">not played yet</span>
         </div>
         <!-- the read: how good + how they rank -->
         <div class="lv-clubstats">

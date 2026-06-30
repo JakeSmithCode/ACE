@@ -519,6 +519,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const wins = played.filter(f => { const [us, them] = scoreOf(f); return us > them; }).length;
       const table = standingsView(w, rows, c.tier, c.group, clock());
       const standing = table.findIndex(t => t.club === c.tag) + 1;
+      // VS YOU: if a signed-in owner scouts another club, how they stack up — the power
+      // gap + this season's head-to-head series (resolved games only).
+      let vsYou: { tag: string; power: number; w: number; l: number; played: number } | undefined;
+      const mine = account ? w.clubs.find(x => x.owner === account) : undefined;
+      if (mine && mine.id !== c.id) {
+        const myi = w.clubs.indexOf(mine);
+        const h2h = rows.filter(f => fixtureStatus(f, clock()) === 'resolved' && ((f.home === myi && f.away === ci) || (f.home === ci && f.away === myi)));
+        let hw = 0, hl = 0;
+        for (const f of h2h) { const meHome = f.home === myi, us = meHome ? f.homeScore : f.awayScore, them = meHome ? f.awayScore : f.homeScore; if (us > them) hw++; else hl++; }
+        vsYou = { tag: mine.tag, power: ranked.find(r => r.tag === mine.tag)?.power ?? Math.round(mine.strength * 100), w: hw, l: hl, played: h2h.length };
+      }
       return json(res, 200, {
         ...publicClub(w, c),
         division: tierName(c.tier),
@@ -527,6 +538,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         infra: row?.infra ?? 0,
         wcTitles: worldCupHistory.filter(t => t.managerTag === c.tag).length,
         form, record: { w: wins, l: played.length - wins }, standing: standing || null, divSize: table.length,
+        vsYou,
       });
     }
     // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)

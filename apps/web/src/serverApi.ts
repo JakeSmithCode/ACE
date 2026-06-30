@@ -33,7 +33,7 @@ export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lin
 export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface Dossier { attack: string; defense: string; lurk: boolean; counter: string }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number } }
 
 export interface LeaderRow { rank: number; handle: string; name?: string; flag?: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
@@ -122,7 +122,7 @@ export class AceServer {
     return fetch(`${this.base}/honors`).then(r => j<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>(r));
   }
   /** A club's public page (identity, division, the fielded five) — read-only. */
-  club(slug: string): Promise<ClubPage> { return fetch(`${this.base}/clubs/${slug}`).then(r => j<ClubPage>(r)); }
+  club(slug: string, token?: string): Promise<ClubPage> { return fetch(`${this.base}/clubs/${slug}`, token ? { headers: { authorization: `Bearer ${token}` } } : {}).then(r => j<ClubPage>(r)); }
   /** The world's best players (cross-club prestige board), optionally by role. */
   leaderboard(role?: string): Promise<{ players: LeaderRow[] }> {
     return fetch(`${this.base}/leaderboard${role ? `?role=${role}` : ''}`).then(r => j<{ players: LeaderRow[] }>(r));
