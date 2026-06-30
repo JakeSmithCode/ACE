@@ -155,6 +155,39 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-panel .kill .kr,.ace-panel .kill .vc{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.01em}
 .ace-panel .kill .vc{text-decoration:line-through;opacity:.78}
 .ace-panel .kill .att{color:var(--att)}.ace-panel .kill .def{color:var(--def)}
+.ace-panel .kill.clickable{cursor:pointer}
+.ace-panel .kill.clickable:hover{background:#11202c}
+.ace-panel .kill .kill-xray{margin-left:auto;font-style:normal;color:var(--muted-2);font-size:14px;opacity:0;transition:opacity .12s}
+.ace-panel .kill.clickable:hover .kill-xray{opacity:1;color:var(--brand)}
+/* duel x-ray overlay — click a kill → why it resolved */
+.ace-xray{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(4,8,12,.72);backdrop-filter:blur(2px)}
+.ace-xray.show{display:flex;animation:ec-in .2s ease both}
+.xr-card{position:relative;width:min(440px,92vw);background:var(--bg-2);border:1px solid var(--line-2);clip-path:var(--bevel);padding:18px 20px 14px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.xr-x{position:absolute;top:9px;right:11px;background:none;border:none;color:var(--muted);font-size:15px;cursor:pointer}
+.xr-x:hover{color:var(--text)}
+.xr-head{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:19px}
+.xr-head .kr,.xr-head .vc{font-weight:600}.xr-head .att{color:var(--att)}.xr-head .def{color:var(--def)}
+.xr-head .vc{text-decoration:line-through;opacity:.8}
+.xr-wp{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:var(--muted-2);text-transform:uppercase}
+.xr-verdict{margin:11px 0;font-size:12.5px;line-height:1.45;color:var(--text);padding-left:11px;border-left:3px solid var(--line-2)}
+.xr-verdict.back{border-left-color:var(--win)}.xr-verdict.even{border-left-color:var(--gold)}.xr-verdict.off{border-left-color:var(--brand)}.xr-verdict.blind{border-left-color:var(--muted-2)}
+.xr-tag{display:block;font-family:var(--label);font-size:11px;font-weight:700;letter-spacing:.14em;margin-bottom:4px}
+.xr-verdict.back .xr-tag{color:var(--win)}.xr-verdict.even .xr-tag{color:var(--gold)}.xr-verdict.off .xr-tag{color:var(--brand)}.xr-verdict.blind .xr-tag{color:var(--muted)}
+.xr-diagram{position:relative;margin:4px 0 11px}
+.xd-svg{width:100%;aspect-ratio:1;display:block;background:#0a0f15;border:1px solid var(--line);clip-path:var(--bevel)}
+.xd-scrim{fill:rgba(8,13,19,.45)}
+.xd-cone{opacity:.9;mix-blend-mode:screen}.xd-cone.att{fill:rgba(34,211,238,.3)}.xd-cone.def{fill:rgba(255,92,110,.3)}
+.xd-line{stroke-width:3;stroke-dasharray:7 5}.xd-line.back{stroke:var(--win)}.xd-line.even{stroke:var(--gold)}.xd-line.off{stroke:var(--brand)}.xd-line.blind{stroke:var(--muted-2)}
+.xd-smoke{fill:rgba(190,200,210,.4);stroke:rgba(220,228,235,.55);stroke-width:2}
+.xd-face{stroke:#fff;stroke-width:2.5;opacity:.85}
+.xd-dot{stroke:#0a0f15;stroke-width:2.5}.xd-dot.att{fill:var(--att)}.xd-dot.def{fill:var(--def)}
+.xd-unaware{fill:none;stroke:var(--win);stroke-width:2.5;stroke-dasharray:4 4}
+.xr-legend{position:absolute;left:8px;bottom:7px;display:flex;gap:10px;font-family:var(--label);font-size:9px;letter-spacing:.02em;background:rgba(6,11,16,.74);padding:3px 7px;clip-path:var(--bevel)}
+.xr-legend i{font-style:normal}.xr-legend .att{color:var(--att)}.xr-legend .def{color:var(--def)}.xr-legend .xl-cone{color:var(--muted-2)}
+.xr-factors{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.xr-f{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+.xr-f i{font-style:normal;color:var(--brand);width:14px;text-align:center}
+.xr-foot{font-family:var(--label);font-size:9px;letter-spacing:.04em;color:var(--muted-2);border-top:1px solid var(--line);padding-top:8px}
 .ace-panel .kill .wp{font-family:var(--label);font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);flex:1;text-align:center;display:flex;align-items:center;justify-content:center;gap:5px}
 .ace-panel .kill .wp::after{content:'►';font-size:8px;color:var(--muted-2)}
 .ace-panel .kill .trade{color:var(--win);font-size:14px;font-weight:700;margin-right:-2px}

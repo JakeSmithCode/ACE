@@ -145,6 +145,7 @@ export class Viewer {
   private oddsNow!: HTMLElement; private oddsBars: HTMLElement[] = []; private oddsChart!: HTMLElement; // true-odds chart
   private live = false; private liveWaiting = false;   // live-watch: parked at the last completed round, awaiting more
   private heatLayer!: SVGGElement; private heatBtn!: HTMLElement; private heatLegend!: HTMLElement; private showHeat = false;
+  private xray!: HTMLElement;   // duel x-ray overlay (click a kill → why it resolved)
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
 
   constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean } = {}) {
@@ -278,6 +279,7 @@ export class Viewer {
     rail.appendChild(info);
     stage.appendChild(rail);
     this.root.appendChild(stage);
+    this.xray = el('div', 'ace-xray'); this.root.appendChild(this.xray);   // duel x-ray overlay
 
     this.playBtn = ctl.querySelector('#ace-play') as HTMLElement;
     this.timer = ctl.querySelector('#ace-timer') as HTMLElement;
@@ -384,6 +386,101 @@ export class Viewer {
     this.heatLegend.classList.toggle('show', this.showHeat);
     if (this.showHeat) { this.playing = false; this.playBtn.textContent = '▶'; this.clearAdvance(); this.hideEndCard(); this.buildHeat(); }
   }
+
+  // ── duel x-ray: click a kill → reconstruct WHY it resolved, from the same geometry
+  // the engine duels on (vision cones + LOS, active utility, the trade window). The
+  // product's core bet ("a tactical instrument you can x-ray") made literal. ────────
+  /** Reconstruct a round's agents (path/facing/side) for the x-ray — playback's data. */
+  private roundRecs(r: Round): Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1 }> {
+    const m = new Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1 }>();
+    for (const e of r.events) if (e.kind === 'move') m.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, hold: e.hold ?? headingAtEnd(e.path), side: this.teamOf.get(e.agent) ?? 0 });
+    return m;
+  }
+  /** Is the segment a→b wall-clear (the engine's LOS, sampled on the navmesh)? */
+  private segClear(a: Vec2, b: Vec2): boolean {
+    if (!this.nav) return true;
+    const steps = Math.max(8, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 12));
+    for (let i = 1; i < steps; i++) { const u = i / steps; if (!this.walkAt(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u)) return false; }
+    return true;
+  }
+  /** Does `from` (facing unit `f`) have `to` inside its ~120° cone AND a clear line? —
+   *  exactly the engine's `inView` test, so the verdict matches the resolved duel. */
+  private seesTarget(from: Vec2, f: Vec2, to: Vec2): boolean {
+    const dx = to[0] - from[0], dy = to[1] - from[1], len = Math.hypot(dx, dy) || 1;
+    const fl = Math.hypot(f[0], f[1]) || 1;
+    const dot = (dx / len) * (f[0] / fl) + (dy / len) * (f[1] / fl);
+    if (Math.acos(Math.max(-1, Math.min(1, dot))) > FOV_HALF) return false;
+    return this.segClear(from, to);
+  }
+  private pointSegDist(p: Vec2, a: Vec2, b: Vec2): number {
+    const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+    return Math.hypot(p[0] - (a[0] + dx * t), p[1] - (a[1] + dy * t));
+  }
+  private inCircle = (p: Vec2, c: Vec2, r: number) => Math.hypot(p[0] - c[0], p[1] - c[1]) <= r;
+  private xrayReport(r: Round, e: Extract<Round['events'][number], { kind: 'kill' }>) {
+    const recs = this.roundRecs(r);
+    const K = recs.get(e.killer), V = recs.get(e.victim);
+    const at = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2 }): Vec2 => rec ? posWithDepart(rec.path, rec.departT, rec.arrive, e.t) : [500, 500];
+    const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2 }): Vec2 => rec ? facingOf(rec.path, rec.departT, rec.arrive, rec.hold, e.t) : [1, 0];
+    const pK = at(K), pV = at(V), fK = face(K), fV = face(V);
+    const kSeesV = this.seesTarget(pK, fK, pV), vSeesK = this.seesTarget(pV, fV, pK);
+    const dist = Math.hypot(pK[0] - pV[0], pK[1] - pV[1]);
+    const abils = r.events.filter((a): a is Extract<Round['events'][number], { kind: 'ability' }> => a.kind === 'ability' && !!a.at && a.until != null && a.t <= e.t && (a.until as number) >= e.t);
+    const smoke = abils.find(a => a.ability === 'smoke' && this.pointSegDist(a.at as Vec2, pK, pV) <= (a.r as number));
+    const flash = abils.find(a => (a.ability === 'flash' || a.ability === 'recon') && a.side !== V?.side && this.inCircle(pV, a.at as Vec2, a.r as number));
+    const trap = abils.find(a => a.ability === 'trap' && a.side === K?.side && this.inCircle(pV, a.at as Vec2, a.r as number));
+    const traded = r.events.some(k => k.kind === 'kill' && k.killer === e.victim && e.t - k.t > 0 && e.t - k.t <= 0.04);
+    // the headline verdict, from the cones (the engine's first-shot edge is decisive)
+    const verdict = kSeesV && !vSeesK ? { tag: 'BACKSTAB', cls: 'back', text: `${e.killer} caught ${e.victim} unaware — the decisive first shot.` }
+      : kSeesV && vSeesK ? { tag: 'EVEN GUNFIGHT', cls: 'even', text: `Both aware of each other — won on the aim (form / loadout edge).` }
+      : !kSeesV && vSeesK ? { tag: 'OFF-ANGLE', cls: 'off', text: `${e.victim} had the look, but ${e.killer} held the angle and won the trade.` }
+      : { tag: 'BLIND DUEL', cls: 'blind', text: `Neither had a clean cone — a close, scrappy break.` };
+    const factors: { icon: string; text: string }[] = [];
+    if (traded) factors.push({ icon: '⇄', text: `Trade — ${e.victim} had just fragged and was punished` });
+    if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
+    if (flash) factors.push({ icon: '✲', text: `${e.victim} was caught by a ${flash.ability}` });
+    if (trap) factors.push({ icon: '◇', text: `${e.victim} tripped ${e.killer}'s side's trap` });
+    factors.push({ icon: '↔', text: `${dist < 130 ? 'Close' : dist > 360 ? 'Long' : 'Mid'} range · ${Math.round(dist)}u` });
+    return { pK, pV, fK, fV, kSeesV, vSeesK, smoke, verdict, factors, kSide: K?.side ?? 0, vSide: V?.side ?? 1 };
+  }
+  /** Open the x-ray card for one kill: the verdict, the factors, and a cropped map
+   *  diagram of the duel (the killer's cone, the sightline, both agents). */
+  private openXray(r: Round, e: Extract<Round['events'][number], { kind: 'kill' }>) {
+    const x = this.xrayReport(r, e);
+    const sc = (s: 0 | 1) => (s === 0 ? 'att' : 'def');
+    // crop the map to the duel (bbox of both agents + the smoke if it's on the line)
+    const pts = [x.pK, x.pV, ...(x.smoke ? [x.smoke.at as Vec2] : [])];
+    const pad = 150;
+    const minX = Math.max(0, Math.min(...pts.map(p => p[0])) - pad), maxX = Math.min(1000, Math.max(...pts.map(p => p[0])) + pad);
+    const minY = Math.max(0, Math.min(...pts.map(p => p[1])) - pad), maxY = Math.min(1000, Math.max(...pts.map(p => p[1])) + pad);
+    const w = Math.max(maxX - minX, maxY - minY);   // square viewBox so the diagram isn't skewed
+    const cone = this.nav ? this.conePath(x.pK, x.fK) : '';
+    const dot = (p: Vec2, s: 0 | 1, unaware: boolean) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(w * 0.022).toFixed(1)}" class="xd-dot ${sc(s)}"/>${unaware ? `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(w * 0.04).toFixed(1)}" class="xd-unaware"/>` : ''}`;
+    const arrow = (p: Vec2, f: Vec2) => { const fl = Math.hypot(f[0], f[1]) || 1, L = w * 0.07; return `<line x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${(p[0] + f[0] / fl * L).toFixed(1)}" y2="${(p[1] + f[1] / fl * L).toFixed(1)}" class="xd-face"/>`; };
+    const diagram = `<svg viewBox="${minX.toFixed(1)} ${minY.toFixed(1)} ${w.toFixed(1)} ${w.toFixed(1)}" class="xd-svg" preserveAspectRatio="xMidYMid slice">
+        <image href="${this.mapUrl}" x="0" y="0" width="1000" height="1000" preserveAspectRatio="none"/>
+        <rect x="${minX}" y="${minY}" width="${w}" height="${w}" class="xd-scrim"/>
+        ${cone ? `<path d="${cone}" class="xd-cone ${sc(x.kSide)}"/>` : ''}
+        <line x1="${x.pK[0].toFixed(1)}" y1="${x.pK[1].toFixed(1)}" x2="${x.pV[0].toFixed(1)}" y2="${x.pV[1].toFixed(1)}" class="xd-line ${x.verdict.cls}"/>
+        ${x.smoke ? `<circle cx="${(x.smoke.at as Vec2)[0]}" cy="${(x.smoke.at as Vec2)[1]}" r="${x.smoke.r}" class="xd-smoke"/>` : ''}
+        ${arrow(x.pV, x.fV)}${arrow(x.pK, x.fK)}
+        ${dot(x.pV, x.vSide, x.kSeesV && !x.vSeesK)}${dot(x.pK, x.kSide, false)}
+      </svg>`;
+    this.xray.innerHTML = `
+      <div class="xr-card">
+        <button class="xr-x">✕</button>
+        <div class="xr-head"><b class="kr ${sc(x.kSide)}">${e.killer}</b><span class="xr-wp">${e.weapon}</span><b class="vc ${sc(x.vSide)}">${e.victim}</b></div>
+        <div class="xr-verdict ${x.verdict.cls}"><span class="xr-tag">${x.verdict.tag}</span>${x.verdict.text}</div>
+        <div class="xr-diagram">${diagram}<div class="xr-legend"><i class="xl-k ${sc(x.kSide)}">▲ ${e.killer}</i><i class="xl-v ${sc(x.vSide)}">▲ ${e.victim}</i><i class="xl-cone">cone = who they see</i></div></div>
+        <div class="xr-factors">${x.factors.map(f => `<span class="xr-f"><i>${f.icon}</i>${f.text}</span>`).join('')}</div>
+        <div class="xr-foot">Round ${r.n} · ${Math.round(e.t * 100)}% in · reconstructed from the engine's vision + utility geometry</div>
+      </div>`;
+    this.xray.classList.add('show');
+    (this.xray.querySelector('.xr-x') as HTMLElement).onclick = () => this.closeXray();
+    this.xray.onclick = ev => { if (ev.target === this.xray) this.closeXray(); };
+  }
+  private closeXray() { this.xray.classList.remove('show'); this.xray.innerHTML = ''; }
 
   /** Swap in a longer timeline mid-watch WITHOUT resetting playback — the live-watch
    *  feed: the server ships more completed rounds as the broadcast plays out. Rebuilds
@@ -580,7 +677,8 @@ export class Viewer {
       const lk = this.lastKill.get(e.victim);
       const traded = lk != null && e.t - lk <= 0.04;
       this.lastKill.set(e.killer, e.t);
-      d.innerHTML = `${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>`;
+      d.innerHTML = `${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span><i class="kill-xray" title="x-ray this duel">⌕</i>`;
+      const ke = e; d.classList.add('clickable'); d.onclick = () => this.openXray(this.tl.rounds[this.roundIdx], ke);   // duel x-ray
       this.feed.appendChild(d); this.feedItems.push(d);
       while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
       const v = this.agents.find(a => a.handle === e.victim);
