@@ -8,7 +8,7 @@
 import { onMounted, onUnmounted, ref, computed, watch as vueWatch } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS, personOf } from '@ace/world';
+import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth } from '@ace/world';
 import { Viewer } from './viewer';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
 const SCOUT_MAX = 3;
@@ -178,6 +178,29 @@ function benchStarter(sp: SquadPlayer) {
   five.push(sub.id);
   saveLineup(five);
 }
+
+// --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
+const ROLE_ORDER = ['duelist', 'initiator', 'controller', 'sentinel'] as const;
+const ROLE_SHORT: Record<string, string> = { duelist: 'DUE', initiator: 'INI', controller: 'CON', sentinel: 'SEN' };
+const ROLE_NEED: Record<string, number> = { duelist: 2, initiator: 1, controller: 1, sentinel: 1 };
+const person = (id: string) => personOf(id);                 // real name + nationality + birthday (pure)
+const solo = (ovr: number) => soloRank(ovr);                 // solo-queue rank (a different axis from the club's tier)
+const trait = (id: string) => traitOf(id);                   // personality trait (pure hash)
+const bday = (id: string) => fmtDayMonth(personOf(id).birthday);
+// roster at a glance: depth per role, plus averages + total value (read squad balance fast)
+const squadSummary = computed(() => {
+  const sq = myClub.value?.squad ?? []; if (!sq.length) return null;
+  const avgOvr = Math.round(sq.reduce((s, p) => s + p.overall, 0) / sq.length);
+  const avgAge = Math.round(sq.reduce((s, p) => s + p.age, 0) / sq.length);
+  const value = sq.reduce((s, p) => s + p.value, 0);
+  const depth = ROLE_ORDER.map(role => {
+    const ps = sq.filter(p => p.role === role);
+    return { role, short: ROLE_SHORT[role], total: ps.length, starters: ps.filter(p => p.starter).length, need: ROLE_NEED[role], thin: ps.length <= ROLE_NEED[role] };
+  });
+  return { count: sq.length, avgOvr, avgAge, value, depth };
+});
+// the player profile card (a full dossier on one of your squad)
+const playerCard = ref<SquadPlayer | null>(null);
 
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
@@ -758,12 +781,30 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <div v-if="!board.length" class="lv-empty">loading the board…</div>
         </div>
         <div v-if="myClub.squad && myClub.squad.length" class="lv-squad">
-          <div class="lv-mkth"><span class="lv-kicker">Your squad</span><span class="lv-mktsub">sell to the richest club that wants him — blocked if it would break your valid five</span></div>
+          <div class="lv-mkth"><span class="lv-kicker">Your squad</span><span class="lv-mktsub">click a name for the full profile · start a reserve to develop him · sell (blocked if it breaks your valid five)</span></div>
+          <!-- roster at a glance: averages + a role depth chart (thin roles flagged) -->
+          <div v-if="squadSummary" class="lv-sqsum">
+            <span class="lv-sqstat"><b>{{ squadSummary.count }}</b> players</span>
+            <span class="lv-sqstat"><b>{{ squadSummary.avgOvr }}</b> avg OVR</span>
+            <span class="lv-sqstat"><b>{{ squadSummary.avgAge }}</b> avg age</span>
+            <span class="lv-sqstat"><b>{{ kfmt(squadSummary.value) }}</b> squad value</span>
+            <span class="lv-sqdepth">
+              <span v-for="d in squadSummary.depth" :key="d.role" class="lv-sqrole" :class="['rl-'+d.role, { thin: d.thin }]" :title="`${d.role}: ${d.starters} starting, ${d.total - d.starters} in reserve${d.thin ? ' — no cover, a gap to fill' : ''}`">
+                {{ d.short }} <b>{{ d.total }}</b><i v-if="d.thin">⚠</i>
+              </span>
+            </span>
+          </div>
           <div class="lv-mktboard">
             <template v-for="sp in myClub.squad" :key="sp.id">
             <div class="lv-mktrow squad">
               <span class="rs-role" :class="sp.role">{{ sp.role.slice(0, 3).toUpperCase() }}</span>
-              <b class="lv-mkthandle clk" :class="{ open: expanded.has('s:'+sp.id) }" title="per-skill scouting" @click="toggleExpand('s:'+sp.id)">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i><i class="lv-disc">▾</i></b>
+              <div class="lv-sqid">
+                <b class="lv-mkthandle clk" title="open profile card" @click="playerCard = sp">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i><i v-if="sp.igl" class="lv-iglb">IGL</i></b>
+                <span class="lv-sqperson">{{ person(sp.id).nation.flag }} {{ person(sp.id).name }}
+                  <i class="lv-sqsolo" :class="'rk-'+solo(sp.overall).tier.toLowerCase()">{{ solo(sp.overall).label }}</i>
+                  <i v-if="trait(sp.id)" class="lv-sqtrait rs-trait" :class="'tr-'+trait(sp.id)!.key" :title="trait(sp.id)!.blurb">✦ {{ trait(sp.id)!.label }}</i>
+                </span>
+              </div>
               <span class="lv-mktage">age {{ sp.age }}</span>
               <span class="lv-mktovr">{{ sp.overall }} <i>OVR</i></span>
               <span class="lv-roomcell" :title="`scouted ceiling ${sp.ceiling[0]}–${sp.ceiling[1]} · ${sp.room} OVR of upside left`">
@@ -772,6 +813,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               </span>
               <span class="lv-mktval">{{ kfmt(sp.value) }}</span>
               <span class="lv-squadacts">
+                <button class="lv-scoutbtn ghost" title="per-skill breakdown" @click="toggleExpand('s:'+sp.id)">{{ expanded.has('s:'+sp.id) ? '▾' : '▸' }}</button>
                 <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>
                 <button v-else-if="canBench(sp)" class="lv-scoutbtn" :disabled="marketBusy" title="bench him (a benched player rusts)" @click="benchStarter(sp)">bench</button>
                 <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
@@ -1132,6 +1174,44 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- player profile card (your squad) — a full dossier, reusing the single-player card -->
+    <div v-if="playerCard" class="pc-overlay" @click.self="playerCard = null">
+      <div class="pc-card">
+        <button class="lv-clubx" @click="playerCard = null">✕</button>
+        <div class="pc-head">
+          <span class="rs-role" :class="playerCard.role">{{ playerCard.role.slice(0, 3).toUpperCase() }}</span>
+          <div class="pc-headmeta">
+            <b class="pc-tag">{{ playerCard.handle }}<i v-if="playerCard.starter" class="lv-starter">XI</i><i v-if="playerCard.igl" class="rs-igl">IGL</i></b>
+            <span class="pc-name">{{ person(playerCard.id).nation.flag }} {{ person(playerCard.id).name }} · {{ person(playerCard.id).nation.country }}</span>
+          </div>
+          <div class="pc-ovr"><b>{{ playerCard.overall }}</b><span>OVR</span></div>
+        </div>
+        <div class="pc-bio">
+          <span><i>Age</i> {{ playerCard.age }}</span>
+          <span><i>Birthday</i> 🎂 {{ bday(playerCard.id) }}</span>
+          <span :class="'rk-' + solo(playerCard.overall).tier.toLowerCase()"><i>Solo rank</i> {{ solo(playerCard.overall).label }}</span>
+          <span><i>Ceiling</i> ↗ {{ playerCard.ceiling[0] }}–{{ playerCard.ceiling[1] }}<em v-if="playerCard.room" class="pc-room"> (+{{ playerCard.room }})</em></span>
+          <span v-if="trait(playerCard.id)"><i>Trait</i> ✦ {{ trait(playerCard.id)!.label }}</span>
+          <span><i>Value</i> {{ kfmt(playerCard.value) }}</span>
+        </div>
+        <div class="pc-section">Attributes <span class="pc-ceilkey">current ↗ scouted ceiling</span></div>
+        <div class="pc-attrs">
+          <div v-for="a in playerCard.attrs" :key="a.key" class="pc-attr">
+            <span class="pc-al">{{ ATTR_LABEL[a.key] }}</span>
+            <span class="pc-abar"><i :class="{ mech: a.mech }" :style="{ width: a.cur + '%' }"></i><span class="pc-tick" :style="{ left: a.ceil + '%' }"></span></span>
+            <span class="pc-av"><b>{{ a.cur }}</b><em v-if="a.ceil > a.cur">↗{{ a.ceil }}</em></span>
+          </div>
+        </div>
+        <template v-if="playerCard.agents.length">
+          <div class="pc-section">Agent pool</div>
+          <div class="pc-agents">
+            <span v-for="ag in playerCard.agents" :key="ag.agent" class="pc-agent"><span>{{ ag.agent }}</span><b>{{ ag.level }}</b></span>
+          </div>
+        </template>
+        <div v-if="trait(playerCard.id)" class="pc-traitnote">✦ {{ trait(playerCard.id)!.blurb }}</div>
       </div>
     </div>
   </div>
