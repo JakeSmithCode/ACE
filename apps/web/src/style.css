@@ -419,7 +419,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-table .hq-thead span{font-family:var(--label);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
 .hq-table .hq-trow.me{background:rgba(34,211,238,.09);box-shadow:inset 2px 0 0 var(--brand)}
 .hq-table .hq-trow:hover:not(.hq-thead):not(.me){background:rgba(255,255,255,.03)}
-.hq-dot{width:9px;height:9px;border-radius:2px;flex:none}
+.hq-dot{width:11px;height:12px;clip-path:polygon(50% 0,100% 26%,100% 74%,50% 100%,0 74%,0 26%);flex:none}
 
 .hq-right{display:flex;flex-direction:column;gap:16px}
 .hq-clubcard{display:flex;gap:13px;align-items:flex-start}
@@ -781,7 +781,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .po-vstep.pick{color:var(--text)}
 .po-vstep.decider{color:var(--gold)}
 /* HQ facilities */
-.fc{max-width:760px}
+.fc{max-width:860px;margin:0 auto}
 .fc-room{display:flex;align-items:center;gap:18px;padding:16px 4px;border-bottom:1px solid var(--line)}
 .fc-info{flex:1}
 .fc-name{font-family:var(--display);font-weight:700;font-size:17px;color:var(--text);display:flex;align-items:center;gap:10px}
