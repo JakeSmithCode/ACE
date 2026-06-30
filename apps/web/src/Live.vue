@@ -193,11 +193,12 @@ const squadSummary = computed(() => {
   const avgOvr = Math.round(sq.reduce((s, p) => s + p.overall, 0) / sq.length);
   const avgAge = Math.round(sq.reduce((s, p) => s + p.age, 0) / sq.length);
   const value = sq.reduce((s, p) => s + p.value, 0);
+  const out = sq.filter(p => p.injury > 0).length, tired = sq.filter(p => p.injury === 0 && p.fatigue >= 70).length;
   const depth = ROLE_ORDER.map(role => {
     const ps = sq.filter(p => p.role === role);
     return { role, short: ROLE_SHORT[role], total: ps.length, starters: ps.filter(p => p.starter).length, need: ROLE_NEED[role], thin: ps.length <= ROLE_NEED[role] };
   });
-  return { count: sq.length, avgOvr, avgAge, value, depth };
+  return { count: sq.length, avgOvr, avgAge, value, depth, out, tired };
 });
 // the player profile card (a full dossier on one of your squad)
 const playerCard = ref<SquadPlayer | null>(null);
@@ -788,6 +789,8 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <span class="lv-sqstat"><b>{{ squadSummary.avgOvr }}</b> avg OVR</span>
             <span class="lv-sqstat"><b>{{ squadSummary.avgAge }}</b> avg age</span>
             <span class="lv-sqstat"><b>{{ kfmt(squadSummary.value) }}</b> squad value</span>
+            <span v-if="squadSummary.out" class="lv-sqalert inj" title="players injured — a reserve covers each, or they play hurt">⚕ {{ squadSummary.out }} out</span>
+            <span v-if="squadSummary.tired" class="lv-sqalert tired" title="players redlining on fatigue — rotate them out before they break down">◔ {{ squadSummary.tired }} tired</span>
             <span class="lv-sqdepth">
               <span v-for="d in squadSummary.depth" :key="d.role" class="lv-sqrole" :class="['rl-'+d.role, { thin: d.thin }]" :title="`${d.role}: ${d.starters} starting, ${d.total - d.starters} in reserve${d.thin ? ' — no cover, a gap to fill' : ''}`">
                 {{ d.short }} <b>{{ d.total }}</b><i v-if="d.thin">⚠</i>
@@ -803,6 +806,8 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                 <span class="lv-sqperson">{{ person(sp.id).nation.flag }} {{ person(sp.id).name }}
                   <i class="lv-sqsolo" :class="'rk-'+solo(sp.overall).tier.toLowerCase()">{{ solo(sp.overall).label }}</i>
                   <i v-if="trait(sp.id)" class="lv-sqtrait rs-trait" :class="'tr-'+trait(sp.id)!.key" :title="trait(sp.id)!.blurb">✦ {{ trait(sp.id)!.label }}</i>
+                  <i v-if="sp.injury" class="lv-sqinj" :title="`injured — out ${sp.injury} more match-day(s); a reserve covers, or he plays hurt`">⚕ OUT {{ sp.injury }}d</i>
+                  <i v-else-if="sp.fatigue >= 40" class="lv-sqfat" :class="{ tired: sp.fatigue >= 70 }" :title="`match fatigue ${sp.fatigue}% — rotate him out to recover; high fatigue dulls his game and risks injury`">◔ {{ sp.fatigue }}%</i>
                 </span>
               </div>
               <span class="lv-mktage">age {{ sp.age }}</span>
@@ -1195,6 +1200,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span :class="'rk-' + solo(playerCard.overall).tier.toLowerCase()"><i>Solo rank</i> {{ solo(playerCard.overall).label }}</span>
           <span><i>Ceiling</i> ↗ {{ playerCard.ceiling[0] }}–{{ playerCard.ceiling[1] }}<em v-if="playerCard.room" class="pc-room"> (+{{ playerCard.room }})</em></span>
           <span v-if="trait(playerCard.id)"><i>Trait</i> ✦ {{ trait(playerCard.id)!.label }}</span>
+          <span :class="{ gold: playerCard.injury || playerCard.fatigue >= 70 }"><i>Condition</i> <template v-if="playerCard.injury">⚕ OUT {{ playerCard.injury }}d</template><template v-else>{{ playerCard.fatigue }}% fatigue</template></span>
           <span><i>Value</i> {{ kfmt(playerCard.value) }}</span>
         </div>
         <div class="pc-section">Attributes <span class="pc-ceilkey">current ↗ scouted ceiling</span></div>

@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, traitKeyOf, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -96,7 +96,22 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
     });
   }
 
-  const next: WorldState = { ...w, clubs, results: [...w.results, ...results], day: w.day + 1, cup };
+  // fitness ticks for HUMAN-OWNED clubs (depth matters on match night): the five who played
+  // tire + risk injury, the rest recover. Only owned clubs model it — a world with no owners
+  // is byte-identical. Seeded on its own stream so it never perturbs resolution.
+  let fitness = w.fitness;
+  const owned = w.clubs.filter(c => c.owner);
+  if (owned.length) {
+    const fr = new Rng((devSeed(w.seed, w.season, w.day) ^ 0xF17a7) >>> 0);
+    let fit = fitness ?? emptyFitness();
+    for (const c of owned) {
+      const fielded = fitFive(c.roster, planFive(c), fit).five;   // who actually played (pre-match fitness)
+      fit = tickFitness(fit, c.roster, new Set(fielded.map(p => p.id)), fr, fitId => traitKeyOf(fitId) === 'workhorse').fitness;
+    }
+    fitness = fit;
+  }
+
+  const next: WorldState = { ...w, clubs, results: [...w.results, ...results], day: w.day + 1, cup, fitness };
 
   const rows = results.map((r, slot) => {
     const row = fixtureRow(id, w.season, w.day, slot, r);

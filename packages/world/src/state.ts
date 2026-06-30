@@ -12,6 +12,7 @@ import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './playoffs.js';
 import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
+import type { Fitness } from './fitness.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
@@ -52,6 +53,7 @@ export interface WorldState {
   clubs: WorldClub[];
   results: MatchResult[];   // the current season's fixtures
   cup?: CupState;           // the season's domestic cup (ticks day-by-day; opt-in/additive)
+  fitness?: Fitness;        // fatigue + injuries for HUMAN-OWNED clubs' players (opt-in/additive)
 }
 
 /** Every `(tier, group)` division and its member club indices, tier-major. A flat
@@ -263,5 +265,6 @@ export function advanceWorld(w: WorldState): Rollover {
   }
   // open a fresh cup for the new season (every club re-entered; club indices are stable)
   const cup = createCup(clubs.map((_, i) => i), w.season + 1);
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup }, champion, moves, notes: meta.changes, cupChampion };
+  // the off-season heals everyone — fitness resets for the new campaign
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion };
 }

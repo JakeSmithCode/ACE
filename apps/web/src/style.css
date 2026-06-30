@@ -1540,6 +1540,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-sqsolo{font-style:normal;font-size:9px;font-weight:700;letter-spacing:.02em}
 .lv-sqtrait{font-style:normal;font-size:9px;border:none;padding:0}
 .lv-iglb{font-family:var(--label);font-size:8px;letter-spacing:.06em;color:var(--gold);border:1px solid rgba(229,181,103,.4);padding:0 3px;margin-left:5px;font-weight:600}
+.lv-sqfat{font-style:normal;font-size:9px;color:var(--muted-2)}
+.lv-sqfat.tired{color:var(--def)}
+.lv-sqinj{font-style:normal;font-size:9px;font-weight:700;color:var(--def);letter-spacing:.02em}
+.lv-sqalert{font-family:var(--label);font-size:10px;letter-spacing:.03em;padding:2px 8px;border-radius:10px}
+.lv-sqalert.inj{color:var(--def);background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.3)}
+.lv-sqalert.tired{color:#e0a850;background:rgba(229,181,103,.1);border:1px solid rgba(229,181,103,.3)}
 .lv-scoutbtn.ghost{padding:3px 6px;color:var(--muted-2)}
 .lv-mktrow.squad{align-items:center}
 /* profile card extras (reuses .pc-* from the single-player card) */
