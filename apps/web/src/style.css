@@ -422,9 +422,25 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .hq-dot{width:9px;height:9px;border-radius:2px;flex:none}
 
 .hq-right{display:flex;flex-direction:column;gap:16px}
-.hq-clubcard{display:flex;gap:13px;align-items:center}
-.hq-badge{width:58px;height:58px;flex:none;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:19px;border:2px solid;color:var(--text);clip-path:var(--bevel)}
+.hq-clubcard{display:flex;gap:13px;align-items:flex-start}
+.hq-badge{width:58px;height:62px;flex:none;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:19px;border:2px solid;color:var(--text);clip-path:polygon(50% 0,100% 26%,100% 74%,50% 100%,0 74%,0 26%)}
 .hq-clubmeta{flex:1;min-width:0}
+/* showcase stats + form on the YOUR CLUB card (mirror the public profile) */
+.hq-clubstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);clip-path:var(--bevel);margin:8px 0}
+.hq-cstat{background:var(--bg-3);padding:7px 4px;text-align:center;display:flex;flex-direction:column;gap:2px}
+.hq-cstat>b{font-family:var(--display);font-size:18px;line-height:1;color:var(--text)}
+.hq-cstat>span{font-family:var(--label);font-size:7.5px;letter-spacing:.06em;color:var(--muted-2)}
+.hq-cstat>span i{font-style:normal}
+.hq-cstars{color:var(--gold);font-size:12px!important;letter-spacing:.5px}.hq-cstars i{color:var(--line-2);font-style:normal}
+.hq-hqpips{display:flex;gap:2px;justify-content:center;height:18px;align-items:center}
+.hq-hqpips i{width:6px;height:6px;background:var(--bg-2);border:1px solid var(--line-2);transform:rotate(45deg)}
+.hq-hqpips i.on{background:var(--brand);border-color:var(--brand)}
+.hq-clubform{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.hq-formlbl{font-family:var(--label);font-size:8.5px;letter-spacing:.1em;color:var(--muted-2)}
+.hq-formpills{display:flex;gap:3px}
+.hq-formpills i{font-family:var(--label);font-style:normal;font-size:9px;font-weight:700;width:16px;height:16px;display:grid;place-items:center;clip-path:var(--bevel)}
+.hq-formpills i.w{background:rgba(74,222,128,.18);color:var(--win);border:1px solid rgba(74,222,128,.4)}
+.hq-formpills i.l{background:rgba(255,92,110,.16);color:var(--def);border:1px solid rgba(255,92,110,.4)}
 .hq-clubname{font-family:var(--display);font-weight:700;font-size:21px}
 .hq-clubsub{font-family:var(--label);font-size:12px;color:var(--muted);margin:2px 0 7px}
 .hq-pos{color:var(--text);font-weight:700}.hq-pos sup{font-size:.65em}

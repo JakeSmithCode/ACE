@@ -27,6 +27,16 @@ const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_
 const seedNo = (c: number) => (playoffs.value ? playoffs.value.qualified.indexOf(c) + 1 : 0);
 const titleCount = (i: number) => titles.value[i] ?? 0;
 
+// --- club showcase readouts (mirror the public profile: how good + how you rank) ---
+const myPower = computed(() => Math.round(w.powerOf(myClub.value)));
+const myWorldRank = computed(() => w.rankInList(w.powerRanking.value, myClub.value));
+const myInfra = computed(() => w.infraLevel(myClub.value));
+const clubStars = (p: number) => Math.max(1, Math.min(5, Math.round((p - 55) / 7)));
+const myForm = computed(() => myResults.value.slice(-6).map(r => {
+  const mc = myClub.value, home = r.home === mc;
+  return { r: r.winner === mc ? 'W' : 'L', opp: tagOf(home ? r.away : r.home), us: home ? r.score[0] : r.score[1], them: home ? r.score[1] : r.score[0] };
+}));
+
 // --- divisions: which tier's table to show (defaults to yours, follows you) ---
 const viewDiv = ref(myDivision.value);
 vueWatch(myDivision, d => { viewDiv.value = d; });
@@ -338,7 +348,16 @@ onUnmounted(() => { viewer?.destroy(); });
                 <span class="hq-pos">{{ w.rankOf(myClub) }}<sup>{{ ['st','nd','rd'][w.rankOf(myClub)-1] || 'th' }}</sup></span> of {{ DIV_SIZE }}
                 <span v-if="myStanding">· {{ myStanding.won }}W {{ myStanding.lost }}L · {{ myStanding.diff >= 0 ? '+' : '' }}{{ myStanding.diff }} diff</span>
               </div>
-              <div class="hq-strbar"><i :style="{ width: (club(myClub).strength * 100) + '%' }"></i><span>strength {{ club(myClub).strength.toFixed(2) }}</span></div>
+              <div class="hq-clubstats">
+                <div class="hq-cstat"><b>{{ myPower }}</b><span>SQUAD OVR</span></div>
+                <div class="hq-cstat"><b>#{{ myWorldRank }}</b><span>WORLD <i>/{{ N }}</i></span></div>
+                <div class="hq-cstat"><b class="hq-cstars">{{ '★'.repeat(clubStars(myPower)) }}<i>{{ '★'.repeat(5 - clubStars(myPower)) }}</i></b><span>RATED</span></div>
+                <div class="hq-cstat"><b class="hq-hqpips"><i v-for="n in 5" :key="n" :class="{ on: n <= myInfra }"></i></b><span>HQ</span></div>
+              </div>
+              <div v-if="myForm.length" class="hq-clubform">
+                <span class="hq-formlbl">FORM</span>
+                <span class="hq-formpills"><i v-for="(g, i) in myForm" :key="i" :class="g.r === 'W' ? 'w' : 'l'" :title="`${g.r === 'W' ? 'won' : 'lost'} ${g.us}–${g.them} vs ${g.opp}`">{{ g.r }}</i></span>
+              </div>
               <div v-if="w.rivalId.value != null" class="hq-rival" :title="`your fiercest rival (nearest you in strength) — a derby carries extra morale stakes`">
                 ⚔ Rival <b class="hq-rivaltag">{{ tagOf(w.rivalId.value) }}</b> {{ nameOf(w.rivalId.value) }}
                 <span class="hq-h2h">H2H {{ w.derbyRecord.value.w }}–{{ w.derbyRecord.value.l }}</span>
