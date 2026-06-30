@@ -1103,6 +1103,24 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .wc-pickp.on i{color:var(--brand)}
 .wc-save:disabled{opacity:.45;cursor:default}
 .wc-votemsg{margin:-10px 0 18px;font-family:var(--label);font-size:11px;letter-spacing:.03em;color:var(--brand)}
+.wc-credit{color:var(--gold)}
+/* the manager's comp picker */
+.wc-comprow{display:grid;grid-template-columns:30px 1fr auto;align-items:center;gap:7px;padding:3px 0}
+.wc-compname{font-size:11.5px}
+.wc-compsel{font-family:var(--label);font-size:10px;background:var(--bg-3);color:var(--text);border:1px solid var(--line-2);padding:2px 5px;clip-path:var(--bevel);cursor:pointer}
+/* World Cup legacy boards (the trophy → manager + nation) */
+.wc-honors{margin:22px 0;padding:16px 18px;background:linear-gradient(180deg,rgba(229,181,103,.06),var(--bg-2) 70%);border:1px solid var(--line);clip-path:var(--bevel)}
+.wc-honors .cir-brackh i{color:var(--gold);font-style:italic}
+.wc-honcols{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:16px;margin-top:12px}
+@media(max-width:900px){.wc-honcols{grid-template-columns:1fr}}
+.wc-honh{font-family:var(--label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.wc-honempty{font-size:11px;color:var(--muted-2);font-style:italic}
+.wc-honrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.wc-honrank{font-family:var(--label);font-style:normal;font-size:9px;color:var(--muted-2);min-width:22px}
+.wc-honrow b{font-family:var(--display);font-size:13px}
+.wc-honflag{font-size:14px}
+.wc-hont{margin-left:auto;font-family:var(--display);font-size:14px;color:var(--gold)}
+.wc-honmgr{margin-left:auto;font-family:var(--label);font-size:9.5px;letter-spacing:.03em;color:var(--brand)}
 .cir-regions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
 .cir-region{background:var(--bg-2);border:1px solid var(--line);border-top:2px solid var(--rg);clip-path:var(--bevel);padding:13px 15px}
 .cir-regh{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.06em;color:var(--rg)}

@@ -140,7 +140,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // to manage a nation, others vote, and the winner authors the nation's tactics — which
   // drive the engine-simmed final. In-memory per server (Pg follow-up like the other
   // per-account state). Keyed by 3-letter country code.
-  interface NationElection { candidates: string[]; votes: Map<string, string>; tactics?: Tactics; lineup?: string[] }
+  interface NationElection { candidates: string[]; votes: Map<string, string>; tactics?: Tactics; lineup?: string[]; comp?: Record<string, string> }
+  // World Cup legacy: a champion crowns the NATION and its elected MANAGER (the trophy is
+  // theirs). Recorded at each season rollover; drives the manager/nation honor boards.
+  interface WCTitle { season: number; code: string; country: string; flag: string; managerTag: string | null; managerAccount: string | null }
+  const worldCupHistory: WCTitle[] = [];
   const elections = new Map<string, NationElection>();
   const electionOf = (code: string): NationElection => {
     let e = elections.get(code);
@@ -167,8 +171,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const mgr = electedManager(code); if (!mgr) return undefined;
     return elections.get(code)?.lineup;
   };
+  // the manager's per-player agent picks (the comp) — manager-gated too
+  const nationComp = (code: string): Record<string, string> | undefined => {
+    const mgr = electedManager(code); if (!mgr) return undefined;
+    return elections.get(code)?.comp;
+  };
   const wcHooks = (w: WorldState) => ({
-    tacticsOf: nationTactics, lineupOf: nationLineup,
+    tacticsOf: nationTactics, lineupOf: nationLineup, compOf: nationComp,
     managerOf: (code: string) => { const a = electedManager(code); return a ? clubTagOf(w, a) : null; },
   });
   const bustWorldCup = () => { worldCupCache = undefined; };   // an election change re-sims the final
@@ -366,10 +375,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const mvpAcc = new Map<string, PlayerStat>();
     for (const f of await store.fixtures(id, w.season)) { if (fixtureStatus(f, clock()) !== 'resolved') continue; const tl = timelines.get(key(f)); if (tl) tallyTimeline(tl, mvpAcc); }
     const mvp = [...mvpAcc.values()].sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
+    // World Cup: crown the finishing season's champion NATION + its elected MANAGER (the
+    // trophy is theirs) from the pre-rollover world, and record it into the legacy.
+    const wcv = (worldCupCache && worldCupCache.season === w.season) ? worldCupCache : buildWorldCupView(w, navOf, wcHooks(w));
+    const wcChampCode = wcv.bracket.champion.code;
+    const wcMgrAccount = electedManager(wcChampCode);
+    const wcMgrTag = wcMgrAccount ? clubTagOf(w, wcMgrAccount) : null;
+    worldCupHistory.push({ season: w.season, code: wcChampCode, country: wcv.bracket.champion.country, flag: wcv.bracket.champion.flag, managerTag: wcMgrTag, managerAccount: wcMgrAccount });
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
+    pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
+    if (wcMgrAccount) { notify(wcMgrAccount, 'award', `🏆🌍 You led ${wcv.bracket.champion.country} to the Season ${roll.season} World Cup title!`, roll.season, liveDay); await persistAccount(wcMgrAccount); }
     pushNews('season', `Season ${roll.season + 1} begins`, roll.season + 1, 0);
     // season-end notifications per owner: final placement (from the finished season, using
     // the pre-rollover world `w` for the right tier), the title, and your-player-is-MVP.
@@ -739,7 +757,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
           youManager,
           yourVoteTag: account ? (e.votes.has(account) ? (clubTagOf(w, e.votes.get(account)!) ?? null) : null) : null,
           tactics: youManager ? (e.tactics ?? DEFAULT_TACTICS) : undefined,
-          pool, fielded,
+          pool, fielded, comp: youManager ? (e.comp ?? {}) : undefined,
         };
       });
       return json(res, 200, { nations, you: myTag });
@@ -792,6 +810,31 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       electionOf(code).lineup = ids;
       bustWorldCup();
       return json(res, 200, { ok: true });
+    }
+    // PATCH /worldcup/:code/comp  { comp: {playerId: agent} }  → the manager picks agents
+    if (path[0] === 'worldcup' && path.length === 3 && path[2] === 'comp' && req.method === 'PATCH') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const code = path[1].toUpperCase();
+      if (electedManager(code) !== account) return json(res, 403, { error: 'only the elected manager can pick the comp' });
+      const body = (await readBody(req)) as { comp?: Record<string, string> };
+      electionOf(code).comp = body.comp ?? {};
+      bustWorldCup();
+      return json(res, 200, { ok: true });
+    }
+    // GET /worldcup/honors  → the World Cup legacy: past champions (nation + manager) and
+    // the manager / nation title boards. The trophy is the manager's AND the team's.
+    if (path[0] === 'worldcup' && path[1] === 'honors' && path.length === 2 && req.method === 'GET') {
+      const mgrTally = new Map<string, number>(), natTally = new Map<string, { country: string; flag: string; titles: number }>();
+      for (const t of worldCupHistory) {
+        if (t.managerTag) mgrTally.set(t.managerTag, (mgrTally.get(t.managerTag) ?? 0) + 1);
+        const n = natTally.get(t.code) ?? { country: t.country, flag: t.flag, titles: 0 };
+        n.titles++; natTally.set(t.code, n);
+      }
+      return json(res, 200, {
+        history: [...worldCupHistory].reverse(),
+        managers: [...mgrTally.entries()].map(([tag, titles]) => ({ tag, titles })).sort((a, b) => b.titles - a.titles),
+        nations: [...natTally.entries()].map(([code, n]) => ({ code, ...n })).sort((a, b) => b.titles - a.titles),
+      });
     }
     // GET /world  → the shard summary (region, clock, the division pyramid + the
     // live broadcast cursor so the client streams the right match-day)

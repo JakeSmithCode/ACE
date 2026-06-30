@@ -5,8 +5,9 @@
 // of the identity layer: "Team Korea" is real names you've scouted all season.
 import { onMounted, onUnmounted, ref, reactive } from 'vue';
 import { simulateMatch } from '@ace/engine';
+import { ROLE_AGENTS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldCupView, type WCSide, type ElectionsView, type NationElection, type PoolPlayer } from './serverApi';
+import { AceServer, type WorldCupView, type WCSide, type ElectionsView, type NationElection, type PoolPlayer, type WorldCupHonors } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -24,7 +25,8 @@ async function loadElections() {
   if (!server) return;
   try {
     elections.value = await server.worldCupElections(token.value ?? undefined);
-    for (const n of elections.value.nations) if (n.youManager) { ensureDraft(n); ensureLine(n); }
+    for (const n of elections.value.nations) if (n.youManager) { ensureDraft(n); ensureLine(n); ensureComp(n); }
+    try { honors.value = await server.worldCupHonors(); } catch { /* offline */ }
   } catch { /* offline */ }
 }
 async function runFor(code: string) {
@@ -73,6 +75,22 @@ async function saveLineup(n: NationElection) {
   try { await server.setNationLineup(n.code, lineDraft[n.code], token.value); voteMsg.value = `${n.code} XI selected — your five plays the final.`; await reload(); }
   catch (e) { voteMsg.value = (e as Error).message; }
 }
+// the manager's comp: pick each fielded player's agent (the last end-to-end lever).
+const compDraft = reactive<Record<string, Record<string, string>>>({});
+const fieldedPlayers = (n: NationElection): PoolPlayer[] => (n.fielded ?? []).map(id => n.pool?.find(p => p.id === id)).filter((p): p is PoolPlayer => !!p);
+const agentsFor = (role: string): string[] => (ROLE_AGENTS as Record<string, string[]>)[role] ?? [];
+function ensureComp(n: NationElection) {
+  const c = compDraft[n.code] ?? (compDraft[n.code] = {});
+  for (const p of fieldedPlayers(n)) if (!c[p.id]) c[p.id] = n.comp?.[p.id] ?? agentsFor(p.role)[0];
+}
+async function saveComp(n: NationElection) {
+  if (!server || !token.value) return;
+  try { await server.setNationComp(n.code, compDraft[n.code], token.value); voteMsg.value = `${n.code} comp set — your agents play the final.`; await reload(); }
+  catch (e) { voteMsg.value = (e as Error).message; }
+}
+// the legacy: past World Cup winners + the manager / nation title boards
+const honors = ref<WorldCupHonors | null>(null);
+const championManager = () => wc.value?.squads.find(s => s.code === wc.value!.bracket.champion.code)?.manager ?? null;
 
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 const isChamp = (s: WCSide) => wc.value != null && s.code === wc.value.bracket.champion.code;
@@ -138,7 +156,7 @@ onUnmounted(() => viewer?.destroy());
         <div class="cir-champmeta">
           <span class="cir-champk">World Champions · Season {{ wc.season }}</span>
           <b class="cir-champname">{{ wc.bracket.champion.flag }} {{ wc.bracket.champion.country }}</b>
-          <span class="cir-champreg">National Team · {{ wc.bracket.champion.code }}</span>
+          <span class="cir-champreg">National Team · {{ wc.bracket.champion.code }}<template v-if="championManager()"> · ⚑ managed by <b class="wc-credit">{{ championManager() }}</b></template></span>
         </div>
         <button class="cir-watch" @click="watchFinal">▷ watch the grand final</button>
       </div>
@@ -203,6 +221,18 @@ onUnmounted(() => viewer?.destroy());
               </div>
               <button class="wc-save" :disabled="!lineValid(elFor(s.code)!)" @click="saveLineup(elFor(s.code)!)">save five</button>
             </div>
+            <!-- the manager's comp: pick each fielded player's agent (the last lever) -->
+            <div v-if="elFor(s.code)!.youManager && compDraft[s.code]" class="wc-tac wc-comp">
+              <div class="wc-tach">pick the agents</div>
+              <div v-for="p in fieldedPlayers(elFor(s.code)!)" :key="p.id" class="wc-comprow">
+                <span class="rs-role wc-prole" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
+                <b class="wc-compname">{{ p.handle }}</b>
+                <select class="wc-compsel" v-model="compDraft[s.code][p.id]">
+                  <option v-for="a in agentsFor(p.role)" :key="a" :value="a">{{ a }}</option>
+                </select>
+              </div>
+              <button class="wc-save" @click="saveComp(elFor(s.code)!)">save comp</button>
+            </div>
           </div>
         </div>
       </div>
@@ -225,6 +255,26 @@ onUnmounted(() => viewer?.destroy());
               </div>
               <div v-if="ri === wc.bracket.rounds.length - 1" class="cir-finmap">{{ wc.final.map }} · engine-simmed</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- the legacy: past winners + the manager / nation title boards -->
+      <div v-if="honors && (honors.history.length || honors.managers.length)" class="wc-honors">
+        <div class="cir-brackh">World Cup legacy · the trophy is the manager's <i>and</i> the team's</div>
+        <div class="wc-honcols">
+          <div class="wc-honcol">
+            <div class="wc-honh">🏆 Manager titles</div>
+            <div v-if="!honors.managers.length" class="wc-honempty">No human champion yet — win a World Cup to etch your name.</div>
+            <div v-for="(m, i) in honors.managers" :key="m.tag" class="wc-honrow"><i class="wc-honrank">{{ i + 1 }}</i><b>{{ m.tag }}</b><span class="wc-hont">{{ m.titles }}×</span></div>
+          </div>
+          <div class="wc-honcol">
+            <div class="wc-honh">🌍 Nation titles</div>
+            <div v-for="(n, i) in honors.nations" :key="n.code" class="wc-honrow"><i class="wc-honrank">{{ i + 1 }}</i><span class="wc-honflag">{{ n.flag }}</span><b>{{ n.country }}</b><span class="wc-hont">{{ n.titles }}×</span></div>
+          </div>
+          <div class="wc-honcol wc-honlog">
+            <div class="wc-honh">Past champions</div>
+            <div v-for="t in honors.history" :key="t.season" class="wc-honrow"><i class="wc-honrank">S{{ t.season }}</i><span class="wc-honflag">{{ t.flag }}</span><b>{{ t.code }}</b><span class="wc-honmgr">{{ t.managerTag ? '⚑ ' + t.managerTag : 'AI-led' }}</span></div>
           </div>
         </div>
       </div>

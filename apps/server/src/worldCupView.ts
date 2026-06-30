@@ -34,6 +34,7 @@ export interface WorldCupHooks {
   tacticsOf?: (code: string) => Tactics | undefined;
   managerOf?: (code: string) => string | null;
   lineupOf?: (code: string) => string[] | undefined;
+  compOf?: (code: string) => Record<string, string> | undefined;
 }
 
 export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, hooks: WorldCupHooks = {}): WorldCupView {
@@ -73,7 +74,7 @@ export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, h
   const snapshot = buildMatchInput({
     seed: last.seed, map, patch: w.patch,
     home: teamOf(last.a, fA.five), away: teamOf(last.b, fB.five),
-    tactics: [tacA, tacB], comp: [{}, {}],
+    tactics: [tacA, tacB], comp: [hooks.compOf?.(last.a.code) ?? {}, hooks.compOf?.(last.b.code) ?? {}],
   });
   const score = simulateMatch(snapshot, navOf(map), 0).finalScore;
   const champ = score[0] >= score[1] ? last.a : last.b;
@@ -82,12 +83,13 @@ export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, h
     season: w.season,
     squads: ev.field.map(s => {
       const { five, custom } = fieldedOf(s);
+      const comp = hooks.compOf?.(s.code);
       return {
         code: s.code, country: s.country, flag: s.flag, strength: Math.round(fiveStrength(five)), pool: s.pool,
         manager: hooks.managerOf?.(s.code) ?? null, custom,
         five: five.map(p => {
           const sr = soloRank(Math.round(overall(p)));
-          return { handle: p.handle, name: personOf(p.id).name, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl, agent: topAgentOf(p), solo: sr.label, soloTier: sr.tier };
+          return { handle: p.handle, name: personOf(p.id).name, role: p.role, overall: Math.round(overall(p)), igl: !!p.igl, agent: comp?.[p.id] ?? topAgentOf(p), solo: sr.label, soloTier: sr.tier };
         }),
       };
     }),

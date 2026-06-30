@@ -73,6 +73,12 @@ export interface NationElection {
   tactics?: Tactics;                                        // present only if you're the manager
   pool?: PoolPlayer[];                                       // the eligible pool (manager only)
   fielded?: string[];                                        // the current fielded five's ids (manager only)
+  comp?: Record<string, string>;                             // the manager's per-player agent picks
+}
+export interface WorldCupHonors {
+  history: { season: number; code: string; country: string; flag: string; managerTag: string | null; managerAccount: string | null }[];
+  managers: { tag: string; titles: number }[];
+  nations: { code: string; country: string; flag: string; titles: number }[];
 }
 export interface ElectionsView { nations: NationElection[]; you: string | null }
 
@@ -105,6 +111,12 @@ export class AceServer {
   setNationLineup(code: string, lineup: string[], token: string): Promise<{ ok: boolean }> {
     return fetch(`${this.base}/worldcup/${code}/lineup`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ lineup }) }).then(r => j<{ ok: boolean }>(r));
   }
+  /** As the elected manager, pick each player's agent (the comp). */
+  setNationComp(code: string, comp: Record<string, string>, token: string): Promise<{ ok: boolean }> {
+    return fetch(`${this.base}/worldcup/${code}/comp`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ comp }) }).then(r => j<{ ok: boolean }>(r));
+  }
+  /** The World Cup legacy — past champions (nation + manager) + the title boards. */
+  worldCupHonors(): Promise<WorldCupHonors> { return fetch(`${this.base}/worldcup/honors`).then(r => j<WorldCupHonors>(r)); }
   /** The Hall of Fame — season champions + all-time title leaders (the legacy engine). */
   honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }> {
     return fetch(`${this.base}/honors`).then(r => j<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>(r));
