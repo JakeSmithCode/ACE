@@ -31,12 +31,12 @@ const ALL_AGENTS = Object.values(ROLE_AGENTS).flat();
 // the full rank pyramid: DIVS tiers of DIV_SIZE clubs — the pro leagues at the
 // top, the solo-queue rank ladder below. N is the TOTAL world size. Only YOUR
 // tier is resolved by the full engine; the rest are quick-resolved by strength
-// (cheap + deterministic), so a 110-club world still sims a season in a blink.
+// (cheap + deterministic), so the whole world still sims a season in a blink.
 export const DIV_NAMES = ['Premier', 'Challengers', 'Radiant', 'Immortal', 'Ascendant', 'Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze', 'Iron'];
-export const DIV_SIZE = 10;
+export const DIV_SIZE = 16;             // a full 16-club division → a 30-match-day double round-robin
 export const DIVS = DIV_NAMES.length;   // 11
 export const PROMO = 2;                 // clubs promoted/relegated between tiers each season
-export const N = DIV_SIZE * DIVS;       // total clubs in the world (110)
+export const N = DIV_SIZE * DIVS;       // total clubs in the world (176)
 export const START_TIER = 7;            // you begin mid-table in Gold — a long climb to the Premier
 export const MAP: MapId = 'ascent';                 // the editor's map (your authored plays live here)
 // the competitive pool + per-fixture map picker now live in @ace/world (one source
@@ -66,7 +66,7 @@ const schedules = shallowRef<Matchday[][]>(divSchedules(division.value));  // on
 const lastMoves = ref<DivMove[]>([]);                // last off-season's promotions/relegations
 const results = ref<MatchResult[]>([]);
 const dayIdx = ref(0);
-const myClub = ref(START_TIER * DIV_SIZE + 5);   // start mid-table in Gold — a club to climb
+const myClub = ref(START_TIER * DIV_SIZE + 8);   // start mid-table in Gold — a club to climb
 const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // season-start snapshot, for roster deltas (set below)
 const myComp = ref<Comp>({});                          // your authored comp (overlay)

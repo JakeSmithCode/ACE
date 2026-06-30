@@ -128,7 +128,7 @@ export const clubTeam = (c: WorldClub): Team => ({ id: c.id, tag: c.tag, name: c
  *  (docs/PHASE2.md §3). The flat default (every tier one group) is byte-identical
  *  to before fan-out. */
 export function createWorld(seed: number, opts: { tiers?: number; size?: number; promo?: number; region?: string; layout?: number[] } = {}): WorldState {
-  const tiers = opts.tiers ?? 11, size = opts.size ?? 10, promo = opts.promo ?? 2;
+  const tiers = opts.tiers ?? 11, size = opts.size ?? 16, promo = opts.promo ?? 2;
   const layout = opts.layout ?? new Array<number>(tiers).fill(1);
   const n = layout.reduce((a, b) => a + b, 0) * size;
   const { tierOf, groupOf } = assignDivisions(layout, size, n);

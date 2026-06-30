@@ -10,8 +10,9 @@ const BASE_YEAR = 2025;                       // season 1 = 2025
 const MONTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SEASON_OPEN_DOY = 40;                   // competition opens ~9 Feb (day-of-year)
-const MATCH_GAP = 14;                         // a fixture roughly every 2 weeks — the season spans
-                                              // ~Feb→Oct so birthdays fall across the whole roster
+const MATCH_GAP = 9;                          // a fixture roughly every 9 days — a 30-match-day (16-club)
+                                              // season still spans ~Feb→late-Oct so birthdays fall across
+                                              // the whole roster and the dates stay inside the year
 
 export const seasonYear = (season: number): number => BASE_YEAR + season - 1;
 /** Calendar days a full season's competition spans (the "/ Y" in Day X / Y). */
