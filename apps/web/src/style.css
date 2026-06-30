@@ -1114,6 +1114,24 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .wc-psolo{font-family:var(--label);font-size:8.5px;letter-spacing:.02em;padding:1px 5px;border:1px solid currentColor;border-radius:3px;opacity:.85}
 .wc-povr{font-family:var(--display);font-size:15px;min-width:22px;text-align:right}
 .wc-bflag{font-size:13px;font-style:normal;margin-right:2px}
+/* World Cup group stage */
+.wc-groups{margin:6px 0 22px}
+.wc-grpgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:11px}
+@media(max-width:1100px){.wc-grpgrid{grid-template-columns:repeat(2,1fr)}}
+.wc-grp{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:10px 12px}
+.wc-grph{font-family:var(--display);font-size:14px;letter-spacing:.02em;color:var(--text);margin-bottom:7px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.wc-grprow{display:grid;grid-template-columns:18px 1fr 20px 20px 36px 26px;align-items:center;gap:5px;padding:4px 0;font-size:12px;font-variant-numeric:tabular-nums}
+.wc-grprow>span:not(.wc-gnat):not(.wc-gpos){text-align:center;color:var(--muted)}
+.wc-grphead{font-family:var(--label);font-size:8.5px;letter-spacing:.05em;color:var(--muted-2);border-bottom:1px solid var(--line);padding-bottom:5px}
+.wc-grphead>span{text-align:center}
+.wc-gpos{font-family:var(--label);font-size:10px;color:var(--muted-2);text-align:center}
+.wc-gnat{display:flex;align-items:center;gap:6px;min-width:0;text-align:left}
+.wc-gnat b{font-family:var(--display);font-size:13px}.wc-gflag{font-size:14px}
+.wc-gpts{color:var(--text)!important;font-family:var(--display);font-weight:700}
+.wc-grprow.through{background:rgba(74,222,128,.07)}
+.wc-grprow.through .wc-gpos{color:var(--win)}
+.wc-grprow.through .wc-gnat b{color:var(--win)}
+.wc-grprow .pos{color:var(--win)!important}.wc-grprow .neg{color:var(--def)!important}
 /* national-team manager election (campaign for the armband) */
 .wc-elect{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
 .wc-mgr{display:flex;align-items:center;gap:7px;font-size:11px}

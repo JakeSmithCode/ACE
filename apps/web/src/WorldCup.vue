@@ -238,9 +238,27 @@ onUnmounted(() => viewer?.destroy());
       </div>
       <div v-if="voteMsg" class="wc-votemsg">{{ voteMsg }}</div>
 
+      <!-- the group stage (a drawn round-robin; top two of each advance) -->
+      <div v-if="wc.groups.length" class="wc-groups">
+        <div class="cir-brackh">Group stage · {{ wc.groups.length }} groups · top two advance to the knockout</div>
+        <div class="wc-grpgrid">
+          <div v-for="grp in wc.groups" :key="grp.name" class="wc-grp">
+            <div class="wc-grph">Group {{ grp.name }}</div>
+            <div class="wc-grprow wc-grphead"><span class="wc-gpos"></span><span class="wc-gnat">Nation</span><span>W</span><span>L</span><span>+/−</span><span>Pts</span></div>
+            <div v-for="(r, i) in grp.rows" :key="r.code" class="wc-grprow" :class="{ through: r.through }">
+              <span class="wc-gpos">{{ i + 1 }}</span>
+              <span class="wc-gnat"><span class="wc-gflag">{{ r.flag }}</span><b>{{ r.code }}</b></span>
+              <span>{{ r.w }}</span><span>{{ r.l }}</span>
+              <span :class="r.rd >= 0 ? 'pos' : 'neg'">{{ r.rd >= 0 ? '+' : '' }}{{ r.rd }}</span>
+              <span class="wc-gpts">{{ r.pts }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- the bracket -->
       <div class="cir-brackwrap">
-        <div class="cir-brackh">World Cup bracket · {{ wc.bracket.field.length }} nations · single elimination</div>
+        <div class="cir-brackh">Knockout · {{ wc.bracket.field.length }} qualifiers · single elimination</div>
         <div class="cir-brack">
           <div v-for="(round, ri) in wc.bracket.rounds" :key="ri" class="cir-col">
             <div class="cir-colh">{{ roundName(ri, wc.bracket.rounds.length) }}</div>

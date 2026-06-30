@@ -19,6 +19,7 @@ export interface WorldCupView {
     code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; custom: boolean;
     five: { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }[];
   }[];
+  groups: { name: string; rows: { code: string; country: string; flag: string; w: number; l: number; rd: number; pts: number; through: boolean }[] }[];
   bracket: {
     field: { code: string; country: string; flag: string }[];
     rounds: { round: number; a: { code: string; country: string; flag: string }; b: { code: string; country: string; flag: string }; winner: { code: string; country: string; flag: string } }[][];
@@ -40,8 +41,13 @@ export interface WorldCupHooks {
 export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, hooks: WorldCupHooks = {}): WorldCupView {
   const seed = (w.seed ^ (w.season * 0x9e3779b1)) >>> 0;
   const squads = nationalSquads(w);
-  const ev = worldCup(squads, { seed, slots: 8 });
+  const ev = worldCup(squads, { seed });
   const pools = nationPools(w);
+  // the group stage: each group's table (top 2 `through`)
+  const groups = ev.groups.map(gr => ({
+    name: gr.name,
+    rows: gr.rows.map((r, i) => ({ code: r.squad.code, country: r.squad.country, flag: r.squad.flag, w: r.w, l: r.l, rd: r.rf - r.ra, pts: r.pts, through: i < 2 })),
+  }));
 
   // the five a nation actually fields: the elected manager's chosen lineup if it's a valid
   // pick from the pool, else the default best five (so seeding stays on the talent ceiling
@@ -93,6 +99,7 @@ export function buildWorldCupView(w: WorldState, navOf: (m: MapId) => Navmesh, h
         }),
       };
     }),
+    groups,
     bracket: { field: ev.field.map(side), rounds, champion: side(champ) },
     final: { a: side(last.a), b: side(last.b), map, score, seed: last.seed, snapshot },
   };

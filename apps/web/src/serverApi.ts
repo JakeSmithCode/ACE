@@ -57,9 +57,11 @@ export interface CircuitView {
 
 export interface WCSide { code: string; country: string; flag: string }
 export interface WCPlayer { handle: string; name: string; role: string; overall: number; igl: boolean; agent: string; solo: string; soloTier: string }
+export interface WCGroupRow { code: string; country: string; flag: string; w: number; l: number; rd: number; pts: number; through: boolean }
 export interface WorldCupView {
   season: number;
   squads: { code: string; country: string; flag: string; strength: number; pool: number; manager: string | null; custom: boolean; five: WCPlayer[] }[];
+  groups: { name: string; rows: WCGroupRow[] }[];
   bracket: { field: WCSide[]; rounds: { round: number; a: WCSide; b: WCSide; winner: WCSide }[][]; champion: WCSide };
   final: { a: WCSide; b: WCSide; map: MapId; score: [number, number]; seed: number; snapshot: MatchInput };
 }
