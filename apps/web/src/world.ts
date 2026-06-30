@@ -12,6 +12,7 @@ import {
   shouldRetire, clubPhase, clubAgeChar,
   startingBalance, freeAgents, playerValue, squadRating, overall, aiListings, aiWantsToBuy, topRivalBid, aiRating, SCOUT_MAX,
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf, playoffPrize,
+  createCup, drawCup, cupByes, cupRoundName, CUP_DAYS, CUP_PRIZE, CUP_NAME, type CupState, type CupTie,
   membersOf, divisionSchedule, promoteRelegate,
   buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity, MAP_POOL, fixtureMap,
   contractWage, demandWage, newContract, CONTRACT_YEARS,
@@ -104,6 +105,11 @@ const metaChanges = ref<MetaChange[]>([]);             // last off-season's patc
 const playoffs = shallowRef<Bracket | null>(null);    // this season's bracket (null until the regular season ends)
 const myPromoPlayoff = shallowRef<PromoPlayoff | null>(null);  // your promotion/relegation playoff at last rollover (watchable)
 const titles = ref<number[]>(clubs.value.map(() => 0));  // career championships per club
+// the domestic cup — every club entered, open draw, runs alongside the league season
+const cup = shallowRef<CupState | null>(null);
+const myCupTie = shallowRef<CupTie | null>(null);          // your tie in the latest cup round (watchable)
+const cupTitles = ref<number[]>(clubs.value.map(() => 0)); // cup wins per club (the silverware tally)
+const lastCupResult = ref<{ kind: 'win' | 'out' | 'bye' | 'champion'; round: string; opp: number; giant: boolean } | null>(null);
 const forcedStart = ref<Set<string>>(new Set());       // manual lineup: pinned to the XI
 const forcedBench = ref<Set<string>>(new Set());       // manual lineup: pinned to reserves
 const facilities = ref<Facilities>(defaultFacilities());  // your HQ rooms (boost YOUR roster's development)
@@ -272,7 +278,7 @@ const awardsHistory = ref<SeasonAwards[]>([]);
 // One record per season managed, accumulated at the rollover: where you finished, whether
 // you lifted the title (playoff champion), won promotion or were relegated, and met the
 // board's brief. The Trophy Room aggregates this into a silverware cabinet + a legacy.
-type CareerSeason = { season: number; tier: number; divName: string; finish: number; champion: boolean; promoted: boolean; relegated: boolean; objMet: boolean };
+type CareerSeason = { season: number; tier: number; divName: string; finish: number; champion: boolean; promoted: boolean; relegated: boolean; objMet: boolean; cup?: boolean };
 const careerLog = ref<CareerSeason[]>([]);
 function seasonAwards(): SeasonAwards | null {
   const d = division.value[myClub.value];
@@ -698,8 +704,62 @@ function simFixture(fx: { home: number; away: number }, seed: number, map: MapId
 // deterministic, plausible, never watched; your own tier always full-sims
 const quickFixture = (fx: { home: number; away: number }, seed: number): MatchResult =>
   quickResultPure(fx.home, fx.away, clubs.value[fx.home].strength, clubs.value[fx.away].strength, seed);
+
+// ── The domestic cup ────────────────────────────────────────────────────────
+// Every club is entered; the draw is open each round (its OWN rng stream, so it never
+// perturbs the league/world streams). YOUR tie full-sims (watchable, your tactics drive
+// it); the rest quick-resolve, so a giant-killing is the engine's verdict, not a script.
+function ensureCup() {
+  if (cup.value && cup.value.season === season.value) return;
+  cup.value = createCup(clubs.value.map((_, i) => i), season.value);
+  myCupTie.value = null; lastCupResult.value = null;
+}
+// when the just-played league match-day hits a cup round's day, draw + resolve that round
+function maybeResolveCupRound(playedMatchday: number) {
+  const c = cup.value;
+  if (!c || c.champion != null || c.nextRound >= CUP_DAYS.length) return;
+  if (playedMatchday !== CUP_DAYS[c.nextRound]) return;
+  const round = c.nextRound;
+  const entering = c.alive.length;
+  const byeCount = round === 0 ? cupByes(entering) : 0;
+  const drawSeed = (seasonSeed.value ^ (season.value * 0x9e3779b1) ^ ((round + 1) * 0x2545f491)) >>> 0;
+  const { pairs, byes } = drawCup(c.alive, byeCount, i => clubs.value[i].strength, drawSeed);
+  const ties: CupTie[] = pairs.map(([home, away], slot) => {
+    const seed = (drawSeed ^ ((slot + 1) * 0x27d4eb2f)) >>> 0;
+    const mine = home === myClub.value || away === myClub.value;
+    const result = mine ? simFixture({ home, away }, seed) : quickFixture({ home, away }, seed);
+    return { round, slot, home, away, seed, result };
+  });
+  const alive = [...byes, ...ties.map(t => t.result!.winner)];
+  const champion = alive.length === 1 ? alive[0] : null;
+  cup.value = { ...c, rounds: [...c.rounds, { round, matchday: CUP_DAYS[round], entering, ties, byes }], alive, nextRound: round + 1, champion };
+  // your fate this round → prize + a banner. Winning/advancing banks the round prize; a
+  // win over a higher division is flagged a GIANT-KILLING (or noted when YOU are the giant).
+  // Keep `myCupTie` as your last PLAYED tie (so you can still rewatch the one you went out on).
+  const me = myClub.value;
+  const mine = ties.find(t => t.home === me || t.away === me) ?? null;
+  if (mine) myCupTie.value = mine;
+  const roundName = cupRoundName(entering);
+  const oppOf = (t: CupTie) => t.home === me ? t.away : t.home;
+  if (champion === me) {
+    cupTitles.value = cupTitles.value.map((t, i) => i === me ? t + 1 : t);
+    balances.value = balances.value.map((b, i) => i === me ? b + CUP_PRIZE[round] : b);
+    lastCupResult.value = { kind: 'champion', round: roundName, opp: mine ? oppOf(mine) : me, giant: false };
+  } else if (mine && mine.result!.winner === me) {
+    const opp = oppOf(mine);
+    balances.value = balances.value.map((b, i) => i === me ? b + CUP_PRIZE[round] : b);
+    lastCupResult.value = { kind: 'win', round: roundName, opp, giant: division.value[opp] < division.value[me] };
+  } else if (mine) {
+    const opp = oppOf(mine);
+    lastCupResult.value = { kind: 'out', round: roundName, opp, giant: division.value[opp] > division.value[me] };
+  } else if (byes.includes(me)) {
+    lastCupResult.value = { kind: 'bye', round: roundName, opp: me, giant: false };
+  }
+}
 function resolveDay() {
   if (done.value || !navReady) return;
+  ensureCup();
+  const playedMatchday = dayIdx.value;   // the match-day about to resolve (cup rounds key off it)
   // the whole world advances each match-day (shared `resolveWorldDay`): your tier
   // full-sims (watchable), every other tier is quick-resolved by strength
   const fresh = resolveWorldDay({
@@ -707,6 +767,7 @@ function resolveDay() {
     full: d => d === myDivision.value, sim: simFixture, quick: quickFixture,
   });
   results.value = [...results.value, ...fresh];
+  maybeResolveCupRound(playedMatchday);   // a cup round falls on this match-day → draw + resolve it
   // in-season development of YOUR squad: the five who played grow (reps), the
   // reserves grow less and rust — so playing a prospect develops him
   const fiveIds = new Set(clubs.value[myClub.value].team.players.map(p => p.id));
@@ -840,7 +901,7 @@ function advanceSeason() {
     champion: bracket?.champion === myClub.value,
     promoted: !!myMove && division.value[myClub.value] < myMove.from,
     relegated: !!myMove && division.value[myClub.value] > myMove.from,
-    objMet,
+    objMet, cup: cup.value?.champion === myClub.value,
   }, ...careerLog.value];
   // snapshot (whole roster) for deltas, then develop the league + your reserves
   prevById.value = snapRosters();
@@ -876,6 +937,7 @@ function advanceSeason() {
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;   // the off-season heals everyone
   camp.value = null;               // a fresh pre-season camp choice for the new campaign
   runIntake();                     // the new season's academy class arrives
+  ensureCup();                     // a fresh ACE Cup for the new season (every club re-entered)
   results.value = []; dayIdx.value = 0;
   playoffs.value = null;           // a fresh bracket awaits next season's end
   const freed = resolveAiFreeAgency(rng);   // AI free-agency wave — strained clubs leak talent
@@ -920,11 +982,11 @@ function selectClub(i: number) {
   listings.value = aiListings(clubs.value, i, marketEligible());
   myListed.value = new Set();
   forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
-  playoffs.value = null; myPromoPlayoff.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
+  playoffs.value = null; myPromoPlayoff.value = null; cup.value = null; myCupTie.value = null; lastCupResult.value = null; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); staff.value = {}; retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   syncLineup();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; careerLog.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); ensureCup(); lastAwards.value = null; awardsHistory.value = []; careerLog.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
 }
 function newWorld(s = Math.floor(Math.random() * 100000)) {
   seasonSeed.value = s;
@@ -942,10 +1004,11 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   patch.value = fullPatch(PATCH, ALL_AGENTS); metaChanges.value = [];
   forcedStart.value = new Set(); forcedBench.value = new Set(); customHandles.value = new Map();
   playoffs.value = null; myPromoPlayoff.value = null; titles.value = clubs.value.map(() => 0);
+  cup.value = null; myCupTie.value = null; lastCupResult.value = null; cupTitles.value = clubs.value.map(() => 0);
   staff.value = {}; facilities.value = defaultFacilities(); academy.value = defaultAcademy(); retirements.value = []; contractDepartures.value = []; marketWave.value = []; scouted.value = new Map();
   objective.value = computeObjective(); objectiveOutcome.value = null;
   fatigue.value = new Map(); injuries.value = new Map(); lastInjury.value = null; morale.value = new Map(); teamTalk.value = null;
-  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); lastAwards.value = null; awardsHistory.value = []; careerLog.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
+  rivalId.value = null; derbyRecord.value = { w: 0, l: 0 }; lastDerby.value = null; ensureRival(); ensureCup(); lastAwards.value = null; awardsHistory.value = []; careerLog.value = []; boardConfidence.value = 60; sacked.value = false; sponsor.value = null; lastSponsorPay.value = null; camp.value = null; captainId.value = null; tacticPresets.value = [];
   refreshMarket();
 }
 
@@ -1285,6 +1348,7 @@ function snapshot() {
     titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value, myPromoPlayoff: myPromoPlayoff.value,
+    cup: cup.value, myCupTie: myCupTie.value, cupTitles: cupTitles.value, lastCupResult: lastCupResult.value,
     forcedStart: [...forcedStart.value], forcedBench: [...forcedBench.value], customHandles: [...customHandles.value.entries()], facilities: facilities.value, academy: academy.value,
     retirements: retirements.value, contractDepartures: contractDepartures.value, marketWave: marketWave.value, scouted: [...scouted.value.entries()],
     prevById: [...prevById.value.entries()], objectiveOutcome: objectiveOutcome.value,
@@ -1311,6 +1375,7 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   myComp.value = o.myComp; myTactics.value = o.myTactics; myRoster.value = o.myRoster;
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
   patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs; myPromoPlayoff.value = o.myPromoPlayoff ?? null;
+  cup.value = o.cup ?? null; myCupTie.value = o.myCupTie ?? null; cupTitles.value = o.cupTitles ?? clubs.value.map(() => 0); lastCupResult.value = o.lastCupResult ?? null;
   forcedStart.value = new Set(o.forcedStart); forcedBench.value = new Set(o.forcedBench);
   customHandles.value = new Map((o as { customHandles?: [string, string][] }).customHandles ?? []);
   facilities.value = o.facilities ?? defaultFacilities();   // default for pre-facilities saves
@@ -1346,6 +1411,7 @@ function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ign
 const _saved = loadSave();
 if (_saved) { hydrate(_saved); hasSave.value = true; }
 ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't carry one
+ensureCup();     // open this season's ACE Cup if a fresh start / older save didn't carry one
 
 // autosave: the store reassigns these refs immutably on every change, so a
 // shallow watch catches them all. Debounced so a fast "sim to end" (many
@@ -1353,7 +1419,7 @@ ensureRival();   // pick your rival if a fresh start / a pre-rivalry save didn't
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
-    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, myPromoPlayoff, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
+    myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, myPromoPlayoff, cup, myCupTie, cupTitles, lastCupResult, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
 
@@ -1361,7 +1427,7 @@ export function useWorld() {
   return {
     N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, MAP_POOL, fixtureMap, navOf, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
     myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
-    playoffs, myPromoPlayoff, titles, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
+    playoffs, myPromoPlayoff, titles, cup, myCupTie, cupTitles, lastCupResult, cupName: CUP_NAME, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,

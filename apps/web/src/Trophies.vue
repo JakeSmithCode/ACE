@@ -10,6 +10,7 @@ const log = computed(() => w.careerLog.value);
 const seasons = computed(() => log.value.length);
 const titles = computed(() => log.value.filter(s => s.champion));
 const promotions = computed(() => log.value.filter(s => s.promoted));
+const cups = computed(() => log.value.filter(s => s.cup));
 const briefs = computed(() => log.value.filter(s => s.objMet).length);
 const relegations = computed(() => log.value.filter(s => s.relegated).length);
 // best league finish + highest tier reached across the career (lower tier index = higher)
@@ -48,6 +49,11 @@ const empty = computed(() => !log.value.length);
           <div class="tr-cabicon">🏆</div>
           <div class="tr-cabn">{{ titles.length }}</div>
           <div class="tr-cabl">League title{{ titles.length === 1 ? '' : 's' }}</div>
+        </div>
+        <div class="tr-cab gold" :class="{ on: cups.length }">
+          <div class="tr-cabicon">🏆</div>
+          <div class="tr-cabn">{{ cups.length }}</div>
+          <div class="tr-cabl">{{ w.cupName }}{{ cups.length === 1 ? '' : 's' }}</div>
         </div>
         <div class="tr-cab green" :class="{ on: promotions.length }">
           <div class="tr-cabicon">▲</div>
@@ -94,6 +100,7 @@ const empty = computed(() => !log.value.length);
           <span class="tr-finish">finished {{ ord(s.finish) }}</span>
           <span class="tr-badges">
             <i v-if="s.champion" class="tr-badge champ" title="playoff champion">🏆 Champions</i>
+            <i v-if="s.cup" class="tr-badge champ" :title="`${w.cupName} winners`">🏆 {{ w.cupName }}</i>
             <i v-if="s.promoted" class="tr-badge promo" title="promoted">▲ Promoted</i>
             <i v-if="s.relegated" class="tr-badge releg" title="relegated">▼ Relegated</i>
             <i v-if="s.objMet" class="tr-badge brief" title="board objective met">✓ Brief</i>

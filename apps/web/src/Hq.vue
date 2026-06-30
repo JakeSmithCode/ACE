@@ -19,6 +19,7 @@ import { useWorld } from './world';
 const w = useWorld();
 const { clubs, myClub, season, myComp, balance, ledger,
   total, done, dayIdx, myStanding, myResults, nextFixture, playoffs, myPromoPlayoff, titles,
+  cup, myCupTie, lastCupResult, cupName,
   myDivision, division, lastMoves, objective, objectiveMet, objectiveRank, objectiveOutcome } = w;
 const N = w.N;
 const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_SIZE;
@@ -26,6 +27,56 @@ const DIV_NAMES = w.DIV_NAMES, DIVS = w.DIVS, PROMO = w.PROMO, DIV_SIZE = w.DIV_
 // playoff helpers
 const seedNo = (c: number) => (playoffs.value ? playoffs.value.qualified.indexOf(c) + 1 : 0);
 const titleCount = (i: number) => titles.value[i] ?? 0;
+
+// ── domestic cup (the ACE Cup) — runs alongside the league ──
+const cupRoundName = (n: number) => n <= 2 ? 'Final' : n <= 4 ? 'Semi-finals' : n <= 8 ? 'Quarter-finals' : `Round of ${n}`;
+const cupIn = computed(() => !!cup.value && cup.value.alive.includes(myClub.value));
+const cupDivTag = (i: number) => DIV_NAMES[division.value[i]];
+// where you stand: champions / through to the next round / knocked out / entered
+const cupStatus = computed(() => {
+  const c = cup.value; if (!c) return null;
+  if (c.champion === myClub.value) return { cls: 'champ', text: `🏆 Champions — you won the ${cupName}!` };
+  if (c.champion != null) return { cls: 'out', text: `Won by ${tagOf(c.champion)} — your run ended earlier` };
+  if (cupIn.value) return { cls: 'in', text: c.rounds.length ? `Through to the ${cupRoundName(c.alive.length)}` : 'Entered — the first-round draw awaits' };
+  // knocked out: find your losing tie
+  for (let r = c.rounds.length - 1; r >= 0; r--) {
+    const t = c.rounds[r].ties.find(x => x.home === myClub.value || x.away === myClub.value);
+    if (t && t.result && t.result.winner !== myClub.value) {
+      const opp = t.home === myClub.value ? t.away : t.home;
+      return { cls: 'out', text: `Knocked out in the ${cupRoundName(c.rounds[r].entering)} by ${tagOf(opp)}` };
+    }
+  }
+  return { cls: 'in', text: 'Entered' };
+});
+// the round about to be drawn (null once the cup is decided)
+const cupNextName = computed(() => {
+  const c = cup.value; if (!c || c.champion != null || c.nextRound >= 8) return null;
+  return cupRoundName(c.alive.length);
+});
+// giant-killings in the latest round — a lower-division club knocking out a higher one
+const cupUpsets = computed(() => {
+  const c = cup.value; if (!c || !c.rounds.length) return [];
+  const last = c.rounds[c.rounds.length - 1];
+  return last.ties
+    .filter(t => t.result && division.value[t.result.winner] > division.value[t.result.winner === t.home ? t.away : t.home])
+    .map(t => ({ w: t.result!.winner, l: t.result!.winner === t.home ? t.away : t.home }))
+    .sort((a, b) => (division.value[b.w] - division.value[b.l]) - (division.value[a.w] - division.value[a.l]))
+    .slice(0, 4);
+});
+// the business end (QF onward) — show the latest round's ties in full
+const cupLate = computed(() => {
+  const c = cup.value; if (!c || !c.rounds.length) return null;
+  const last = c.rounds[c.rounds.length - 1];
+  return last.entering <= 8 ? last : null;
+});
+// a celebratory "moment" line for the dramatic results
+const cupMoment = computed(() => {
+  const r = lastCupResult.value; if (!r) return null;
+  if (r.kind === 'champion') return null;   // the status line already crowns you
+  if (r.kind === 'win' && r.giant) return { cls: 'gk', text: `⚡ Giant-killing — you dumped ${tagOf(r.opp)} (${cupDivTag(r.opp)}) out of the ${cupName}` };
+  if (r.kind === 'out' && r.giant) return { cls: 'shock', text: `✗ Cup shock — ${tagOf(r.opp)} (${cupDivTag(r.opp)}) knocked you out` };
+  return null;
+});
 
 // promotion-playoff outcome relative to YOUR club (set during the off-season rollover)
 const ppOutcome = computed(() => {
@@ -348,6 +399,42 @@ onUnmounted(() => { viewer?.destroy(); });
         </div>
       </div>
       <div class="hq-compnote">After the title playoffs, the <b>3rd–4th</b> of {{ DIV_NAMES[myPromoPlayoff.boundary + 1] }} challenge the <b>13th–14th</b> of {{ DIV_NAMES[myPromoPlayoff.boundary] }} for the last two spots up top. <b>Both semifinal winners go up; both losers go down</b> (the final is for the playoff trophy). Click any <b>G</b> to watch — your tactics drove your games.</div>
+    </div>
+
+    <!-- the domestic cup — every club in, open draw, runs alongside the league -->
+    <div v-if="cup && !playoffs" class="hq-panel hq-cup">
+      <h3><span class="b"></span>{{ cupName }}
+        <span class="rs-sub">open knockout · all {{ N }} clubs{{ cupNextName ? ` · next: ${cupNextName}` : cup.champion != null ? ` · won by ${tagOf(cup.champion)}` : '' }}</span>
+      </h3>
+      <div v-if="cupMoment" class="cup-moment" :class="cupMoment.cls">{{ cupMoment.text }}</div>
+      <div v-if="cupStatus" class="cup-status" :class="cupStatus.cls">{{ cupStatus.text }}</div>
+      <!-- your latest tie, watchable -->
+      <div v-if="myCupTie && myCupTie.result" class="cup-mytie">
+        <span class="cup-side" :class="{ win: myCupTie.result.winner === myCupTie.home }">
+          <i class="hq-dot" :style="{ background: `hsl(${hue(myCupTie.home)} 65% 55%)` }"></i>{{ tagOf(myCupTie.home) }}<em>{{ cupDivTag(myCupTie.home) }}</em>
+        </span>
+        <b class="cup-score">{{ myCupTie.result.score[0] }}–{{ myCupTie.result.score[1] }}</b>
+        <span class="cup-side rt" :class="{ win: myCupTie.result.winner === myCupTie.away }">
+          <em>{{ cupDivTag(myCupTie.away) }}</em>{{ tagOf(myCupTie.away) }}<i class="hq-dot" :style="{ background: `hsl(${hue(myCupTie.away)} 65% 55%)` }"></i>
+        </span>
+        <button class="po-game cup-watch" @click="watch(myCupTie.result!)" title="watch your cup tie">▷ watch</button>
+      </div>
+      <!-- giant-killings around the world this round -->
+      <div v-if="cupUpsets.length" class="cup-upsets">
+        <span class="cup-uh">⚡ Giant-killings</span>
+        <span v-for="(u, i) in cupUpsets" :key="i" class="cup-upset"><b>{{ tagOf(u.w) }}</b> <em>{{ cupDivTag(u.w) }}</em> ▸ {{ tagOf(u.l) }} <em>{{ cupDivTag(u.l) }}</em></span>
+      </div>
+      <!-- the business end (QF onward): the latest round's ties in full -->
+      <div v-if="cupLate" class="cup-late">
+        <div class="cup-lateh">{{ cupRoundName(cupLate.entering) }}</div>
+        <div v-for="(t, i) in cupLate.ties" :key="i" class="cup-latetie" :class="{ me: t.home === myClub || t.away === myClub }">
+          <span :class="{ win: !!t.result && t.result.winner === t.home }">{{ tagOf(t.home) }}</span>
+          <b v-if="t.result">{{ t.result.score[0] }}–{{ t.result.score[1] }}</b><b v-else>vs</b>
+          <span :class="{ win: !!t.result && t.result.winner === t.away }">{{ tagOf(t.away) }}</span>
+        </div>
+      </div>
+      <div v-if="cup.champion != null" class="po-champ" :class="{ me: cup.champion === myClub }">🏆 {{ cname(cup.champion) }} — {{ cupName }} winners</div>
+      <div class="hq-compnote">Every club in the world is in the <b>{{ cupName }}</b> — an <b>open draw</b> each round, so a lower-division side that survives can draw (and dump out) a giant. Your ties full-sim with your tactics; click <b>▷ watch</b> to see them. A deep run banks real prize money.</div>
     </div>
 
     <div class="hq-grid">
