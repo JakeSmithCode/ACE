@@ -500,11 +500,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       req.on('close', () => clearInterval(timer));
       return;
     }
-    // GET /clubs/:slug  → public club page (read-only, no embargo)
+    // GET /clubs/:slug  → public club PROFILE: identity + the fielded five + how the club
+    // RANKS (world power rank, division, infra) + its legacy (titles, intl, World Cup
+    // manager honors). The showcase a rival scouts you by. Read-only, no embargo.
     if (path[0] === 'clubs' && path.length === 2 && (req.method ?? 'GET') === 'GET') {
       const w = (await store.loadWorld(id))!;
       const c = w.clubs.find(x => x.tag.toLowerCase() === path[1].toLowerCase());
-      return c ? json(res, 200, publicClub(w, c)) : json(res, 404, { error: 'no such club' });
+      if (!c) return json(res, 404, { error: 'no such club' });
+      const ranked = topClubs(w, w.clubs.length);   // every club, by squad power
+      const row = ranked.find(r => r.tag === c.tag);
+      return json(res, 200, {
+        ...publicClub(w, c),
+        division: tierName(c.tier),
+        power: row?.power ?? Math.round(c.strength * 100),
+        powerRank: row?.rank ?? null, totalClubs: w.clubs.length,
+        infra: row?.infra ?? 0,
+        wcTitles: worldCupHistory.filter(t => t.managerTag === c.tag).length,
+      });
     }
     // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)
     if (path[0] === 'standings' && path.length === 4) {

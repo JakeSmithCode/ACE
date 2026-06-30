@@ -1230,7 +1230,32 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-badge.clickable:hover{filter:brightness(1.25)}
 .lv-cname.clickable:hover{color:var(--brand)}
 .lv-clubmodal{position:fixed;inset:0;z-index:50;background:rgba(8,12,18,.72);display:grid;place-items:center;padding:20px}
-.lv-clubcard{position:relative;width:min(440px,92vw);background:var(--bg-2);border:1px solid var(--line-2);clip-path:var(--bevel);padding:22px 24px}
+.lv-clubcard{position:relative;width:min(480px,93vw);max-height:92vh;overflow-y:auto;background:var(--bg-2);border:1px solid var(--line-2);clip-path:var(--bevel);padding:22px 24px}
+/* crest hero */
+.lv-clubhero{display:flex;align-items:center;gap:15px;margin-bottom:15px;padding-bottom:15px;border-bottom:1px solid var(--line)}
+.lv-crest{width:60px;height:64px;flex:0 0 auto;display:grid;place-items:center;border:2px solid var(--cc);clip-path:polygon(50% 0,100% 26%,100% 74%,50% 100%,0 74%,0 26%);box-shadow:0 0 22px -6px var(--cc)}
+.lv-cresttag{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.01em;color:#fff}
+.lv-clubid{display:flex;flex-direction:column;gap:5px;min-width:0}
+.lv-clubtags{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lv-clubdiv{font-family:var(--label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cc);font-weight:600}
+.lv-stars{font-size:12px;color:var(--gold);letter-spacing:1px}.lv-stars i{color:var(--line-2);font-style:normal}
+.lv-owntag{font-family:var(--label);font-size:9px;letter-spacing:.06em;color:var(--brand);border:1px solid rgba(34,211,238,.4);padding:1px 5px;border-radius:3px}
+.lv-aitag{font-family:var(--label);font-size:9px;letter-spacing:.06em;color:var(--muted-2);border:1px solid var(--line-2);padding:1px 5px;border-radius:3px}
+/* stat strip — how good + how they rank */
+.lv-clubstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);clip-path:var(--bevel);margin-bottom:13px}
+.lv-cstat{background:var(--bg-3);padding:10px 8px;text-align:center;display:flex;flex-direction:column;gap:3px}
+.lv-cstat>b{font-family:var(--display);font-size:22px;line-height:1;color:var(--text)}
+.lv-cstat>span{font-family:var(--label);font-size:8px;letter-spacing:.08em;color:var(--muted-2)}
+.lv-cstat>span i{font-style:normal;color:var(--gold)}
+.lv-trophyn{color:var(--gold)!important}
+.lv-hqpips{display:flex;gap:2px;justify-content:center;height:22px;align-items:center}
+.lv-hqpips i{width:7px;height:7px;background:var(--bg-2);border:1px solid var(--line-2);transform:rotate(45deg)}
+.lv-hqpips i.on{background:var(--brand);border-color:var(--brand)}
+/* the cabinet */
+.lv-honstrip{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.lv-hon{font-family:var(--label);font-size:10px;letter-spacing:.03em;color:var(--muted);background:var(--bg-3);border:1px solid var(--line-2);padding:3px 9px;clip-path:var(--bevel)}
+.lv-hon b{color:var(--text);font-family:var(--display);font-size:12px}
+.lv-hon.gold{border-color:rgba(245,200,92,.45)}.lv-hon.gold b{color:var(--gold)}
 .lv-clubx{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted-2);font-size:16px;cursor:pointer}
 .lv-clubx:hover{color:var(--text)}
 .lv-clubhead{display:flex;align-items:center;gap:14px;margin-bottom:18px}

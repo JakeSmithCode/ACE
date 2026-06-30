@@ -508,6 +508,9 @@ async function openClub(slug: string) {
   catch (e) { errMsg.value = (e as Error).message; } finally { clubBusy.value = false; }
 }
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
+// club-profile readouts: a star tier from squad power, and the world-rank percentile
+const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55) / 7)));   // ~55→1★ .. ~90→5★
+const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.max(1, Math.round((rank / total) * 100)) : null);
 
 onMounted(connect);
 onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); });
@@ -993,14 +996,34 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
     <div v-if="clubModal" class="lv-clubmodal" @click.self="clubModal = null">
       <div class="lv-clubcard">
         <button class="lv-clubx" @click="clubModal = null">✕</button>
-        <div class="lv-clubhead">
-          <i class="lv-badge id" :style="{ background: `hsl(${hue(clubModal.tag)} 60% 24%)`, borderColor: `hsl(${hue(clubModal.tag)} 65% 55%)` }">{{ clubModal.tag }}</i>
-          <div class="lv-clubmeta">
+        <!-- crest hero: the club's identity -->
+        <div class="lv-clubhero" :style="{ '--cc': `hsl(${hue(clubModal.tag)} 66% 56%)` }">
+          <div class="lv-crest" :style="{ background: `linear-gradient(150deg, hsl(${hue(clubModal.tag)} 55% 26%), hsl(${hue(clubModal.tag)} 50% 16%))`, borderColor: `hsl(${hue(clubModal.tag)} 66% 56%)` }">
+            <span class="lv-cresttag">{{ clubModal.tag }}</span>
+          </div>
+          <div class="lv-clubid">
             <b class="lv-clubname">{{ clubModal.name }}</b>
-            <span class="lv-clubsub">{{ tierName(clubModal.tier) }} · {{ clubModal.rating }} OVR · {{ clubModal.owned ? 'human-owned' : 'AI-run' }}<template v-if="clubModal.titles"> · {{ '🏆'.repeat(Math.min(5, clubModal.titles)) }}</template><template v-if="clubModal.intlTitles"> · <span class="lv-intl" title="international (Masters) titles">🌐×{{ clubModal.intlTitles }}</span></template></span>
+            <div class="lv-clubtags">
+              <span class="lv-clubdiv">{{ clubModal.division || tierName(clubModal.tier) }}</span>
+              <span class="lv-stars" :title="`squad quality`">{{ '★'.repeat(clubStars(clubModal.power)) }}<i>{{ '★'.repeat(5 - clubStars(clubModal.power)) }}</i></span>
+              <span :class="clubModal.owned ? 'lv-owntag' : 'lv-aitag'">{{ clubModal.owned ? '◉ OWNED' : '⚙ AI' }}</span>
+              <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
+            </div>
             <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>
           </div>
-          <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
+        </div>
+        <!-- the read: how good + how they rank -->
+        <div class="lv-clubstats">
+          <div class="lv-cstat"><b>{{ clubModal.power ?? clubModal.rating }}</b><span>SQUAD OVR</span></div>
+          <div class="lv-cstat"><b>#{{ clubModal.powerRank ?? '—' }}</b><span>WORLD RANK<i v-if="clubPct(clubModal.powerRank, clubModal.totalClubs)"> · top {{ clubPct(clubModal.powerRank, clubModal.totalClubs) }}%</i></span></div>
+          <div class="lv-cstat"><b class="lv-hqpips"><i v-for="n in 5" :key="n" :class="{ on: n <= (clubModal.infra ?? 0) }"></i></b><span>HQ INFRA</span></div>
+          <div class="lv-cstat"><b class="lv-trophyn">{{ (clubModal.titles || 0) + (clubModal.intlTitles || 0) + (clubModal.wcTitles || 0) }}</b><span>TROPHIES</span></div>
+        </div>
+        <!-- the cabinet -->
+        <div v-if="clubModal.titles || clubModal.intlTitles || clubModal.wcTitles" class="lv-honstrip">
+          <span v-if="clubModal.titles" class="lv-hon">🏆 <b>{{ clubModal.titles }}×</b> league</span>
+          <span v-if="clubModal.intlTitles" class="lv-hon">🌐 <b>{{ clubModal.intlTitles }}×</b> Masters</span>
+          <span v-if="clubModal.wcTitles" class="lv-hon gold">🌍 <b>{{ clubModal.wcTitles }}×</b> World Cup mgr</span>
         </div>
         <div v-if="clubModal.dossier" class="lv-dossier">
           <div class="lv-doshead">⌖ SCOUTING REPORT</div>
