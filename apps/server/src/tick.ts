@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -70,19 +70,33 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
   // relevance-scoped resolution: full-sim the watchable divisions, quick the rest.
   let snapshots: Map<number, MatchInput> | undefined;
   let resolve: ((fx: Fixture, seed: number, division: number) => MatchResult) | undefined;
+  let sim: ReturnType<typeof fullSimResolver> | undefined;
   let fullSimmed = 0;
   if (opts?.full && opts.navOf) {
-    const sim = fullSimResolver(w, opts.navOf, opts.forks ?? 0);
+    sim = fullSimResolver(w, opts.navOf, opts.forks ?? 0);
     snapshots = sim.snapshots;
     resolve = (fx, seed, division) => {
-      if (opts.full!(division)) { fullSimmed++; return sim.resolve(fx, seed, division); }
+      if (opts.full!(division)) { fullSimmed++; return sim!.resolve(fx, seed, division); }
       return quickResult(fx.home, fx.away, w.clubs[fx.home].strength, w.clubs[fx.away].strength, seed);
     };
   }
 
   const devRng = new Rng(devSeed(w.seed, w.season, w.day));
   const { results, clubs } = resolveSeasonDay(w, w.day, devRng, { resolve });
-  const next: WorldState = { ...w, clubs, results: [...w.results, ...results], day: w.day + 1 };
+
+  // the domestic cup ticks WITH the league (durable in WorldState): on a cup match-day, draw +
+  // resolve that round — full-sim the WATCHABLE ties (Premier / human-owned, capturing the
+  // input snapshot for re-sim) and quick-resolve the rest.
+  let cup = w.cup ?? createCup(w.clubs.map((_, i) => i), w.season);
+  if (cupRoundDue(cup, w.day)) {
+    cup = resolveCupRound(cup, i => w.clubs[i].strength, w.seed, w.season, (home, away, seed) => {
+      const watch = !!(opts?.full && (opts.full(w.clubs[home].tier) || opts.full(w.clubs[away].tier))) || !!w.clubs[home].owner || !!w.clubs[away].owner;
+      if (watch && sim) { const r = sim.resolve({ home, away }, seed, 0); return { result: r, input: sim.snapshots.get(seed) }; }
+      return { result: quickResult(home, away, w.clubs[home].strength, w.clubs[away].strength, seed) };
+    });
+  }
+
+  const next: WorldState = { ...w, clubs, results: [...w.results, ...results], day: w.day + 1, cup };
 
   const rows = results.map((r, slot) => {
     const row = fixtureRow(id, w.season, w.day, slot, r);

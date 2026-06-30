@@ -413,6 +413,15 @@ const cupOpen = ref(false);
 async function loadCup() { if (server.value) try { cupView.value = await server.value.cup(); } catch { /* transient */ } }
 async function toggleCup() { cupOpen.value = !cupOpen.value; if (cupOpen.value && !cupView.value) await loadCup(); }
 const cupLateRounds = computed(() => (cupView.value?.rounds ?? []).filter(r => r.ties.length <= 8));   // QF onward
+// YOUR club's latest cup tie (any round) — surfaced + watchable, so you can follow your own run
+const myCupRun = computed(() => {
+  const tag = myClub.value?.tag; if (!tag || !cupView.value) return null;
+  for (let r = cupView.value.rounds.length - 1; r >= 0; r--) {
+    const t = cupView.value.rounds[r].ties.find(x => x.home.tag === tag || x.away.tag === tag);
+    if (t) return { tie: t, round: cupView.value.rounds[r].name, won: t.winner === (t.home.tag === tag ? t.home.idx : t.away.idx) };
+  }
+  return null;
+});
 async function watchCupTie(t: CupTieView) {
   if (!server.value || !t.watchable) return;
   loadingWatch.value = true;
@@ -1028,6 +1037,15 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <div v-if="!cupView" class="lv-empty">loading…</div>
           <template v-else>
             <div v-if="cupView.champion" class="lv-cupchamp" :class="{ mine: mine(cupView.champion.tag) }">🏆 {{ cupView.champion.tag }} · {{ cupView.champion.name }} <i>{{ tierName(cupView.champion.tier) }}</i> — ACE Cup winners</div>
+            <!-- your own run (any round) — watchable -->
+            <div v-if="myCupRun" class="lv-cuptie myrun" :class="{ win: myCupRun.won }">
+              <span class="lv-cuprunh">Your run · {{ myCupRun.round }}</span>
+              <span class="lv-cupside" :class="{ win: myCupRun.tie.winner === myCupRun.tie.home.idx }"><i class="hq-dot" :style="{ background: `hsl(${hue(myCupRun.tie.home.tag)} 65% 55%)` }"></i><b>{{ myCupRun.tie.home.tag }}</b> <em>{{ tierName(myCupRun.tie.home.tier) }}</em></span>
+              <b class="lv-cupscore">{{ myCupRun.tie.score[0] }}–{{ myCupRun.tie.score[1] }}</b>
+              <span class="lv-cupside rt" :class="{ win: myCupRun.tie.winner === myCupRun.tie.away.idx }"><em>{{ tierName(myCupRun.tie.away.tier) }}</em> <b>{{ myCupRun.tie.away.tag }}</b><i class="hq-dot" :style="{ background: `hsl(${hue(myCupRun.tie.away.tag)} 65% 55%)` }"></i></span>
+              <button v-if="myCupRun.tie.watchable" class="lv-watch sm" :disabled="loadingWatch" @click="watchCupTie(myCupRun.tie)" title="watch your tie">▷</button>
+              <span v-else class="lv-cupq">·</span>
+            </div>
             <div v-if="cupView.upsets.length" class="lv-cupupsets">
               <span class="lv-cupuh">⚡ Giant-killings</span>
               <span v-for="(u, i) in cupView.upsets" :key="i" class="lv-cupupset"><b class="clickable" @click="openClub(u.w.tag)">{{ u.w.tag }}</b> <em>{{ tierName(u.w.tier) }}</em> ▸ {{ u.l.tag }} <em>{{ tierName(u.l.tier) }}</em></span>

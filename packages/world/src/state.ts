@@ -11,6 +11,7 @@ import { divisionSchedule, funnelPromoteRelegate, promoteRelegate, snakeGroup, t
 import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './playoffs.js';
+import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
@@ -39,6 +40,7 @@ export interface WorldClub {
   owner: string | null;
   lineup?: string[];   // an owner's explicit five (player ids); undefined → best five
   intlTitles?: number; // international (Masters) titles won — prestige, additive/opt-in
+  cupTitles?: number;  // domestic ACE Cup wins — additive/opt-in (crowned at the rollover)
 }
 
 export interface WorldState {
@@ -49,6 +51,7 @@ export interface WorldState {
   patch: PatchState;
   clubs: WorldClub[];
   results: MatchResult[];   // the current season's fixtures
+  cup?: CupState;           // the season's domestic cup (ticks day-by-day; opt-in/additive)
 }
 
 /** Every `(tier, group)` division and its member club indices, tier-major. A flat
@@ -138,7 +141,7 @@ export function createWorld(seed: number, opts: { tiers?: number; size?: number;
     roster: c.team.players, tactics: c.tactics, comp: {},
     strength: c.strength, balance: startingBalance(c.strength), titles: 0, owner: null,
   }));
-  return { seed, region: opts.region ?? 'AMER', tiers: layout.length, size, promo, layout, season: 1, day: 0, patch: fullPatch(PATCH, ALL_AGENTS), clubs, results: [] };
+  return { seed, region: opts.region ?? 'AMER', tiers: layout.length, size, promo, layout, season: 1, day: 0, patch: fullPatch(PATCH, ALL_AGENTS), clubs, results: [], cup: createCup(clubs.map((_, i) => i), 1) };
 }
 
 /** One `(tier, group)` division's final table (best-first) from the season's
@@ -200,15 +203,19 @@ export function simulateSeason(w: WorldState): WorldState {
   const total = schedules[0].length;
   const results: MatchResult[] = [];
   let cur: WorldState = w;
+  let cup = w.cup ?? createCup(w.clubs.map((_, i) => i), w.season);
   for (let day = 0; day < total; day++) {
     const r = resolveSeasonDay(cur, day, devRng, { schedules });
     results.push(...r.results);
     cur = { ...cur, clubs: r.clubs };
+    // the cup ticks with the league — headless quick-resolve (no engine, no snapshots)
+    if (cupRoundDue(cup, day)) cup = resolveCupRound(cup, i => cur.clubs[i].strength, w.seed, w.season,
+      (h, a, seed) => ({ result: quickResult(h, a, cur.clubs[h].strength, cur.clubs[a].strength, seed) }));
   }
-  return { ...cur, results, day: total };
+  return { ...cur, results, day: total, cup };
 }
 
-export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[] }
+export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[]; cupChampion: number | null }
 
 /** Roll the off-season: top-tier playoffs (a champion + a title), settle every
  *  club's books by division rank, develop every squad, shift the meta, then
@@ -223,10 +230,11 @@ export function advanceWorld(w: WorldState): Rollover {
   const champion = bracket.champion ?? premier[0].club;
   const poPrize = (i: number) => w.clubs[i].tier === 0 ? playoffPrize(finishOf(bracket, i)) : 0;
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);
+  const cupChampion = w.cup?.champion ?? null;   // the finishing season's ACE Cup winners (crowned here)
   let clubs = w.clubs.map((c, i): WorldClub => {
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster), playoff: poPrize(i) });
     const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE));  // bootcamp share — the rest grew in-season
-    return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0) };
+    return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0) };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP
@@ -253,5 +261,7 @@ export function advanceWorld(w: WorldState): Rollover {
     clubs = clubs.map((c, i) => ({ ...c, tier: fr.tiers[i], group: fr.groups[i] }));
     moves = fr.moves;
   }
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [] }, champion, moves, notes: meta.changes };
+  // open a fresh cup for the new season (every club re-entered; club indices are stable)
+  const cup = createCup(clubs.map((_, i) => i), w.season + 1);
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup }, champion, moves, notes: meta.changes, cupChampion };
 }
