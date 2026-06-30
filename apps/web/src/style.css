@@ -1256,6 +1256,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-hon{font-family:var(--label);font-size:10px;letter-spacing:.03em;color:var(--muted);background:var(--bg-3);border:1px solid var(--line-2);padding:3px 9px;clip-path:var(--bevel)}
 .lv-hon b{color:var(--text);font-family:var(--display);font-size:12px}
 .lv-hon.gold{border-color:rgba(245,200,92,.45)}.lv-hon.gold b{color:var(--gold)}
+/* current form strip */
+.lv-clubform{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:9px 11px;background:var(--bg-3);border:1px solid var(--line);clip-path:var(--bevel)}
+.lv-formlbl{font-family:var(--label);font-size:9px;letter-spacing:.1em;color:var(--muted-2)}
+.lv-formpills{display:flex;gap:3px}
+.lv-formpills i{font-family:var(--label);font-style:normal;font-size:10px;font-weight:700;width:18px;height:18px;display:grid;place-items:center;clip-path:var(--bevel)}
+.lv-formpills i.w{background:rgba(74,222,128,.18);color:var(--win);border:1px solid rgba(74,222,128,.4)}
+.lv-formpills i.l{background:rgba(255,92,110,.16);color:var(--def);border:1px solid rgba(255,92,110,.4)}
+.lv-formrec{margin-left:auto;font-family:var(--label);font-size:10px;letter-spacing:.04em;color:var(--muted)}
+.lv-formrec b{font-family:var(--display);font-size:13px;color:var(--text)}
 .lv-clubx{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted-2);font-size:16px;cursor:pointer}
 .lv-clubx:hover{color:var(--text)}
 .lv-clubhead{display:flex;align-items:center;gap:14px;margin-bottom:18px}

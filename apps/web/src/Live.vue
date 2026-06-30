@@ -511,6 +511,7 @@ const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 // club-profile readouts: a star tier from squad power, and the world-rank percentile
 const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55) / 7)));   // ~55→1★ .. ~90→5★
 const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.max(1, Math.round((rank / total) * 100)) : null);
+const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
 
 onMounted(connect);
 onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); });
@@ -1024,6 +1025,14 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span v-if="clubModal.titles" class="lv-hon">🏆 <b>{{ clubModal.titles }}×</b> league</span>
           <span v-if="clubModal.intlTitles" class="lv-hon">🌐 <b>{{ clubModal.intlTitles }}×</b> Masters</span>
           <span v-if="clubModal.wcTitles" class="lv-hon gold">🌍 <b>{{ clubModal.wcTitles }}×</b> World Cup mgr</span>
+        </div>
+        <!-- current form: how good RIGHT NOW (resolved games only) -->
+        <div v-if="clubModal.record && (clubModal.record.w + clubModal.record.l) > 0" class="lv-clubform">
+          <span class="lv-formlbl">FORM</span>
+          <span class="lv-formpills">
+            <i v-for="(g, i) in clubModal.form" :key="i" :class="g.r === 'W' ? 'w' : 'l'" :title="`${g.r === 'W' ? 'won' : 'lost'} ${g.us}–${g.them} vs ${g.opp} (md ${g.day})`">{{ g.r }}</i>
+          </span>
+          <span class="lv-formrec"><b>{{ clubModal.record.w }}W–{{ clubModal.record.l }}L</b><template v-if="clubModal.standing"> · {{ ord(clubModal.standing) }} in {{ clubModal.division }}</template></span>
         </div>
         <div v-if="clubModal.dossier" class="lv-dossier">
           <div class="lv-doshead">⌖ SCOUTING REPORT</div>

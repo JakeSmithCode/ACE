@@ -509,6 +509,16 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!c) return json(res, 404, { error: 'no such club' });
       const ranked = topClubs(w, w.clubs.length);   // every club, by squad power
       const row = ranked.find(r => r.tag === c.tag);
+      // CURRENT form (the "how good right now" read, distinct from squad power) — recent
+      // results + season record + division standing, all from RESOLVED fixtures only.
+      const ci = w.clubs.indexOf(c);
+      const rows = await store.fixtures(id, w.season);
+      const played = rows.filter(f => (f.home === ci || f.away === ci) && fixtureStatus(f, clock()) === 'resolved').sort((a, b) => a.day - b.day);
+      const scoreOf = (f: typeof played[number]) => (f.home === ci ? [f.homeScore, f.awayScore] : [f.awayScore, f.homeScore]) as [number, number];
+      const form = played.slice(-6).map(f => { const [us, them] = scoreOf(f); return { r: us > them ? 'W' : 'L', us, them, opp: labelOf(f.home === ci ? f.away : f.home).tag, day: f.day + 1 }; });
+      const wins = played.filter(f => { const [us, them] = scoreOf(f); return us > them; }).length;
+      const table = standingsView(w, rows, c.tier, c.group, clock());
+      const standing = table.findIndex(t => t.club === c.tag) + 1;
       return json(res, 200, {
         ...publicClub(w, c),
         division: tierName(c.tier),
@@ -516,6 +526,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         powerRank: row?.rank ?? null, totalClubs: w.clubs.length,
         infra: row?.infra ?? 0,
         wcTitles: worldCupHistory.filter(t => t.managerTag === c.tag).length,
+        form, record: { w: wins, l: played.length - wins }, standing: standing || null, divSize: table.length,
       });
     }
     // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)
