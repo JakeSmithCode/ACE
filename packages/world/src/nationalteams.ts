@@ -78,21 +78,14 @@ export function nationalSquads(w: WorldState): NationSquad[] {
 /** A national squad as an engine team (its five, tagged by country code). */
 export const nationalTeam = (s: NationSquad): Team => ({ id: `NT-${s.code}`, tag: s.code, name: s.country, players: s.five });
 
-export interface WorldCupMatch { round: number; a: NationSquad; b: NationSquad; winner: NationSquad; seed: number }
+// The tournament STRUCTURE — the draw + fixtures + ranking + seeding. The RESULTS are the
+// engine's: the server full-sims every game (so your authored plan drives the whole run and
+// every game is watchable). @ace/world stays pure (no engine); these are the deterministic
+// brackets the server resolves.
+export interface WCFixture { a: NationSquad; b: NationSquad; seed: number }
+export interface WCGroupDraw { name: string; teams: NationSquad[]; fixtures: WCFixture[] }
+export interface WorldCupDraw { field: NationSquad[]; groups: WCGroupDraw[]; bracketSeeds: NationSquad[] }
 export interface GroupRow { squad: NationSquad; w: number; l: number; rf: number; ra: number; pts: number }
-export interface WorldCupGroup {
-  name: string;                                                  // 'A'..'D'
-  rows: GroupRow[];                                              // standings, ranked (top 2 advance)
-  matches: { a: NationSquad; b: NationSquad; sa: number; sb: number; seed: number }[];
-}
-export interface WorldCupResult {
-  seed: number;
-  field: NationSquad[];          // the qualified nations
-  groups: WorldCupGroup[];       // the group stage (empty on a tiny field)
-  matches: WorldCupMatch[];      // the knockout, round by round
-  champion: NationSquad;
-  placement: NationSquad[];      // knockout finish order (champion first)
-}
 
 /** Classic single-elim seeding (1 plays n, 2 plays n-1, …) so the top seeds spread. */
 function bracketOrder(n: number): number[] {
@@ -105,21 +98,6 @@ function bracketOrder(n: number): number[] {
   }
   return order;
 }
-
-/** Win probability for `a` over `b` from their squad-OVR gap — calibrated so a few OVR is
- *  a real edge but upsets still happen (a ~5-OVR gap ≈ 70%), unlike a club's 0..1 strength. */
-const winProb = (a: NationSquad, b: NationSquad) => 1 / (1 + Math.exp(-(a.strength - b.strength) * 0.18));
-/** A knockout game → the winner (deterministic from the seed). */
-function play(a: NationSquad, b: NationSquad, seed: number): NationSquad {
-  return new Rng(seed >>> 0).next() < winProb(a, b) ? a : b;
-}
-/** A group game → a plausible 13–N scoreline (so the table has real tiebreakers). */
-function groupGame(a: NationSquad, b: NationSquad, seed: number): { aWin: boolean; sa: number; sb: number } {
-  const rng = new Rng(seed >>> 0);
-  const aWin = rng.next() < winProb(a, b);
-  const loser = Math.max(3, Math.min(11, Math.round(11 - Math.abs(a.strength - b.strength) * 0.45 + rng.range(-2, 3))));
-  return aWin ? { aWin, sa: 13, sb: loser } : { aWin, sa: loser, sb: 13 };
-}
 /** A seeded Fisher–Yates shuffle — deterministic from `seed`. */
 function shuffle<T>(arr: T[], seed: number): T[] {
   const rng = new Rng(seed >>> 0), a = [...arr];
@@ -127,68 +105,40 @@ function shuffle<T>(arr: T[], seed: number): T[] {
   return a;
 }
 
-/** Resolve a seeded knockout bracket from a fixed `alive` order. */
-function resolveKnockout(field: NationSquad[], start: NationSquad[], seed: number, groups: WorldCupGroup[]): WorldCupResult {
-  const matches: WorldCupMatch[] = [];
-  const eliminatedRound = new Map<NationSquad, number>();
-  let alive = start, round = 0;
-  while (alive.length > 1) {
-    const next: NationSquad[] = [];
-    for (let i = 0; i < alive.length; i += 2) {
-      const a = alive[i], b = alive[i + 1];
-      const s = fixtureSeed(seed, round, i);
-      const winner = play(a, b, s);
-      matches.push({ round, a, b, winner, seed: s });
-      eliminatedRound.set(winner === a ? b : a, round);
-      next.push(winner);
-    }
-    alive = next; round++;
-  }
-  const champion = alive[0];
-  eliminatedRound.set(champion, round);
-  const placement = [...start].sort((a, b) => (eliminatedRound.get(b) ?? -1) - (eliminatedRound.get(a) ?? -1) || b.strength - a.strength);
-  return { seed, field, groups, matches, champion, placement };
+/** Rank a group's table: points → round-diff → rounds-for → squad strength (deterministic). */
+export function rankGroup(rows: GroupRow[]): GroupRow[] {
+  return [...rows].sort((x, y) => y.pts - x.pts || (y.rf - y.ra) - (x.rf - x.ra) || y.rf - x.rf || y.squad.strength - x.squad.strength);
 }
 
-/** Run the World Cup: the top nations qualify, are DRAWN into groups of four (four pots by
- *  seed band, each shuffled, one per group — a balanced but not pre-ordained draw), play a
- *  round-robin, and the top two of each group advance to a single-elim knockout, cross-
- *  bracketed so a group's two qualifiers can only meet again in the FINAL (FIFA-style).
- *  Falls back to a straight seeded bracket if too few nations qualify for groups. Every game
- *  seed is a stable hash → reproducible; the server overrides the final with a real engine
- *  sim (the watchable verdict). */
-export function worldCup(squads: NationSquad[], opts: { seed: number }): WorldCupResult {
+/** The knockout entry order from group winners + runners-up — cross-bracketed FIFA-style so a
+ *  group's two qualifiers can only meet again in the FINAL (1A v 2B, 1C v 2D, 1B v 2A, …). */
+export function knockoutSeeding(winners: NationSquad[], runners: NationSquad[]): NationSquad[] {
+  const G = winners.length;
+  if (G === 4) return [winners[0], runners[1], winners[2], runners[3], winners[1], runners[0], winners[3], runners[2]];
+  return [winners[0], runners[1], winners[1], runners[0]];   // 2 groups → 4 teams
+}
+
+/** The World Cup DRAW: the top nations qualify and are drawn into groups of four (four pots by
+ *  seed band, each shuffled, one team per group — balanced but not pre-ordained), each group's
+ *  round-robin fixtures stamped with stable seeds. Falls back to a straight seeded bracket
+ *  (`bracketSeeds`, no groups) when too few nations qualify. Pure + deterministic. */
+export function worldCupDraw(squads: NationSquad[], seed: number): WorldCupDraw {
   const G = squads.length >= 16 ? 4 : squads.length >= 8 ? 2 : 0;   // groups of four we can fill
-  if (G === 0) {   // tiny field → a straight seeded single-elim
+  if (G === 0) {
     const N = 1 << Math.floor(Math.log2(Math.max(2, squads.length)));
     const field = squads.slice(0, N);
-    return resolveKnockout(field, bracketOrder(N).map(s => field[s - 1]), opts.seed, []);
+    return { field, groups: [], bracketSeeds: bracketOrder(N).map(s => field[s - 1]) };
   }
   const field = squads.slice(0, G * 4);
-  // the draw: four pots by seed band, each shuffled, one team per pot into each group
-  const pots = [0, 1, 2, 3].map(p => shuffle(field.slice(p * G, p * G + G), fixtureSeed(opts.seed, 90 + p, 0)));
-  const groups: WorldCupGroup[] = [];
+  const pots = [0, 1, 2, 3].map(p => shuffle(field.slice(p * G, p * G + G), fixtureSeed(seed, 90 + p, 0)));
+  const groups: WCGroupDraw[] = [];
   for (let g = 0; g < G; g++) {
     const teams = pots.map(pot => pot[g]);
-    const rows: GroupRow[] = teams.map(squad => ({ squad, w: 0, l: 0, rf: 0, ra: 0, pts: 0 }));
-    const rowOf = (s: NationSquad) => rows.find(r => r.squad === s)!;
-    const matches: WorldCupGroup['matches'] = [];
+    const fixtures: WCFixture[] = [];
     let mi = 0;
-    for (let i = 0; i < teams.length; i++) for (let j = i + 1; j < teams.length; j++) {
-      const a = teams[i], b = teams[j], seed = fixtureSeed(opts.seed, 100 + g, mi++);
-      const r = groupGame(a, b, seed);
-      matches.push({ a, b, sa: r.sa, sb: r.sb, seed });
-      const ra = rowOf(a), rb = rowOf(b);
-      ra.rf += r.sa; ra.ra += r.sb; rb.rf += r.sb; rb.ra += r.sa;
-      if (r.aWin) { ra.w++; ra.pts += 3; rb.l++; } else { rb.w++; rb.pts += 3; ra.l++; }
-    }
-    rows.sort((x, y) => y.pts - x.pts || (y.rf - y.ra) - (x.rf - x.ra) || y.rf - x.rf || y.squad.strength - x.squad.strength);
-    groups.push({ name: String.fromCharCode(65 + g), rows, matches });
+    for (let i = 0; i < teams.length; i++) for (let j = i + 1; j < teams.length; j++)
+      fixtures.push({ a: teams[i], b: teams[j], seed: fixtureSeed(seed, 100 + g, mi++) });
+    groups.push({ name: String.fromCharCode(65 + g), teams, fixtures });
   }
-  // the knockout draw: group winners + runners-up, cross-bracketed (FIFA-style)
-  const W = groups.map(gr => gr.rows[0].squad), R = groups.map(gr => gr.rows[1].squad);
-  const alive: NationSquad[] = G === 4
-    ? [W[0], R[1], W[2], R[3], W[1], R[0], W[3], R[2]]
-    : [W[0], R[1], W[1], R[0]];
-  return resolveKnockout(field, alive, opts.seed, groups);
+  return { field, groups, bracketSeeds: [] };
 }

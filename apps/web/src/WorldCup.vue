@@ -7,7 +7,7 @@ import { onMounted, onUnmounted, ref, reactive } from 'vue';
 import { simulateMatch } from '@ace/engine';
 import { ROLE_AGENTS } from '@ace/world';
 import { Viewer } from './viewer';
-import { AceServer, type WorldCupView, type WCSide, type ElectionsView, type NationElection, type PoolPlayer, type WorldCupHonors } from './serverApi';
+import { AceServer, type WorldCupView, type WCSide, type WCGame, type ElectionsView, type NationElection, type PoolPlayer, type WorldCupHonors } from './serverApi';
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
 const url = ref(DEFAULT);
@@ -112,20 +112,28 @@ async function reload() {
   try { wc.value = await server.worldCup(); await loadElections(); } catch { /* transient */ }
 }
 
-// --- watch the grand final (full-simmed, re-rendered from its snapshot) ------
+// --- watch ANY game (every game is engine-simmed; fetch its snapshot by id, re-sim) ---
 const host = ref<HTMLElement | null>(null);
-const watching = ref(false);
+const watching = ref<{ a: WCSide; b: WCSide; score: [number, number]; label: string } | null>(null);
 const navs: Record<string, any> = {};
 let viewer: Viewer | null = null;
-async function watchFinal() {
-  if (!wc.value) return;
-  const f = wc.value.final;
-  if (!navs[f.map]) navs[f.map] = await fetch(`/${f.map}.navmesh.json`).then(r => r.json());
-  const out = simulateMatch(f.snapshot, navs[f.map], 50);
-  watching.value = true;
-  requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${f.map}.png`, navs[f.map]); });
+async function watchGame(g: WCGame, label = '') {
+  if (!server) return;
+  try {
+    const rep = await server.worldCupReplay(g.id);
+    if (!rep?.snapshot) return;
+    const map = rep.snapshot.map;
+    if (!navs[map]) navs[map] = await fetch(`/${map}.navmesh.json`).then(r => r.json());
+    const out = simulateMatch(rep.snapshot, navs[map], 50);
+    watching.value = { a: g.a, b: g.b, score: g.score, label };
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, navs[map]); });
+  } catch (e) { errMsg.value = (e as Error).message; }
 }
-function closeWatch() { watching.value = false; viewer?.destroy(); viewer = null; }
+const watchFinal = () => { if (wc.value) watchGame(wc.value.final, 'Grand Final'); };
+function closeWatch() { watching.value = null; viewer?.destroy(); viewer = null; }
+// expand a group's fixtures
+const openGroups = ref(new Set<string>());
+const toggleGroup = (n: string) => { const s = new Set(openGroups.value); s.has(n) ? s.delete(n) : s.add(n); openGroups.value = s; };
 
 onMounted(load);
 onUnmounted(() => viewer?.destroy());
@@ -243,37 +251,59 @@ onUnmounted(() => viewer?.destroy());
         <div class="cir-brackh">Group stage · {{ wc.groups.length }} groups · top two advance to the knockout</div>
         <div class="wc-grpgrid">
           <div v-for="grp in wc.groups" :key="grp.name" class="wc-grp">
-            <div class="wc-grph">Group {{ grp.name }}</div>
-            <div class="wc-grprow wc-grphead"><span class="wc-gpos"></span><span class="wc-gnat">Nation</span><span>W</span><span>L</span><span>+/−</span><span>Pts</span></div>
-            <div v-for="(r, i) in grp.rows" :key="r.code" class="wc-grprow" :class="{ through: r.through }">
-              <span class="wc-gpos">{{ i + 1 }}</span>
-              <span class="wc-gnat"><span class="wc-gflag">{{ r.flag }}</span><b>{{ r.code }}</b></span>
-              <span>{{ r.w }}</span><span>{{ r.l }}</span>
-              <span :class="r.rd >= 0 ? 'pos' : 'neg'">{{ r.rd >= 0 ? '+' : '' }}{{ r.rd }}</span>
-              <span class="wc-gpts">{{ r.pts }}</span>
-            </div>
+            <div class="wc-grph">Group {{ grp.name }}<button class="wc-grptog" @click="toggleGroup(grp.name)">{{ openGroups.has(grp.name) ? 'table ▴' : 'games ▾' }}</button></div>
+            <template v-if="!openGroups.has(grp.name)">
+              <div class="wc-grprow wc-grphead"><span class="wc-gpos"></span><span class="wc-gnat">Nation</span><span>W</span><span>L</span><span>+/−</span><span>Pts</span></div>
+              <div v-for="(r, i) in grp.rows" :key="r.code" class="wc-grprow" :class="{ through: r.through }">
+                <span class="wc-gpos">{{ i + 1 }}</span>
+                <span class="wc-gnat"><span class="wc-gflag">{{ r.flag }}</span><b>{{ r.code }}</b></span>
+                <span>{{ r.w }}</span><span>{{ r.l }}</span>
+                <span :class="r.rd >= 0 ? 'pos' : 'neg'">{{ r.rd >= 0 ? '+' : '' }}{{ r.rd }}</span>
+                <span class="wc-gpts">{{ r.pts }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div v-for="g in grp.games" :key="g.id" class="wc-gfix" @click="watchGame(g, `Group ${grp.name}`)" :title="`watch — ${g.map}`">
+                <span class="wc-gfa" :class="{ win: g.score[0] >= g.score[1] }">{{ g.a.flag }} {{ g.a.code }}</span>
+                <span class="wc-gfsc">{{ g.score[0] }}–{{ g.score[1] }}</span>
+                <span class="wc-gfb" :class="{ win: g.score[1] > g.score[0] }">{{ g.b.code }} {{ g.b.flag }}</span>
+                <i class="wc-gfwatch">▷</i>
+              </div>
+            </template>
           </div>
         </div>
       </div>
 
-      <!-- the bracket -->
+      <!-- the knockout — every tie engine-simmed + watchable -->
       <div class="cir-brackwrap">
-        <div class="cir-brackh">Knockout · {{ wc.bracket.field.length }} qualifiers · single elimination</div>
+        <div class="cir-brackh">Knockout · {{ wc.bracket.field.length }} qualifiers · every tie engine-simmed</div>
         <div class="cir-brack">
           <div v-for="(round, ri) in wc.bracket.rounds" :key="ri" class="cir-col">
             <div class="cir-colh">{{ roundName(ri, wc.bracket.rounds.length) }}</div>
-            <div v-for="(m, mi) in round" :key="mi" class="cir-match" :class="{ fin: ri === wc.bracket.rounds.length - 1 }">
+            <div v-for="(m, mi) in round" :key="mi" class="cir-match wc-komatch" :class="{ fin: ri === wc.bracket.rounds.length - 1 }" @click="watchGame(m, roundName(ri, wc.bracket.rounds.length))" :title="`watch — ${m.map}`">
               <div class="cir-side" :class="{ win: won(m, m.a), champ: ri === wc.bracket.rounds.length - 1 && isChamp(m.a) }">
-                <i class="wc-bflag">{{ m.a.flag }}</i><b>{{ m.a.code }}</b>
-                <span v-if="ri === wc.bracket.rounds.length - 1" class="cir-sc">{{ wc.final.score[0] }}</span>
+                <i class="wc-bflag">{{ m.a.flag }}</i><b>{{ m.a.code }}</b><span class="cir-sc">{{ m.score[0] }}</span>
               </div>
               <div class="cir-side" :class="{ win: won(m, m.b), champ: ri === wc.bracket.rounds.length - 1 && isChamp(m.b) }">
-                <i class="wc-bflag">{{ m.b.flag }}</i><b>{{ m.b.code }}</b>
-                <span v-if="ri === wc.bracket.rounds.length - 1" class="cir-sc">{{ wc.final.score[1] }}</span>
+                <i class="wc-bflag">{{ m.b.flag }}</i><b>{{ m.b.code }}</b><span class="cir-sc">{{ m.score[1] }}</span>
               </div>
-              <div v-if="ri === wc.bracket.rounds.length - 1" class="cir-finmap">{{ wc.final.map }} · engine-simmed</div>
+              <div class="cir-finmap">{{ m.map }} · ▷ watch</div>
             </div>
           </div>
+          <!-- third-place playoff (bronze) -->
+          <div v-if="wc.third" class="cir-col wc-third">
+            <div class="cir-colh">Third place</div>
+            <div class="cir-match wc-komatch bronze" @click="watchGame(wc.third, 'Third-place playoff')" :title="`watch — ${wc.third.map}`">
+              <div class="cir-side" :class="{ win: won(wc.third, wc.third.a) }"><i class="wc-bflag">{{ wc.third.a.flag }}</i><b>{{ wc.third.a.code }}</b><span class="cir-sc">{{ wc.third.score[0] }}</span></div>
+              <div class="cir-side" :class="{ win: won(wc.third, wc.third.b) }"><i class="wc-bflag">{{ wc.third.b.flag }}</i><b>{{ wc.third.b.code }}</b><span class="cir-sc">{{ wc.third.score[1] }}</span></div>
+              <div class="cir-finmap">🥉 {{ wc.third.winner.code }} · ▷ watch</div>
+            </div>
+          </div>
+        </div>
+        <div v-if="wc.boot" class="wc-boot">
+          <span class="wc-bootico">⚽</span>
+          <div class="wc-bootmeta"><span class="wc-bootk">Golden Boot · top fragger</span><b>{{ wc.boot.flag }} {{ wc.boot.handle }}</b><span class="wc-bootname">{{ wc.boot.name }}</span></div>
+          <div class="wc-bootnum"><b>{{ wc.boot.kills }}</b><span>kills · {{ wc.boot.games }} games</span></div>
         </div>
       </div>
 
@@ -297,11 +327,11 @@ onUnmounted(() => viewer?.destroy());
         </div>
       </div>
 
-      <!-- the watched grand final -->
+      <!-- the watched game (any tie — re-simmed from its snapshot) -->
       <div v-if="watching" class="lv-watchwrap">
         <div class="lv-watchhead">
-          <b>{{ wc.final.a.flag }} {{ wc.final.a.code }}</b> {{ wc.final.score[0] }} – {{ wc.final.score[1] }} <b>{{ wc.final.b.code }} {{ wc.final.b.flag }}</b>
-          · <span class="hq-rmap">{{ wc.final.map }}</span> · the grand final, re-simmed from the server snapshot
+          <b>{{ watching.a.flag }} {{ watching.a.code }}</b> {{ watching.score[0] }} – {{ watching.score[1] }} <b>{{ watching.b.code }} {{ watching.b.flag }}</b>
+          · <span class="hq-rmap">{{ watching.label }}</span> · re-simmed from the server snapshot
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>

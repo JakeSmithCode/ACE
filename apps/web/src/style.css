@@ -1132,6 +1132,29 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .wc-grprow.through .wc-gpos{color:var(--win)}
 .wc-grprow.through .wc-gnat b{color:var(--win)}
 .wc-grprow .pos{color:var(--win)!important}.wc-grprow .neg{color:var(--def)!important}
+.wc-grptog{float:right;background:none;border:none;color:var(--brand);font-family:var(--label);font-size:9px;letter-spacing:.04em;cursor:pointer;padding:0}
+.wc-gfix{display:grid;grid-template-columns:1fr auto 1fr 16px;align-items:center;gap:6px;padding:5px 2px;border-bottom:1px solid var(--line);font-size:11px;cursor:pointer}
+.wc-gfix:hover{background:rgba(34,211,238,.06)}
+.wc-gfa{text-align:left;color:var(--muted)}.wc-gfb{text-align:right;color:var(--muted)}
+.wc-gfa.win,.wc-gfb.win{color:var(--text);font-weight:600}
+.wc-gfsc{font-family:var(--display);font-size:12px;color:var(--text);font-variant-numeric:tabular-nums}
+.wc-gfwatch{font-style:normal;color:var(--muted-2);font-size:11px;text-align:center}
+.wc-gfix:hover .wc-gfwatch{color:var(--brand)}
+/* knockout games are clickable to watch */
+.cir-match.wc-komatch{cursor:pointer;transition:border-color .12s,background .12s}
+.cir-match.wc-komatch:hover{border-color:var(--brand)}
+.wc-third .cir-match.bronze:hover{border-color:var(--gold)}
+.wc-third .cir-finmap{color:var(--gold)}
+/* Golden Boot */
+.wc-boot{display:flex;align-items:center;gap:14px;margin-top:14px;padding:11px 16px;background:linear-gradient(100deg,rgba(245,200,92,.1),var(--bg-2) 70%);border:1px solid rgba(245,200,92,.3);clip-path:var(--bevel)}
+.wc-bootico{font-size:26px}
+.wc-bootmeta{display:flex;flex-direction:column;gap:1px}
+.wc-bootk{font-family:var(--label);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+.wc-bootmeta b{font-family:var(--display);font-size:17px}
+.wc-bootname{font-size:10px;color:var(--muted-2)}
+.wc-bootnum{margin-left:auto;text-align:right}
+.wc-bootnum b{font-family:var(--display);font-size:22px;color:var(--gold)}
+.wc-bootnum span{display:block;font-family:var(--label);font-size:9px;color:var(--muted-2)}
 /* national-team manager election (campaign for the armband) */
 .wc-elect{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
 .wc-mgr{display:flex;align-items:center;gap:7px;font-size:11px}

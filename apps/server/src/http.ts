@@ -6,7 +6,7 @@
 // sees the same wall-clock moment). The result + snapshot stay sealed until the
 // broadcast plays out.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { MatchTimeline, Tactics } from '@ace/shared';
+import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, type Academy, type WorldState, type WorldClub } from '@ace/world';
@@ -136,6 +136,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const circuitSeed = opts.seed ?? 7;
   let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
   let worldCupCache: WorldCupView | undefined;   // the World Cup, recomputed each season
+  let worldCupGames = new Map<string, MatchInput>();   // game id → snapshot (re-simmed to watch)
+  /** Rebuild the World Cup (every game engine-simmed) if stale, and return the view. */
+  const ensureWorldCup = (w: WorldState): WorldCupView => {
+    if (!worldCupCache || worldCupCache.season !== w.season) {
+      const built = buildWorldCupView(w, navOf, wcHooks(w));
+      worldCupCache = built.view; worldCupGames = built.games;
+    }
+    return worldCupCache;
+  };
   // National-team manager ELECTIONS (the World Cup social layer): human club-owners run
   // to manage a nation, others vote, and the winner authors the nation's tactics — which
   // drive the engine-simmed final. In-memory per server (Pg follow-up like the other
@@ -377,7 +386,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const mvp = [...mvpAcc.values()].sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
     // World Cup: crown the finishing season's champion NATION + its elected MANAGER (the
     // trophy is theirs) from the pre-rollover world, and record it into the legacy.
-    const wcv = (worldCupCache && worldCupCache.season === w.season) ? worldCupCache : buildWorldCupView(w, navOf, wcHooks(w));
+    const wcv = ensureWorldCup(w);
     const wcChampCode = wcv.bracket.champion.code;
     const wcMgrAccount = electedManager(wcChampCode);
     const wcMgrTag = wcMgrAccount ? clubTagOf(w, wcMgrAccount) : null;
@@ -756,21 +765,24 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // elected managers' tactics drive the final, so an election change busts the cache.
     if (path[0] === 'worldcup' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
-      if (!worldCupCache || worldCupCache.season !== w.season) {
-        worldCupCache = buildWorldCupView(w, navOf, wcHooks(w));
-      }
-      return json(res, 200, worldCupCache);
+      return json(res, 200, ensureWorldCup(w));
+    }
+    // GET /worldcup/replay/:id  → a watchable game's snapshot (group, knockout, third-place,
+    // or final) — the client re-sims it in the viewer. Every World Cup game is full-simmed.
+    if (path[0] === 'worldcup' && path[1] === 'replay' && path.length === 3) {
+      const w = (await store.loadWorld(id))!;
+      ensureWorldCup(w);
+      const snap = worldCupGames.get(decodeURIComponent(path[2]));
+      return snap ? json(res, 200, { snapshot: snap }) : json(res, 404, { error: 'no such game' });
     }
     // GET /worldcup/elections  → the manager election state for each qualified nation
     // (current manager, candidates + vote counts, and — with a Bearer — your own status).
     if (path[0] === 'worldcup' && path[1] === 'elections' && path.length === 2 && req.method === 'GET') {
       const w = (await store.loadWorld(id))!;
-      if (!worldCupCache || worldCupCache.season !== w.season) {
-        worldCupCache = buildWorldCupView(w, navOf, wcHooks(w));
-      }
+      const wcv = ensureWorldCup(w);
       const myTag = account ? clubTagOf(w, account) : null;
       const pools = nationPools(w);
-      const nations = worldCupCache.squads.map(s => {
+      const nations = wcv.squads.map(s => {
         const e = electionOf(s.code), mgr = electedManager(s.code);
         const candidates = e.candidates.map(a => ({ tag: clubTagOf(w, a) ?? '—', votes: tallyVotes(e, a), you: a === account }))
           .sort((x, y) => y.votes - x.votes || x.tag.localeCompare(y.tag));
