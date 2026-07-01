@@ -5,7 +5,7 @@
 // spoilers until it's over); once revealed we pull the snapshot and re-sim it in the
 // viewer (the engine runs client-side, so watching costs the server nothing). This is
 // the seam between the deep persistence backend and the broadcast-grade viewer.
-import { onMounted, onUnmounted, ref, computed, watch as vueWatch } from 'vue';
+import { onMounted, onUnmounted, ref, computed, nextTick, watch as vueWatch } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
@@ -101,7 +101,6 @@ async function loadBoard() {
   try { board.value = (await server.value.market()).board; bidAmt.value = Object.fromEntries(board.value.map(e => [e.handle, e.value])); }
   catch (e) { authErr.value = (e as Error).message; }
 }
-async function toggleMarket() { marketOpen.value = !marketOpen.value; if (marketOpen.value && !board.value.length) await loadBoard(); }
 async function bid(e: MarketEntry) {
   if (!server.value || !token.value) return; marketBusy.value = true;
   const msg = (m: string) => (bidMsg.value = { ...bidMsg.value, [e.handle]: m });
@@ -267,8 +266,18 @@ async function renew(sp: SquadPlayer) {
 const academyOpen = ref(false);
 const acadBusy = ref(false);
 const acadMsg = ref('');
-function toggleAcademy() { academyOpen.value = !academyOpen.value; }
 const academy = computed(() => myClub.value?.academy ?? null);
+
+// club-management panels are an ACCORDION — opening one closes the rest (no messy stacking).
+// One coordinator drives all seven toggles; it also lazy-loads the market board on first open.
+const PANEL_REFS: Record<string, { value: boolean }> = { tactics: planOpen, market: marketOpen, academy: academyOpen, hq: hqOpen, staff: staffOpen, sponsor: sponsorOpen, board: boardOpen };
+async function showPanel(which: string) {
+  const target = PANEL_REFS[which]; const wasOpen = target.value;
+  for (const r of Object.values(PANEL_REFS)) r.value = false;
+  target.value = !wasOpen;
+  if (which === 'market' && marketOpen.value && !board.value.length) void loadBoard();
+  if (target.value) { await nextTick(); document.querySelector('.lv-planpanel, .lv-mktpanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+}
 async function upgradeAcademy() {
   if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
   try {
@@ -667,13 +676,18 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <b class="lv-myname">{{ myClub.name }}</b>
           <span class="lv-tier">{{ tierName(myClub.tier) }} · {{ myClub.rating }} OVR</span>
           <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
-          <button class="lv-planbtn" :class="{ on: planOpen }" @click="planOpen = !planOpen">✎ tactics</button>
-          <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
-          <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
-          <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="hqOpen = !hqOpen">⌂ HQ</button>
-          <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="staffOpen = !staffOpen">♦ staff</button>
-          <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="sponsorOpen = !sponsorOpen">◈ sponsor</button>
-          <button class="lv-planbtn board" :class="{ on: boardOpen }" @click="boardOpen = !boardOpen">⚑ board</button>
+          <span class="lv-btngroup">
+            <button class="lv-planbtn" :class="{ on: planOpen }" @click="showPanel('tactics')">✎ tactics</button>
+            <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="showPanel('market')">⇄ market</button>
+          </span>
+          <span class="lv-btnsep" title="club management"></span>
+          <span class="lv-btngroup club">
+            <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="showPanel('academy')">⬡ academy</button>
+            <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="showPanel('hq')">⌂ HQ</button>
+            <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="showPanel('staff')">♦ staff</button>
+            <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="showPanel('sponsor')">◈ sponsor</button>
+            <button class="lv-planbtn board" :class="{ on: boardOpen }" @click="showPanel('board')">⚑ board</button>
+          </span>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>

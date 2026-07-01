@@ -1107,6 +1107,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* Match Center — tactics authoring */
 .lv-planbtn{background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.35);color:var(--brand);font-family:var(--label);font-size:11px;letter-spacing:.04em;padding:6px 13px;cursor:pointer;clip-path:var(--bevel)}
 .lv-planbtn.on,.lv-planbtn:hover{background:rgba(34,211,238,.2)}
+/* the active management panel gets a clear ring so it reads as selected (accordion) */
+.lv-planbtn.on{box-shadow:inset 0 0 0 1px currentColor}
+.lv-btngroup{display:inline-flex;gap:6px}
+.lv-btnsep{display:inline-block;width:1px;align-self:stretch;min-height:20px;background:var(--line-2,#2a3138);margin:0 3px}
 .lv-planpanel{background:var(--bg-2);border:1px solid var(--line);clip-path:var(--bevel);padding:16px 18px;margin-bottom:16px}
 .lv-plangrid{display:grid;grid-template-columns:1fr 1fr auto;gap:26px;align-items:start}
 .lv-plancol{display:flex;flex-direction:column;gap:12px}
