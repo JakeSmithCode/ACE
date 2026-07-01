@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, type FacilityId, type Facilities, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -966,7 +966,30 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!c) return json(res, 200, null);
       const academy = academyView(acadOf(account), c.balance, h => scoutLevelOf(account, h));
       const facilities = c.facilities ?? defaultFacilities();
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities) });
+      const staff = c.staff ?? {};
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff) });
+    }
+    // POST /me/staff  { role, id?, release? }  → hire a backroom staffer from the season's
+    // shortlist (no fee, a recurring wage) or release one. Coach → dev growth, analyst →
+    // ceiling + cheaper scouting, psych → less fatigue + injury. Owner-scoped.
+    if (path[0] === 'me' && path[1] === 'staff' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { role?: string; id?: string; release?: boolean };
+      const role = b.role as StaffRole;
+      if (!STAFF_ROLES.includes(role)) return json(res, 400, { error: 'unknown role' });
+      const w = (await store.loadWorld(id))!;
+      const staff: StaffHires = { ...(w.clubs.find(x => x.id === mine.id)!.staff) };
+      if (b.release) { delete staff[role]; }
+      else {
+        const cand = staffMarket(w.seed, w.season)[role].find(m => m.id === b.id);
+        if (!cand) return json(res, 404, { error: 'not on the shortlist' });
+        staff[role] = cand;
+      }
+      const clubs = w.clubs.map(x => x.id === mine.id ? { ...x, staff } : x);
+      await store.saveWorld(id, { ...w, clubs });
+      return json(res, 200, { ok: true, staff, staffWageBill: staffWageBill(staff) });
     }
     // POST /me/facility  { room }  → build/expand an HQ room (charges the club balance). The
     // boost threads into development at the next tick; a built room costs recurring upkeep.

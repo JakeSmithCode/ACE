@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, traitKeyOf, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, traitKeyOf, staffEffect, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -106,7 +106,8 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
     let fit = fitness ?? emptyFitness();
     for (const c of owned) {
       const fielded = fitFive(c.roster, planFive(c), fit).five;   // who actually played (pre-match fitness)
-      fit = tickFitness(fit, c.roster, new Set(fielded.map(p => p.id)), fr, fitId => traitKeyOf(fitId) === 'workhorse').fitness;
+      const eff = c.staff ? staffEffect(c.staff) : null;          // a sports psych cuts fatigue + injury rates
+      fit = tickFitness(fit, c.roster, new Set(fielded.map(p => p.id)), fr, fitId => traitKeyOf(fitId) === 'workhorse', eff?.fatigueMul ?? 1, eff?.injuryMul ?? 1).fitness;
     }
     fitness = fit;
   }

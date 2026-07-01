@@ -65,7 +65,7 @@ export function fitTeam(c: { id: string; tag: string; name: string; roster: Play
 /** Post-match update for one roster: heal injuries a day, tire the five who played (+ roll a
  *  new injury at the fatigue they played), recover the rest. Pure + seeded; `horse(id)` flags
  *  the workhorse trait (tires slower, hurt less). Returns the new state + any fresh injury. */
-export function tickFitness(prev: Fitness | undefined, roster: Player[], fielded: Set<string>, rng: Rng, horse: (id: string) => boolean): { fitness: Fitness; injured: { id: string; days: number } | null } {
+export function tickFitness(prev: Fitness | undefined, roster: Player[], fielded: Set<string>, rng: Rng, horse: (id: string) => boolean, fatigueMul = 1, injuryMul = 1): { fitness: Fitness; injured: { id: string; days: number } | null } {
   const fat: Record<string, number> = { ...(prev?.fat ?? {}) };
   const inj: Record<string, number> = { ...(prev?.inj ?? {}) };
   for (const id of Object.keys(inj)) { if (inj[id] - 1 > 0) inj[id] -= 1; else delete inj[id]; }   // heal a match-day
@@ -73,12 +73,12 @@ export function tickFitness(prev: Fitness | undefined, roster: Player[], fielded
   for (const p of roster) {
     const cur = fat[p.id] ?? 0;
     if (fielded.has(p.id)) {
-      const h = horse(p.id);
-      if (!(p.id in inj) && rng.chance((INJ_BASE + INJ_FAT * (cur / FAT_MAX)) * (h ? 0.7 : 1))) {
+      const h = horse(p.id);                               // a sports psychologist cuts both muls (fatigue + injury)
+      if (!(p.id in inj) && rng.chance((INJ_BASE + INJ_FAT * (cur / FAT_MAX)) * (h ? 0.7 : 1) * injuryMul)) {
         inj[p.id] = rng.int(2, 4); fat[p.id] = 20;        // sidelined; rests while out
         if (!injured || overall(p) > overall(roster.find(r => r.id === injured!.id) ?? p)) injured = { id: p.id, days: inj[p.id] };
       } else {
-        fat[p.id] = Math.min(FAT_MAX, cur + FAT_GAIN * (h ? 0.8 : 1));
+        fat[p.id] = Math.min(FAT_MAX, cur + FAT_GAIN * (h ? 0.8 : 1) * fatigueMul);
       }
     } else {
       fat[p.id] = Math.max(0, cur - FAT_RECOVER);          // bench/rest recovers

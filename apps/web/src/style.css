@@ -1561,6 +1561,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-hqblurb{font-family:var(--label);font-size:10px;color:var(--muted-2);line-height:1.4}
 .lv-hqeffect{font-family:var(--label);font-size:11px;color:var(--acc);margin-top:auto}
 .lv-hqroom .lv-go{align-self:flex-start}
+/* backroom staff panel */
+.lv-staffroles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:8px}
+.lv-staffrole{padding:11px 13px;background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:4px}
+.lv-staffhd{margin-bottom:8px}
+.lv-staffhd b{font-family:var(--display);font-weight:700;font-size:14px;color:var(--ink);display:block}
+.lv-staffblurb{font-family:var(--label);font-size:10px;color:var(--muted-2);line-height:1.4}
+.lv-staffhired{display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(59,209,127,.06);border:1px solid rgba(59,209,127,.22);border-radius:3px;font-size:12px}
+.lv-staffcand{display:flex;align-items:center;gap:8px;padding:4px 4px;border-bottom:1px solid var(--line);font-size:12px}
+.lv-staffcand:last-child{border-bottom:0}
+.lv-staffhired b,.lv-staffcand b{font-family:var(--display);color:var(--ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-staffstars{color:var(--gold);font-size:10px;letter-spacing:-1px}
+.lv-staffstars i{color:var(--line-2,#333);font-style:normal}
+.lv-staffwage{font-family:var(--label);font-size:10px;color:var(--muted-2)}
 .lv-scoutbtn.ghost{padding:3px 6px;color:var(--muted-2)}
 .lv-mktrow.squad{align-items:center}
 /* profile card extras (reuses .pc-* from the single-player card) */

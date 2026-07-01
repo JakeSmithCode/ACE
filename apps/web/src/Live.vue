@@ -8,7 +8,7 @@
 import { onMounted, onUnmounted, ref, computed, watch as vueWatch } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX } from '@ace/world';
+import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
 import { Viewer } from './viewer';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
 const SCOUT_MAX = 3;
@@ -193,6 +193,27 @@ async function upgradeFacility(room: string) {
     if (r.ok) { await refreshMe(); hqMsg.value = `✓ upgraded — boost applies from the next match-day`; }
     else hqMsg.value = r.reason === 'insufficient funds' ? `need ${kfmt(r.cost || 0)} to upgrade` : (r.reason ?? 'rejected');
   } catch (e) { hqMsg.value = (e as Error).message; } finally { hqBusy.value = false; }
+}
+
+// --- backroom staff: coach (dev), analyst (ceiling + scout), psych (fitness) --------
+const staffOpen = ref(false);
+const staffBusy = ref(false);
+const staffMsg = ref('');
+const STAFF_ROLE_LIST = STAFF_ROLES;
+const staffMeta = STAFF_META as Record<string, { title: string; blurb: string }>;
+const staffHired = (role: string) => myClub.value?.staff?.[role];
+const staffShortlist = (role: string) => myClub.value?.staffMarket?.[role] ?? [];
+async function hireStaff(role: string, memberId: string) {
+  if (!server.value || !token.value) return;
+  staffBusy.value = true; staffMsg.value = '';
+  try { const r = await server.value.staffAction({ role, id: memberId }, token.value); if (r.ok) { await refreshMe(); staffMsg.value = '✓ hired — effect applies from the next match-day'; } }
+  catch (e) { staffMsg.value = (e as Error).message; } finally { staffBusy.value = false; }
+}
+async function releaseStaff(role: string) {
+  if (!server.value || !token.value) return;
+  staffBusy.value = true;
+  try { const r = await server.value.staffAction({ role, release: true }, token.value); if (r.ok) await refreshMe(); }
+  catch (e) { staffMsg.value = (e as Error).message; } finally { staffBusy.value = false; }
 }
 
 // --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
@@ -635,6 +656,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
           <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
           <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="hqOpen = !hqOpen">⌂ HQ</button>
+          <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="staffOpen = !staffOpen">♦ staff</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
@@ -885,6 +907,33 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
         </div>
         <span v-if="hqMsg" class="lv-wire" :class="{ ok: hqMsg.startsWith('✓') }">{{ hqMsg }}</span>
+      </div>
+
+      <!-- backroom staff — coach (development) · analyst (ceiling + cheaper scouting) · psych (fitness) -->
+      <div v-if="myClub && staffOpen" class="lv-mktpanel staff">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Backroom staff</span>
+          <span class="lv-mktsub">specialists on a recurring wage — a coach speeds development, an analyst lifts the ceiling + cheapens scouting, a psych keeps the squad fresh. Wages {{ kfmt(myClub.staffWageBill || 0) }}/season.</span>
+        </div>
+        <div class="lv-staffroles">
+          <div v-for="role in STAFF_ROLE_LIST" :key="role" class="lv-staffrole">
+            <div class="lv-staffhd"><b>{{ staffMeta[role].title }}</b><span class="lv-staffblurb">{{ staffMeta[role].blurb }}</span></div>
+            <div v-if="staffHired(role)" class="lv-staffhired">
+              <span class="lv-staffstars">{{ '★'.repeat(staffHired(role)!.rating) }}<i>{{ '★'.repeat(5 - staffHired(role)!.rating) }}</i></span>
+              <b>{{ staffHired(role)!.name }}</b>
+              <span class="lv-staffwage">{{ kfmt(staffHired(role)!.wage) }}/s</span>
+              <button class="lv-sellbtn" :disabled="staffBusy" @click="releaseStaff(role)">release</button>
+            </div>
+            <div v-else class="lv-staffshort">
+              <div v-for="m in staffShortlist(role)" :key="m.id" class="lv-staffcand">
+                <span class="lv-staffstars">{{ '★'.repeat(m.rating) }}<i>{{ '★'.repeat(5 - m.rating) }}</i></span>
+                <b>{{ m.name }}</b><span class="lv-staffwage">{{ kfmt(m.wage) }}/s</span>
+                <button class="lv-go sm" :disabled="staffBusy" @click="hireStaff(role, m.id)">hire</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span v-if="staffMsg" class="lv-wire" :class="{ ok: staffMsg.startsWith('✓') }">{{ staffMsg }}</span>
       </div>
 
       <!-- the academy — your homegrown youth pipeline (build → intake → develop → graduate) -->

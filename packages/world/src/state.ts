@@ -16,6 +16,8 @@ import type { Fitness } from './fitness.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
+import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
+import type { DevBoost } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
 import { fullPatch, patchMeta, type MetaChange } from './meta.js';
 
@@ -44,6 +46,14 @@ export interface WorldClub {
   intlTitles?: number; // international (Masters) titles won — prestige, additive/opt-in
   cupTitles?: number;  // domestic ACE Cup wins — additive/opt-in (crowned at the rollover)
   facilities?: Facilities;   // an owner's HQ rooms (the dev money-sink); undefined → no boost (AI/abstract)
+  staff?: StaffHires;        // an owner's backroom staff (coach/analyst/psych); undefined → no effect
+}
+
+/** An owned club's combined development boost: HQ rooms × backroom staff. Undefined for both
+ *  → NO_BOOST, so AI clubs + no-owner worlds are byte-identical. */
+export function clubDevBoost(c: WorldClub): DevBoost {
+  const base = c.facilities ? facilityBoost(c.facilities) : NO_BOOST;
+  return c.staff ? withStaffBoost(base, staffEffect(c.staff)) : base;
 }
 
 export interface WorldState {
@@ -192,7 +202,7 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
     // reps and grows; leave him benched and he rusts. For a generated club with no
     // lineup, `planFive` === `startingFive`, so the world/season CLIs are byte-identical.
     const five = new Set(planFive(c).map(p => p.id));
-    const boost = c.facilities ? facilityBoost(c.facilities) : NO_BOOST;   // an owner's HQ speeds growth (undefined → no change)
+    const boost = clubDevBoost(c);   // an owner's HQ × staff speeds growth (undefined → no change)
     const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng, boost));
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
   });
@@ -237,9 +247,9 @@ export function advanceWorld(w: WorldState): Rollover {
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);
   const cupChampion = w.cup?.champion ?? null;   // the finishing season's ACE Cup winners (crowned here)
   let clubs = w.clubs.map((c, i): WorldClub => {
-    const upkeep = c.facilities ? facilityUpkeep(c.facilities) : 0;   // a built HQ costs to run (a ledger line)
-    const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + upkeep, playoff: poPrize(i) });
-    const boost = c.facilities ? facilityBoost(c.facilities) : NO_BOOST;
+    const overhead = (c.facilities ? facilityUpkeep(c.facilities) : 0) + (c.staff ? staffWageBill(c.staff) : 0);   // HQ upkeep + staff wages (a ledger line)
+    const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + overhead, playoff: poPrize(i) });
+    const boost = clubDevBoost(c);
     const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE, boost));  // bootcamp share — the rest grew in-season
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0) };
   });
