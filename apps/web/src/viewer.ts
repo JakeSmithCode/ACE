@@ -147,6 +147,15 @@ export class Viewer {
   private heatLayer!: SVGGElement; private heatBtn!: HTMLElement; private heatLegend!: HTMLElement; private showHeat = false;
   private xray!: HTMLElement;   // duel x-ray overlay (click a kill → why it resolved)
   private buyEls: [HTMLElement, HTMLElement] = [null as any, null as any]; // per-team buy badge
+  // ── the broadcast MOMENT layer: the beats a crowd watches for, all derived from the
+  // event stream (no contract change): FIRST BLOOD, multikills/ACE, the clutch callout,
+  // spike-planted sting, kill tracers, alive counters, match point. ──────────────────
+  private banner!: HTMLElement; private bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  private killsInRound = new Map<string, number>();   // per-round kill tally per player (multikill detection)
+  private firstBloodDone = false;                     // has this round's opening kill happened
+  private lastClutch: string | null = null;           // the clutcher already called out this round
+  private aliveEls: [HTMLElement, HTMLElement] = [null as any, null as any];   // 5 alive-pips per team
+  private mpt!: HTMLElement;                          // MATCH POINT tag in the scorebar
 
   constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean } = {}) {
     this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav; this.live = !!opts.live;
@@ -156,31 +165,35 @@ export class Viewer {
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  destroy() { cancelAnimationFrame(this.raf); this.clearAdvance(); }
+  destroy() { cancelAnimationFrame(this.raf); this.clearAdvance(); if (this.bannerTimer) clearTimeout(this.bannerTimer); }
 
   private build() {
     const t = this.tl;
     this.root.innerHTML = '';
     // scorebar
     const sb = el('div', 'ace-scorebar');
+    const pips = '<i></i><i></i><i></i><i></i><i></i>';
     sb.innerHTML = `
       <div class="ace-team att">
-        <div class="tmeta"><div class="tg">${t.teams[0].name}</div><div class="tside" id="ace-side0"></div></div>
+        <div class="tmeta"><div class="tg">${t.teams[0].name}</div><div class="tside" id="ace-side0"></div><div class="alive a" id="ace-alive0">${pips}</div></div>
         <div class="tmark att">${t.teams[0].tag}</div>
       </div>
       <div class="ace-scoreblock">
         <div class="sc"><span class="a">0</span><div class="clockwrap" id="ace-clockwrap"><span class="clock" id="ace-clock">1:40</span></div><span class="b">0</span></div>
         <div class="side" id="ace-round">Round 1</div>
+        <div class="mpt" id="ace-mpt"></div>
         <div class="ctx">${t.map.toUpperCase()} · PATCH ${t.patch} · SEED ${t.seed}</div>
       </div>
       <div class="ace-team def r">
         <div class="tmark def">${t.teams[1].tag}</div>
-        <div class="tmeta"><div class="tg">${t.teams[1].name}</div><div class="tside" id="ace-side1"></div></div>
+        <div class="tmeta"><div class="tg">${t.teams[1].name}</div><div class="tside" id="ace-side1"></div><div class="alive b r" id="ace-alive1">${pips}</div></div>
       </div>`;
     this.scoreA = sb.querySelector('.sc .a') as HTMLElement;
     this.scoreB = sb.querySelector('.sc .b') as HTMLElement;
     this.clock = sb.querySelector('#ace-clock') as HTMLElement;
     this.clockWrap = sb.querySelector('#ace-clockwrap') as HTMLElement;
+    this.mpt = sb.querySelector('#ace-mpt') as HTMLElement;
+    this.aliveEls = [sb.querySelector('#ace-alive0') as HTMLElement, sb.querySelector('#ace-alive1') as HTMLElement];
     this.sideTags = [sb.querySelector('#ace-side0') as HTMLElement, sb.querySelector('#ace-side1') as HTMLElement];
     this.root.appendChild(sb);
     this.roundLabel = sb.querySelector('#ace-round') as HTMLElement;
@@ -189,7 +202,7 @@ export class Viewer {
     // left: map + controls
     const left = el('div', 'ace-left');
     const wrap = el('div', 'ace-mapwrap');
-    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-endcard" id="ace-endcard"></div><div class="ace-heatkey" id="ace-heatkey"></div>`;
+    wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-banner" id="ace-banner"></div><div class="ace-endcard" id="ace-endcard"></div><div class="ace-heatkey" id="ace-heatkey"></div>`;
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox()); this.mapSvg = s as unknown as SVGSVGElement;
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
@@ -216,6 +229,7 @@ export class Viewer {
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
+    this.banner = wrap.querySelector('#ace-banner') as HTMLElement;
     this.endCard = wrap.querySelector('#ace-endcard') as HTMLElement;
     this.heatLegend = wrap.querySelector('#ace-heatkey') as HTMLElement;
 
@@ -275,7 +289,7 @@ export class Viewer {
     panel.innerHTML = `<h3><span class="b"></span>Kill Feed</h3><div class="feed" id="ace-feed"><div class="empty">Round in progress…</div></div>`;
     rail.appendChild(panel);
     const info = el('div', 'ace-panel');
-    info.innerHTML = `<h3><span class="b"></span>Match</h3><div class="devnote">Generated by <b>@ace/engine</b> from a seed. Every route is an A* path on Ascent's navmesh; every duel turns on who sees whom (vision cones), the utility thrown (smokes/flashes), and each player's form on the night. Because the engine is a pure function, every round is re-simulated 120× to show its <b>true odds</b> — which wins were robbery, which losses were chokes.</div>`;
+    info.innerHTML = `<h3><span class="b"></span>Match</h3><div class="devnote">Generated by <b>@ace/engine</b> from a seed. Every route is an A* path on the map's navmesh; every duel turns on who sees whom (vision cones), the utility thrown (smokes/flashes), and each player's form on the night. Because the engine is a pure function, every round is re-simulated 120× to show its <b>true odds</b> — which wins were robbery, which losses were chokes.</div>`;
     rail.appendChild(info);
     stage.appendChild(rail);
     this.root.appendChild(stage);
@@ -290,7 +304,7 @@ export class Viewer {
     this.feed = rail.querySelector('#ace-feed') as HTMLElement;
 
     this.playBtn.onclick = () => { if (this.showHeat) this.toggleHeat(); if (this.ended) this.scrubTo(0); this.playing = !this.playing; this.playBtn.textContent = this.playing ? '❚❚' : '▶'; this.last = null; };
-    (ctl.querySelector('#ace-speed') as HTMLElement).onclick = (e) => { this.speed = this.speed === 1 ? 2 : 1; (e.target as HTMLElement).textContent = this.speed + '×'; };
+    (ctl.querySelector('#ace-speed') as HTMLElement).onclick = (e) => { this.speed = this.speed === 1 ? 2 : this.speed === 2 ? 4 : 1; (e.target as HTMLElement).textContent = this.speed + '×'; };
     this.coneBtn = ctl.querySelector('#ace-vis') as HTMLElement;
     this.coneBtn.onclick = () => { this.showCones = !this.showCones; this.coneBtn.classList.toggle('on', this.showCones); this.render(); };
     if (!this.nav) { this.showCones = false; this.coneBtn.classList.remove('on'); this.coneBtn.style.display = 'none'; }
@@ -308,6 +322,20 @@ export class Viewer {
 
     this.rebuildStrip();
   }
+
+  /** Flash a broadcast moment banner over the map — the crowd beat (FIRST BLOOD, ACE,
+   *  CLUTCH, SPIKE PLANTED…). One element; a new moment replaces the last (the animation
+   *  restarts via a reflow). Suppressed in the heatmap analysis view. */
+  private announce(cls: string, html: string, dur = 1700) {
+    if (this.showHeat) return;
+    if (this.bannerTimer) clearTimeout(this.bannerTimer);
+    this.banner.className = 'ace-banner';
+    void this.banner.getBoundingClientRect();   // restart the entrance animation
+    this.banner.innerHTML = html;
+    this.banner.className = 'ace-banner show ' + cls;
+    this.bannerTimer = setTimeout(() => { this.banner.className = 'ace-banner'; }, dur);
+  }
+  private clearBanner() { if (this.bannerTimer) clearTimeout(this.bannerTimer); this.bannerTimer = null; this.banner.className = 'ace-banner'; this.banner.innerHTML = ''; }
 
   /** Rebuild the round strip from the current timeline (idempotent — used on the
    *  initial build AND when live playback unlocks new rounds). */
@@ -516,6 +544,10 @@ export class Viewer {
     this.abilities = r.events.filter((e): e is Extract<typeof e, { kind: 'ability' }> => e.kind === 'ability' && (e as { at?: Vec2 }).at != null);
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
+    // reset the moment layer for the fresh round, then call the round in like a broadcast
+    this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
+    const atkCls = r.attacker === 0 ? 'att' : 'def';
+    this.announce('roundstart', `<i>ROUND ${r.n}</i><b class="${atkCls}">${this.tl.teams[r.attacker].tag}</b><s>attack ${r.site}</s>`, 1500);
 
     // deaths
     const death = new Map<string, number>();
@@ -594,6 +626,11 @@ export class Viewer {
     let s0 = 0, s1 = 0;
     for (let ri = 0; ri < i; ri++) (this.tl.rounds[ri].winner === 0 ? s0++ : s1++);
     this.scoreA.textContent = String(s0); this.scoreB.textContent = String(s1);
+    // MATCH POINT — a side one round from closing it (first to 13). Both at 12 = overtime nerves.
+    const mp0 = s0 >= 12, mp1 = s1 >= 12;
+    this.mpt.innerHTML = mp0 && mp1 ? `<span class="both">MATCH POINT · BOTH</span>`
+      : mp0 ? `<span class="att">MATCH POINT · ${this.tl.teams[0].tag}</span>`
+      : mp1 ? `<span class="def">MATCH POINT · ${this.tl.teams[1].tag}</span>` : '';
 
     // each team's buy this round — an IN-GAME call made by the in-game leader
     ([0, 1] as const).forEach(ti => {
@@ -627,8 +664,18 @@ export class Viewer {
     const r = this.tl.rounds[this.roundIdx];
     const winCls = r.winner === 0 ? 'att' : 'def';
     const method: Record<string, string> = { detonation: 'Spike detonated', defuse: 'Spike defused', elimination: 'Team eliminated', time: 'Time expired' };
+    // the round's star: its top fragger (ties broken by first to reach the count)
+    let mvpH = '', mvpK = 0;
+    for (const [h, k] of this.killsInRound) if (k > mvpK) { mvpK = k; mvpH = h; }
+    const mvpCls = this.teamOf.get(mvpH) === 0 ? 'att' : 'def';
+    // a THRIFTY: winning the round on a save/eco while the loser was fully bought
+    const buyW = r.economy?.buy?.[String(r.winner) as '0' | '1'];
+    const buyL = r.economy?.buy?.[String(1 - r.winner) as '0' | '1'];
+    const thrifty = buyW === 'eco' && buyL === 'full';
     this.endCard.className = 'ace-endcard show ' + winCls;
-    this.endCard.innerHTML = `<div class="ec-tag">${this.tl.teams[r.winner].tag}</div><div class="ec-win">Round won</div><div class="ec-method">${method[r.method] ?? r.method} · ${r.winner === r.attacker ? 'attack' : 'defense'}</div>`;
+    this.endCard.innerHTML = `<div class="ec-tag">${this.tl.teams[r.winner].tag}</div><div class="ec-win">Round won${thrifty ? ' · <em class="ec-thrifty">THRIFTY</em>' : ''}</div>`
+      + `<div class="ec-method">${method[r.method] ?? r.method} · ${r.winner === r.attacker ? 'attack' : 'defense'}</div>`
+      + (mvpK >= 2 ? `<div class="ec-mvp">★ <b class="${mvpCls}">${mvpH}</b> · ${mvpK}K</div>` : '');
   }
   private hideEndCard() { if (this.endCard) { this.endCard.className = 'ace-endcard'; this.endCard.innerHTML = ''; } }
 
@@ -659,6 +706,7 @@ export class Viewer {
     this.clearAdvance();
     this.T = frac; this.fired = -1; this.ended = false; this.hideEndCard();
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
+    this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
     r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e, false); });
     this.fired = frac;
@@ -677,15 +725,21 @@ export class Viewer {
       const lk = this.lastKill.get(e.victim);
       const traded = lk != null && e.t - lk <= 0.04;
       this.lastKill.set(e.killer, e.t);
-      d.innerHTML = `${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span><i class="kill-xray" title="x-ray this duel">⌕</i>`;
+      // moment tallies — always counted (scrubs replay silently), announced only live
+      const fb = !this.firstBloodDone; this.firstBloodDone = true;
+      const streak = (this.killsInRound.get(e.killer) ?? 0) + 1; this.killsInRound.set(e.killer, streak);
+      const mkTag = streak >= 3 ? `<span class="mk s${streak}">${streak >= 5 ? 'ACE' : streak + 'K'}</span>` : '';
+      d.innerHTML = `${fb ? '<span class="fbtag" title="first blood">FB</span>' : ''}${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span><span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>${mkTag}<i class="kill-xray" title="x-ray this duel">⌕</i>`;
       const ke = e; d.classList.add('clickable'); d.onclick = () => this.openXray(this.tl.rounds[this.roundIdx], ke);   // duel x-ray
       this.feed.appendChild(d); this.feedItems.push(d);
       while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
       const v = this.agents.find(a => a.handle === e.victim);
+      const k = this.agents.find(a => a.handle === e.killer);
       if (v) {
         v.node.classList.add('dead');
-        // on-map kill pop: a brief expanding ring at the death spot draws the eye to
-        // the action (live only — replaying past kills on a scrub shouldn't re-pop).
+        // on-map kill beat (live only — replaying past kills on a scrub shouldn't re-pop):
+        // an expanding ring at the death spot + a TRACER from the killer, so the eye is
+        // drawn to where the fight happened and who took it.
         if (live) {
           const dp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch);
           const pop = svg('g') as SVGGElement; pop.setAttribute('class', 'ace-killpop ' + vc);
@@ -693,7 +747,23 @@ export class Viewer {
           pop.innerHTML = `<circle class="kp-ring" r="5"></circle>`;
           this.agLayer.appendChild(pop);
           setTimeout(() => pop.remove(), 680);
+          if (k) {
+            const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch);
+            const tr = svg('line');
+            tr.setAttribute('class', 'ace-tracer ' + kc);
+            tr.setAttribute('x1', kp[0].toFixed(1)); tr.setAttribute('y1', kp[1].toFixed(1));
+            tr.setAttribute('x2', dp[0].toFixed(1)); tr.setAttribute('y2', dp[1].toFixed(1));
+            this.trLayer.appendChild(tr);
+            setTimeout(() => tr.remove(), 640);
+          }
         }
+      }
+      // the crowd beats, called live: the opening kill, then the multikill ladder
+      if (live) {
+        if (streak === 5) this.announce('acek', `<i>ACE</i><b class="${kc}">${e.killer}</b><s>all five</s>`, 2600);
+        else if (streak === 4) this.announce('mkb', `<i>QUAD KILL</i><b class="${kc}">${e.killer}</b>`, 1900);
+        else if (streak === 3) this.announce('mkb', `<i>TRIPLE KILL</i><b class="${kc}">${e.killer}</b>`, 1700);
+        else if (fb) this.announce('fb', `<i>FIRST BLOOD</i><b class="${kc}">${e.killer}</b>`, 1500);
       }
       this.boardDirty = true;
     } else if (e.kind === 'plant') {
@@ -701,6 +771,7 @@ export class Viewer {
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
       const d = el('div', 'kill event'); d.textContent = `◆ Spike planted · ${e.site} site`;
       this.feed.appendChild(d); this.feedItems.push(d);
+      if (live) this.announce('plant', `<i>SPIKE PLANTED</i><s>${e.site} site — retake or lose it</s>`, 1800);
     } else if (e.kind === 'defuse') {
       this.spike.classList.remove('on');
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
@@ -725,6 +796,14 @@ export class Viewer {
     this.deadNow.clear();
     for (const e of this.tl.rounds[this.roundIdx].events) if (e.kind === 'kill' && e.t <= frac) this.deadNow.add(e.victim);
     this.renderBoard();
+    this.renderAlive();
+  }
+  /** The scorebar's 5-pip alive counters — the at-a-glance 5v4 read every broadcast HUD has. */
+  private renderAlive() {
+    ([0, 1] as const).forEach(ti => {
+      const pips = this.aliveEls[ti].children;
+      this.tl.teams[ti].players.forEach((p, i) => { if (pips[i]) pips[i].className = this.deadNow.has(p.handle) ? 'down' : ''; });
+    });
   }
   /** Sort each team by kills and repaint the rows (top fragger first). */
   private renderBoard() {
@@ -865,6 +944,12 @@ export class Viewer {
     let clutcher: VAg | null = null;
     if (liveAtt.length === 1 && liveDef.length >= 2) clutcher = liveAtt[0].a;
     else if (liveDef.length === 1 && liveAtt.length >= 2) clutcher = liveDef[0].a;
+    // the clutch callout — the moment a broadcast lives for, announced once per clutcher
+    if (clutcher && this.playing && !this.ended && this.lastClutch !== clutcher.handle) {
+      this.lastClutch = clutcher.handle;
+      const foes = (clutcher.side === 'att' ? liveDef : liveAtt).length;
+      this.announce('clutch', `<i>CLUTCH TIME</i><b class="${clutcher.side}">${clutcher.handle}</b><s>1 v ${foes}</s>`, 2100);
+    }
     // PASS 3 — apply (snap to a walkable cell so a nudged body never stands in a wall)
     for (const { a, dead, prog, p } of frame) {
       const q = this.nav && !dead && !this.walkAt(p[0], p[1]) ? (this.nearestWalkable(p) ?? p) : p;
