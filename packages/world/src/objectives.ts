@@ -20,16 +20,18 @@ export function computeObjective(rank: number, tier: number, divSize: number, pr
 }
 
 /** How the board's confidence (0..100) moves at season's end: smashing the brief backs you,
- *  bombing it mounts pressure. Forgiving from the neutral start — a near-miss costs little. */
+ *  bombing it mounts pressure. Forgiving from the neutral start — a near-miss costs little.
+ *  In PvP it's a REPUTATION/backing signal, never a sacking trigger — the club is always yours. */
 export function confDelta(objMet: boolean, needRank: number, finish: number): number {
   const reqGap = needRank - finish;   // >0 = you beat the required finish
   return objMet ? 6 + Math.min(9, Math.max(0, reqGap) * 3)   // met: +6 (scraped) .. +15 (smashed)
                 : Math.max(-16, -3 + reqGap * 3);            // missed: −6 a near-miss .. −16 a disaster
 }
 
+/** The board's mood/backing (never a threat to ownership in PvP — you keep your club). */
 export function confidenceStatus(c: number): { key: string; label: string } {
   if (c >= 75) return { key: 'secure', label: 'the board backs you fully' };
   if (c >= 45) return { key: 'stable', label: 'the board is satisfied' };
-  if (c >= 20) return { key: 'shaky', label: 'under pressure — results needed' };
-  return { key: 'brink', label: 'on the brink — your job is at risk' };
+  if (c >= 20) return { key: 'shaky', label: 'the board wants to see results' };
+  return { key: 'brink', label: 'the board is frustrated — but the club is yours' };
 }
