@@ -100,14 +100,28 @@ const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clippe
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
   hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch; spawnFan?: Vec2;
+  // presentation-only render state (never feeds the x-ray/heatmap reconstructions):
+  rox: number; roy: number;    // smoothed separation offset (kills pile-up jitter)
+  rang: number | null;         // smoothed facing angle — cones SWEEP between headings, never snap
 }
+
+/** A persistent, keyed ability node — built once per round, animated per frame as a pure
+ *  function of round-time T (scrub/pause-correct), instead of rebuilding DOM at 60Hz. */
+interface AbNode { e: Extract<Round['events'][number], { kind: 'ability' }>; g: SVGGElement; c1: SVGCircleElement; c2: SVGCircleElement; R: number; }
 
 const HITCH_DUR = 0.05;     // round-t the viewer pauses a trap-tripped agent (the visible stutter)
 const SPAWN_FAN = 34;       // lateral spacing of attackers across the spawn barrier (px, viewer-only)
 const SPAWN_CONVERGE = 0.12; // round-t over which the spread spawn collapses onto the engine path
 const SEP_MIN = 38;         // min on-screen spacing between same-side bodies — de-stack piles (px, viewer-only)
 const SEP_ITERS = 3;        // relaxation passes per frame to resolve overlaps
+const SEP_TAU = 70;         // ms time-constant smoothing the separation offset (de-jitters piles)
+const TURN_RATE = 9.4;      // rad/s max cone turn — a 90° flick sweeps in ~170ms (smooth but snappy)
 const AB_VIS_SCALE = 0.62;  // smoke/flash/recon render at this fraction of the gameplay radius — a Valorant-sized dome, not a room-filling cloud (visual only; the engine's blind reach is unchanged)
+const AB_BLOOM = 0.02;      // round-t a smoke takes to bloom to full size (~0.4s at 1×)
+const AB_FADE = 0.045;      // round-t of the smoke's dissipate fade at the end of its life
+const AB_ARM = 0.025;       // round-t a trap takes to arm (ring draws in)
+const easeOut = (p: number) => 1 - (1 - p) * (1 - p);
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 export class Viewer {
   private tl: MatchTimeline;
@@ -134,6 +148,8 @@ export class Viewer {
   private agLayer!: SVGGElement; private trLayer!: SVGGElement; private coneLayer!: SVGGElement; private spike!: SVGGElement;
   private abLayer!: SVGGElement; private utilBtn!: HTMLElement; private showUtil = true;
   private abilities: Extract<Round['events'][number], { kind: 'ability' }>[] = [];   // utility with geometry, for the map
+  private abNodes: AbNode[] = [];        // persistent per-round ability nodes (animated, never rebuilt per frame)
+  private snapNext = true;               // next render snaps smoothing state (round load / scrub — no lag-in)
   private feed!: HTMLElement; private feedItems: HTMLElement[] = [];
   private lastKill = new Map<string, number>();   // killer handle -> t, for tagging trades
   private playBtn!: HTMLElement; private timer!: HTMLElement; private seekFill!: HTMLElement; private seekHead!: HTMLElement; private seek!: HTMLElement;
@@ -319,7 +335,7 @@ export class Viewer {
     this.coneBtn.onclick = () => { this.showCones = !this.showCones; this.coneBtn.classList.toggle('on', this.showCones); this.render(); };
     if (!this.nav) { this.showCones = false; this.coneBtn.classList.remove('on'); this.coneBtn.style.display = 'none'; }
     this.utilBtn = ctl.querySelector('#ace-util') as HTMLElement;
-    this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.render(); };
+    this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.abLayer.style.display = this.showUtil ? '' : 'none'; this.render(); };
     this.heatBtn = ctl.querySelector('#ace-heat') as HTMLElement;
     this.heatBtn.onclick = () => this.toggleHeat();
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
@@ -550,8 +566,25 @@ export class Viewer {
     // quick fade so a new round eases in rather than hard-cutting from the result card
     this.mapSvg.classList.remove('round-in'); void this.mapSvg.getBoundingClientRect(); this.mapSvg.classList.add('round-in');
     this.agLayer.innerHTML = ''; this.trLayer.innerHTML = ''; this.coneLayer.innerHTML = ''; this.abLayer.innerHTML = '';
-    // utility with map geometry (older timelines without `at` are simply skipped)
+    this.snapNext = true;   // fresh round — smoothing state snaps to the first frame
+    // utility with map geometry (older timelines without `at` are simply skipped).
+    // Each ability gets ONE persistent node, built here and ANIMATED per frame as a pure
+    // function of round-time (bloom in, hold, dissipate) — scrub- and pause-correct, and
+    // no per-frame DOM churn.
     this.abilities = r.events.filter((e): e is Extract<typeof e, { kind: 'ability' }> => e.kind === 'ability' && (e as { at?: Vec2 }).at != null);
+    this.abNodes = this.abilities.filter(e => e.r != null).map(e => {
+      const side = e.side === r.attacker ? 'att' : 'def';
+      const R = e.ability === 'trap' ? (e.r as number) : (e.r as number) * AB_VIS_SCALE;
+      const g = svg('g') as SVGGElement;
+      g.setAttribute('class', `ace-abg ab-${e.ability} ${side}`);
+      g.setAttribute('transform', `translate(${(e.at as Vec2)[0].toFixed(1)},${(e.at as Vec2)[1].toFixed(1)})`);
+      g.style.display = 'none';
+      g.innerHTML = e.ability === 'smoke' ? '<circle class="abf"/><circle class="abe"/>'
+        : e.ability === 'trap' ? '<circle class="abt"/><circle class="abeye" r="3.2"/>'
+        : '<circle class="abb"/><circle class="abcore"/>';
+      this.abLayer.appendChild(g);
+      return { e, g, c1: g.children[0] as SVGCircleElement, c2: g.children[1] as SVGCircleElement, R };
+    });
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
     // reset the moment layer for the fresh round, then call the round in like a broadcast
@@ -576,7 +609,7 @@ export class Viewer {
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone };
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, rox: 0, roy: 0, rang: null };
     });
 
     // trap STUTTER: an agent whose path crosses an ENEMY trap was slowed by the
@@ -717,6 +750,7 @@ export class Viewer {
     this.T = frac; this.fired = -1; this.ended = false; this.hideEndCard();
     this.feed.innerHTML = ''; this.feedItems = []; this.lastKill.clear(); this.spike.classList.remove('on');
     this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
+    this.snapNext = true;   // a scrub jumps time — smoothing state snaps, never lags in
     this.agents.forEach(a => { a.node.classList.remove('dead'); a.tp = []; a.trail.setAttribute('points', ''); });
     r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t <= frac) this.fire(e, false); });
     this.fired = frac;
@@ -899,24 +933,32 @@ export class Viewer {
     return d + 'Z';
   }
 
-  private render() {
-    // utility on the map: each ability is a clean CIRCLE the size of its gameplay
-    // radius — like a Valorant smoke dome / flash, not CS-style gas filling a room
-    // (this also matches the engine's blind model, which is a plain radius). Smokes
-    // are solid vision-blockers; flashes/recon a fading burst; traps a dashed ring.
-    this.abLayer.innerHTML = '';
-    if (this.showUtil) {
-      const att = this.tl.rounds[this.roundIdx].attacker;
-      for (const a of this.abilities) {
-        const until = a.until ?? a.t;
-        if (this.T < a.t || this.T > until || !a.at || !a.r) continue;
-        const side = a.side === att ? 'att' : 'def';
-        // a flash/recon burst fades over its short window; smokes/traps hold steady
-        const burst = a.ability === 'flash' || a.ability === 'recon';
-        const op = burst ? ` style="opacity:${((1 - (this.T - a.t) / Math.max(0.02, until - a.t)) * 0.6 + 0.12).toFixed(2)}"` : '';
-        // traps are a watch-zone (full footprint); smoke/flash/recon are Valorant-sized domes
-        const rr = a.ability === 'trap' ? a.r : a.r * AB_VIS_SCALE;
-        this.abLayer.insertAdjacentHTML('beforeend', `<circle class="ace-abil ab-${a.ability} ${side}" cx="${a.at[0].toFixed(1)}" cy="${a.at[1].toFixed(1)}" r="${rr.toFixed(1)}"${op}></circle>`);
+  private render(dt = 16.7) {
+    const snap = this.snapNext; this.snapNext = false;
+    // utility on the map: persistent keyed nodes, ANIMATED as a pure function of
+    // round-time T (scrub/pause-correct — never wall-clock): a smoke BLOOMS to its
+    // gameplay dome, holds, then DISSIPATES as it expires; a flash/recon BURSTS and
+    // fades; a trap ARMS (grows in) and its dashes sweep slowly like a live sensor.
+    if (this.showUtil) for (const n of this.abNodes) {
+      const t0 = n.e.t, t1 = n.e.until ?? n.e.t;
+      if (this.T < t0 || this.T > t1) { n.g.style.display = 'none'; continue; }
+      n.g.style.display = '';
+      const prog = (this.T - t0) / Math.max(0.02, t1 - t0);
+      if (n.e.ability === 'smoke') {
+        const bloom = easeOut(clamp01((this.T - t0) / AB_BLOOM));
+        const fade = clamp01((t1 - this.T) / AB_FADE);
+        const r = n.R * (0.25 + 0.75 * bloom);
+        n.c1.setAttribute('r', r.toFixed(1)); n.c2.setAttribute('r', r.toFixed(1));
+        n.g.style.opacity = (0.3 + 0.7 * Math.min(bloom, fade)).toFixed(2);
+      } else if (n.e.ability === 'trap') {
+        const arm = easeOut(clamp01((this.T - t0) / AB_ARM));
+        n.c1.setAttribute('r', Math.max(1, n.R * arm).toFixed(1));
+        n.c1.setAttribute('transform', `rotate(${((this.T - t0) * 220).toFixed(1)})`);   // the sensor sweep
+        n.g.style.opacity = (0.45 + 0.55 * arm).toFixed(2);
+      } else {   // flash / recon: a burst that expands and burns out
+        n.c1.setAttribute('r', (n.R * (0.35 + 0.65 * easeOut(prog))).toFixed(1));
+        n.c2.setAttribute('r', Math.max(0.5, n.R * 0.22 * (1 - prog)).toFixed(1));
+        n.g.style.opacity = (0.15 + 0.85 * (1 - prog)).toFixed(2);
       }
     }
     const cones = this.showCones && !!this.nav;
@@ -929,11 +971,12 @@ export class Viewer {
       if (a.spawnFan && !dead && prog < SPAWN_CONVERGE) {
         const k = 1 - prog / SPAWN_CONVERGE; p[0] += a.spawnFan[0] * k; p[1] += a.spawnFan[1] * k;
       }
-      return { a, dead, prog, p };
+      return { a, dead, prog, p, bx: p[0], by: p[1] };   // b = pre-separation base (exact engine-mirrored position)
     });
     // PASS 2 — separate overlapping same-side bodies so a hold reads as a spread
-    // defense, not a pile on one point. A few relaxation passes push close pairs
-    // apart; recomputed fresh each frame (no drift). Pure render — engine untouched.
+    // defense, not a pile on one point. WALL-AWARE: a push is applied only if the
+    // pushed position stays walkable, so bodies slide apart along open ground and
+    // are never shoved through a wall (which used to teleport them via the snap).
     for (let it = 0; it < SEP_ITERS; it++) {
       for (let i = 0; i < frame.length; i++) {
         const fi = frame[i]; if (fi.dead) continue;
@@ -943,7 +986,10 @@ export class Viewer {
           if (d >= SEP_MIN) continue;
           if (d < 1e-3) { dx = i % 2 ? 1 : -1; dy = i % 2 ? 0 : 1; d = 1; }  // exact overlap → deterministic split
           const push = (SEP_MIN - d) / 2, ux = dx / d, uy = dy / d;
-          fi.p[0] -= ux * push; fi.p[1] -= uy * push; fj.p[0] += ux * push; fj.p[1] += uy * push;
+          const ix = fi.p[0] - ux * push, iy = fi.p[1] - uy * push;
+          if (!this.nav || this.walkAt(ix, iy)) { fi.p[0] = ix; fi.p[1] = iy; }
+          const jx = fj.p[0] + ux * push, jy = fj.p[1] + uy * push;
+          if (!this.nav || this.walkAt(jx, jy)) { fj.p[0] = jx; fj.p[1] = jy; }
         }
       }
     }
@@ -960,16 +1006,37 @@ export class Viewer {
       const foes = (clutcher.side === 'att' ? liveDef : liveAtt).length;
       this.announce('clutch', `<i>CLUTCH TIME</i><b class="${clutcher.side}">${clutcher.handle}</b><s>1 v ${foes}</s>`, 2100);
     }
-    // PASS 3 — apply (snap to a walkable cell so a nudged body never stands in a wall)
-    for (const { a, dead, prog, p } of frame) {
-      const q = this.nav && !dead && !this.walkAt(p[0], p[1]) ? (this.nearestWalkable(p) ?? p) : p;
+    // PASS 3 — apply, with TEMPORAL SMOOTHING of the separation offset (the relaxation
+    // can resolve differently frame to frame in a pile; an exponential lerp of the
+    // OFFSET — never the exact engine-mirrored base — turns that jitter into drift).
+    // Facing SWEEPS at a capped turn rate, so cones rotate like a player checking an
+    // angle instead of snapping. Both are presentation-only: the x-ray/heatmap always
+    // reconstruct from the raw engine-mirrored math.
+    const k = snap ? 1 : 1 - Math.exp(-dt / SEP_TAU);
+    for (const { a, dead, prog, p, bx, by } of frame) {
+      if (!dead) {
+        a.rox += (p[0] - bx - a.rox) * k; a.roy += (p[1] - by - a.roy) * k;
+      }
+      const px = bx + a.rox, py = by + a.roy;    // dead: offset frozen at the death frame (no corpse slide)
+      const q: Vec2 = this.nav && !dead && !this.walkAt(px, py) ? (this.nearestWalkable([px, py]) ?? [px, py]) : [px, py];
       a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})`);
       a.node.classList.toggle('clutch', a === clutcher);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
-      if (cones && !dead) { a.cone.setAttribute('d', this.conePath(q, facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch))); a.cone.style.display = ''; }
-      else a.cone.style.display = 'none';
+      if (cones && !dead) {
+        const f = facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch);
+        const ta = Math.atan2(f[1], f[0]);
+        if (a.rang == null || snap) a.rang = ta;
+        else {
+          let dA = ta - a.rang;
+          while (dA > Math.PI) dA -= Math.PI * 2; while (dA < -Math.PI) dA += Math.PI * 2;
+          const maxTurn = TURN_RATE * (dt / 1000) * this.speed;   // faster playback, faster flicks
+          a.rang += Math.abs(dA) <= maxTurn ? dA : Math.sign(dA) * maxTurn;
+        }
+        a.cone.setAttribute('d', this.conePath(q, [Math.cos(a.rang), Math.sin(a.rang)]));
+        a.cone.style.display = '';
+      } else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
     this.seekFill.style.width = (this.T * 100) + '%';
@@ -1003,7 +1070,7 @@ export class Viewer {
         else if (this.live) { this.liveWaiting = true; this.showLiveTail(); }
         else this.showMatchCard();
       }
-      this.render();
+      this.render(dt);
     }
     this.raf = requestAnimationFrame(this.loop);
   };

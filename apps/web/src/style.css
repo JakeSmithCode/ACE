@@ -75,13 +75,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-cone.att{fill:rgba(34,211,238,.10);stroke:rgba(34,211,238,.30)}
 .ace-cone.def{fill:rgba(255,92,110,.09);stroke:rgba(255,92,110,.28)}
 /* utility on the map: smokes block vision (solid grey), flashes/recon burst bright, traps are an armed dashed watch-ring */
-.ace-abil{pointer-events:none}
-.ab-smoke{fill:rgba(156,158,170,.52);stroke:rgba(200,202,214,.6);stroke-width:2}
-.ab-flash{fill:rgba(255,241,150,.32);stroke:rgba(255,241,150,.6);stroke-width:1.5}
-.ab-recon{fill:rgba(120,210,255,.16);stroke:rgba(120,210,255,.55);stroke-width:1.5;stroke-dasharray:5 4}
-.ab-trap{fill:transparent;stroke-width:2;stroke-dasharray:7 6}
-.ab-trap.att{stroke:rgba(34,211,238,.7)}.ab-trap.def{stroke:rgba(255,92,110,.7)}
-.ab-recon.att{stroke:rgba(34,211,238,.6)}.ab-recon.def{stroke:rgba(255,150,160,.6)}
+/* utility lifecycle nodes: one persistent <g> per ability, animated per frame as a pure
+   function of round-time (bloom → hold → dissipate) — scrub/pause-correct by construction */
+.ace-abg{pointer-events:none}
+.ab-smoke .abf{fill:rgba(156,158,170,.5)}
+.ab-smoke .abe{fill:none;stroke:rgba(200,202,214,.65);stroke-width:2}
+.ab-flash .abb{fill:rgba(255,241,150,.26);stroke:rgba(255,241,150,.65);stroke-width:1.5}
+.ab-flash .abcore{fill:rgba(255,248,214,.9)}
+.ab-recon .abb{fill:rgba(120,210,255,.14);stroke:rgba(120,210,255,.6);stroke-width:1.5;stroke-dasharray:5 4}
+.ab-recon .abcore{fill:rgba(190,232,255,.85)}
+.ab-trap .abt{fill:rgba(127,140,150,.05);stroke-width:2;stroke-dasharray:7 6}
+.ab-trap.att .abt{stroke:rgba(34,211,238,.7)}.ab-trap.def .abt{stroke:rgba(255,92,110,.7)}
+.ab-trap.att .abeye{fill:rgba(34,211,238,.85)}.ab-trap.def .abeye{fill:rgba(255,92,110,.85)}
+.ace-ag{transition:opacity .3s ease}   /* a death eases out instead of hard-cutting */
 .ace-ag .ring{stroke-width:2.5;fill:rgba(8,14,20,.85)}
 .ace-ag .ring.att{stroke:var(--att)}.ace-ag .ring.def{stroke:var(--def)}
 .ace-ag .core.att{fill:var(--att)}.ace-ag .core.def{fill:var(--def)}
