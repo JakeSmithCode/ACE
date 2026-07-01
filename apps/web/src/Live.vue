@@ -1173,6 +1173,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span class="lv-kicker">Premier · Match-day {{ DAY + 1 }}<template v-if="world"> / {{ world.lastDay + 1 }}</template></span>
           <span class="lv-livetag" :class="{ on: anyLive }">{{ anyLive ? '● LIVE' : allDone ? 'FINAL' : '—' }}</span>
           <span class="lv-embargo" v-if="anyLive">results sealed until each broadcast ends — no spoilers</span>
+          <button v-if="myClub && allDone && world && DAY < world.lastDay && !myClub.teamTalk" class="lv-talknudge" title="you haven't set a team talk for the next match — the right tone gives an edge" @click="showPanel('tactics')">◆ set a team talk</button>
           <button v-if="myClub && allDone && world && DAY < world.lastDay" class="lv-advance" :disabled="advancing" @click="advance">▶ advance match-day</button>
           <span v-else-if="myClub && allDone && world && DAY >= world.lastDay" class="lv-seasondone">season complete · playoffs next</span>
         </div>
