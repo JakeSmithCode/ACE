@@ -1,4 +1,5 @@
 import type { MatchTimeline, Round, Vec2 } from '@ace/shared';
+import { ANCHORS } from '@ace/maps';   // pure barrel (geometry only) — the site callouts
 
 // posAlong duplicated here (viewer is browser-only; avoids importing the node maps pkg)
 function posAlong(path: Vec2[], frac: number): Vec2 {
@@ -206,6 +207,15 @@ export class Viewer {
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox()); this.mapSvg = s as unknown as SVGSVGElement;
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
+    // site callouts (A/B/C) — the orientation every caster + viewer navigates by.
+    // From the same anchors the engine plays on, so the label sits where the fight is.
+    const sitesG = svg('g'); sitesG.setAttribute('class', 'ace-sitelabels');
+    const anchors = ANCHORS[this.tl.map];
+    if (anchors) for (const [sid, pt] of Object.entries(anchors.sites)) {
+      if (!pt) continue;
+      const [sx, sy] = pt as Vec2;
+      sitesG.innerHTML += `<g transform="translate(${sx},${sy})"><circle class="sl-ring" r="26"></circle><text class="sl-t" y="9">${sid}</text></g>`;
+    }
     this.abLayer = svg('g') as SVGGElement; this.abLayer.setAttribute('class', 'ace-abils');
     this.coneLayer = svg('g') as SVGGElement; this.coneLayer.setAttribute('class', 'ace-cones');
     this.trLayer = svg('g') as SVGGElement; this.trLayer.setAttribute('class', 'ace-trails');
@@ -225,7 +235,7 @@ export class Viewer {
       </radialGradient>`;
     this.heatLayer = svg('g') as SVGGElement; this.heatLayer.setAttribute('class', 'ace-heat');
     // utility (smokes/flashes/traps) sits on the map surface, cones above it, then trails/agents
-    s.append(defs, img, scrim, this.abLayer, this.coneLayer, this.trLayer, this.spike, this.agLayer, this.heatLayer);
+    s.append(defs, img, scrim, sitesG, this.abLayer, this.coneLayer, this.trLayer, this.spike, this.agLayer, this.heatLayer);
     wrap.appendChild(s);
     left.appendChild(wrap);
     this.phase = wrap.querySelector('#ace-phase') as HTMLElement;
