@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, type FacilityId, type Facilities, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -965,7 +965,28 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const wm = (await store.loadWorld(id))!;
       if (!c) return json(res, 200, null);
       const academy = academyView(acadOf(account), c.balance, h => scoutLevelOf(account, h));
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy });
+      const facilities = c.facilities ?? defaultFacilities();
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities) });
+    }
+    // POST /me/facility  { room }  → build/expand an HQ room (charges the club balance). The
+    // boost threads into development at the next tick; a built room costs recurring upkeep.
+    if (path[0] === 'me' && path[1] === 'facility' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { room?: string };
+      const room = b.room as FacilityId;
+      if (!['bootcamp', 'recovery', 'analyst'].includes(room)) return json(res, 400, { error: 'unknown room' });
+      const w = (await store.loadWorld(id))!;
+      const c = w.clubs.find(x => x.id === mine.id)!;
+      const fac: Facilities = { ...defaultFacilities(), ...c.facilities };
+      if (fac[room] >= FACILITY_MAX) return json(res, 200, { ok: false, reason: 'maxed' });
+      const cost = facilityCost(fac[room]);
+      if (c.balance < cost) return json(res, 200, { ok: false, reason: 'insufficient funds', cost });
+      const next = { ...fac, [room]: fac[room] + 1 };
+      const clubs = w.clubs.map(x => x.id === mine.id ? { ...x, facilities: next, balance: x.balance - cost } : x);
+      await store.saveWorld(id, { ...w, clubs });
+      return json(res, 200, { ok: true, facilities: next, balance: c.balance - cost, facilityUpkeep: facilityUpkeep(next) });
     }
     // POST /academy/upgrade  → build/expand the youth wing (charges the club balance);
     // a freshly-built academy delivers its first intake immediately.

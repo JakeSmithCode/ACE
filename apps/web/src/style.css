@@ -1550,6 +1550,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-sqdeal{display:block;font-style:normal;font-size:9px;color:var(--muted-2);letter-spacing:.02em;margin-top:1px}
 .lv-sqdeal.exp{color:var(--gold)}
 .lv-scoutbtn.renew{color:var(--gold);border-color:rgba(229,181,103,.4)}
+/* HQ / facilities panel */
+.lv-hqrooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px}
+.lv-hqroom{padding:11px 13px;background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:4px;display:flex;flex-direction:column;gap:6px}
+.lv-hqhd{display:flex;align-items:center;justify-content:space-between}
+.lv-hqhd b{font-family:var(--display);font-weight:700;font-size:14px;color:var(--ink)}
+.lv-hqpips{display:inline-flex;gap:2px}
+.lv-hqpips i{font-size:9px;color:var(--line-2,#333)}
+.lv-hqpips i.on{color:var(--brand)}
+.lv-hqblurb{font-family:var(--label);font-size:10px;color:var(--muted-2);line-height:1.4}
+.lv-hqeffect{font-family:var(--label);font-size:11px;color:var(--acc);margin-top:auto}
+.lv-hqroom .lv-go{align-self:flex-start}
 .lv-scoutbtn.ghost{padding:3px 6px;color:var(--muted-2)}
 .lv-mktrow.squad{align-items:center}
 /* profile card extras (reuses .pc-* from the single-player card) */

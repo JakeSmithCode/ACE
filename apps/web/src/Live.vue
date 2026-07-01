@@ -8,7 +8,7 @@
 import { onMounted, onUnmounted, ref, computed, watch as vueWatch } from 'vue';
 import type { MapId, Tactics } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth } from '@ace/world';
+import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX } from '@ace/world';
 import { Viewer } from './viewer';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
 const SCOUT_MAX = 3;
@@ -177,6 +177,22 @@ function benchStarter(sp: SquadPlayer) {
   const five = sq.filter(p => p.starter && p.id !== sp.id).map(p => p.id);
   five.push(sub.id);
   saveLineup(five);
+}
+
+// --- HQ / facilities: the dev money-sink (upgrade rooms to grow your squad faster) --
+const hqOpen = ref(false);
+const hqBusy = ref(false);
+const hqMsg = ref('');
+const FAC_ROOMS = FACILITIES;
+const facLevel = (id: string) => (myClub.value?.facilities as Record<string, number> | undefined)?.[id] ?? 0;
+async function upgradeFacility(room: string) {
+  if (!server.value || !token.value) return;
+  hqBusy.value = true; hqMsg.value = '';
+  try {
+    const r = await server.value.upgradeFacility(room, token.value);
+    if (r.ok) { await refreshMe(); hqMsg.value = `✓ upgraded — boost applies from the next match-day`; }
+    else hqMsg.value = r.reason === 'insufficient funds' ? `need ${kfmt(r.cost || 0)} to upgrade` : (r.reason ?? 'rejected');
+  } catch (e) { hqMsg.value = (e as Error).message; } finally { hqBusy.value = false; }
 }
 
 // --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
@@ -618,6 +634,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <button class="lv-planbtn" :class="{ on: planOpen }" @click="planOpen = !planOpen">✎ tactics</button>
           <button class="lv-planbtn mkt" :class="{ on: marketOpen }" @click="toggleMarket">⇄ market</button>
           <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
+          <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="hqOpen = !hqOpen">⌂ HQ</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
@@ -848,6 +865,26 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             </template>
           </div>
         </div>
+      </div>
+
+      <!-- the HQ — the development money-sink (upgrade rooms → your squad grows faster) -->
+      <div v-if="myClub && hqOpen" class="lv-mktpanel hq">
+        <div class="lv-mkth">
+          <span class="lv-kicker">HQ · Facilities</span>
+          <span class="lv-mktsub">a compounding investment — build rooms to develop your squad faster, slow the age decline, and lift the ceiling. Upkeep {{ kfmt(myClub.facilityUpkeep || 0) }}/season.</span>
+        </div>
+        <div class="lv-hqrooms">
+          <div v-for="f in FAC_ROOMS" :key="f.id" class="lv-hqroom">
+            <div class="lv-hqhd"><b>{{ f.name }}</b><span class="lv-hqpips"><i v-for="n in FACILITY_MAX" :key="n" :class="{ on: n <= facLevel(f.id) }">▮</i></span></div>
+            <div class="lv-hqblurb">{{ f.blurb }}</div>
+            <div class="lv-hqeffect">{{ f.effect(facLevel(f.id)) }}</div>
+            <button v-if="facLevel(f.id) < FACILITY_MAX" class="lv-go sm" :disabled="hqBusy || (myClub.balance || 0) < facilityCost(facLevel(f.id))" @click="upgradeFacility(f.id)">
+              {{ facLevel(f.id) === 0 ? 'build' : 'expand' }} · {{ kfmt(facilityCost(facLevel(f.id))) }}
+            </button>
+            <span v-else class="lv-acadmax">✦ maxed</span>
+          </div>
+        </div>
+        <span v-if="hqMsg" class="lv-wire" :class="{ ok: hqMsg.startsWith('✓') }">{{ hqMsg }}</span>
       </div>
 
       <!-- the academy — your homegrown youth pipeline (build → intake → develop → graduate) -->
