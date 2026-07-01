@@ -1546,6 +1546,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-sqalert{font-family:var(--label);font-size:10px;letter-spacing:.03em;padding:2px 8px;border-radius:10px}
 .lv-sqalert.inj{color:var(--def);background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.3)}
 .lv-sqalert.tired{color:#e0a850;background:rgba(229,181,103,.1);border:1px solid rgba(229,181,103,.3)}
+.lv-sqalert.exp{color:var(--gold);background:rgba(229,181,103,.1);border:1px solid rgba(229,181,103,.3)}
+.lv-sqdeal{display:block;font-style:normal;font-size:9px;color:var(--muted-2);letter-spacing:.02em;margin-top:1px}
+.lv-sqdeal.exp{color:var(--gold)}
+.lv-scoutbtn.renew{color:var(--gold);border-color:rgba(229,181,103,.4)}
 .lv-scoutbtn.ghost{padding:3px 6px;color:var(--muted-2)}
 .lv-mktrow.squad{align-items:center}
 /* profile card extras (reuses .pc-* from the single-player card) */

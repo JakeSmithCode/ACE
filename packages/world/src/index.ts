@@ -10,6 +10,7 @@ export * from './divisions.js';
 export * from './playoffs.js';
 export * from './cup.js';
 export * from './fitness.js';
+export * from './contracts.js';
 export * from './affinity.js';
 export * from './resolve.js';
 export * from './state.js';

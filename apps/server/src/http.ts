@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -403,6 +403,26 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (cupChampClub) cupHistory.push({ season: w.season, tag: cupChampClub.tag, name: cupChampClub.name, tier: cupChampClub.tier });
     // season's match-days exhausted → roll it over, then open the new season's day 0
     const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
+    // CONTRACTS tick down at the rollover (owner-scoped): a deal that hits 0 unrenewed WALKS
+    // FREE — the player leaves, the club backfills from free agency to stay valid. AI clubs
+    // float at the market wage (untouched), so a world with no owners is unaffected.
+    {
+      const nw = (await store.loadWorld(id))!;
+      const allHandles = new Set(nw.clubs.flatMap(c => c.roster.map(p => p.handle)));
+      let changed = false;
+      const clubs = nw.clubs.map(c => {
+        if (!c.owner) return c;
+        const faSeed = (nw.seed ^ (nw.season * 0x9e3779b1) ^ (c.tier * 131 + 7)) >>> 0;
+        const r = processContracts(c.roster, nw.patch, faSeed, allHandles);
+        if (!r.departed.length) return c;
+        changed = true;
+        r.signed.forEach(p => allHandles.add(p.handle));
+        for (const d of r.departed) notify(c.owner!, 'system', `📄 ${d.handle} left on a free — his contract expired unrenewed`, nw.season, 0);
+        for (const s of r.signed) notify(c.owner!, 'system', `✍ ${s.handle} signed to fill the gap (free agent, ${CONTRACT_YEARS}y deal)`, nw.season, 0);
+        return { ...c, roster: r.roster };
+      });
+      if (changed) await store.saveWorld(id, { ...nw, clubs });
+    }
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
@@ -613,7 +633,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const result = resolveWorldBid(w, clubIdx, player, b.amount ?? 0);
       if (!result.ok) return json(res, 200, result);                 // outbid / below / broke → raise or walk
       sold.add(player.handle);
-      await store.saveWorld(id, applySigning(w, mine.id, player, result.paid!));
+      // the signing carries a fresh contract (a wage LOCKED for the term) — the lasting cost
+      const signed = applySigning(w, mine.id, player, result.paid!);
+      const withDeal = { ...signed, clubs: signed.clubs.map(c => c.id === mine.id ? { ...c, roster: c.roster.map(p => p.handle === player.handle ? { ...p, contract: newContract(p, signed.patch, CONTRACT_YEARS) } : p) } : c) };
+      await store.saveWorld(id, withDeal);
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ...result, club: publicClub(after, after.clubs[clubIdx]) });
     }
@@ -1039,6 +1062,21 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       try { await savePlan(store, id, mine.id, { tactics: body.tactics ?? cur.tactics, comp: body.comp ?? cur.comp, lineup: body.lineup ?? cur.lineup }); }
       catch (e) { return json(res, 422, { error: (e as Error).message }); }
       return json(res, 200, planOf((await myClub(store, id, account))!));
+    }
+    // POST /me/renew  { playerId }  → re-sign one of your players to a fresh deal at his
+    // current market wage (a raise for a risen youngster, a cut for a faded vet). Free — it
+    // just re-locks the wage so he can't walk. Returns the updated squad.
+    if (path[0] === 'me' && path[1] === 'renew' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { playerId?: string };
+      if (!mine.roster.some(p => p.id === b.playerId)) return json(res, 404, { error: 'not on your roster' });
+      const w = (await store.loadWorld(id))!;
+      const clubs = w.clubs.map(c => c.id === mine.id ? { ...c, roster: renewContract(c.roster, b.playerId!, w.patch) } : c);
+      await store.saveWorld(id, { ...w, clubs });
+      const after = (await store.loadWorld(id))!;
+      return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });
     }
     return json(res, 404, { error: 'not found' });
   });

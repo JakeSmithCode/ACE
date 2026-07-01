@@ -26,7 +26,7 @@ export interface AttrScout { key: string; cur: number; ceil: number; mech: boole
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
-export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[] }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; wage: number; contractYears: number; renew: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[] }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
 export interface FivePlayer { handle: string; role: string; overall: number; igl: boolean; solo?: string; soloTier?: string; agent?: string; trait?: string | null; name?: string; country?: string; flag?: string; age?: number }
 export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lineup?: string[] }
@@ -268,6 +268,8 @@ export class AceServer {
       body: JSON.stringify({ lineup }),
     }).then(r => j<ClubPlan>(r));
   }
+  /** Re-sign a player to a fresh deal at his current market wage (re-locks his wage). */
+  renew(playerId: string, token: string): Promise<{ ok: boolean; squad?: SquadPlayer[] }> { return this.post('/me/renew', { playerId }, token); }
 
   /** Subscribe to a day's synced live match-center (SSE). `onFrame` fires ~1/s with
    *  every watched fixture's running score; returns an unsubscribe fn. Falls back to

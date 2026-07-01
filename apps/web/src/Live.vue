@@ -194,14 +194,22 @@ const squadSummary = computed(() => {
   const avgAge = Math.round(sq.reduce((s, p) => s + p.age, 0) / sq.length);
   const value = sq.reduce((s, p) => s + p.value, 0);
   const out = sq.filter(p => p.injury > 0).length, tired = sq.filter(p => p.injury === 0 && p.fatigue >= 70).length;
+  const wages = sq.reduce((s, p) => s + p.wage, 0), expiring = sq.filter(p => p.contractYears > 0 && p.contractYears <= 1).length;
   const depth = ROLE_ORDER.map(role => {
     const ps = sq.filter(p => p.role === role);
     return { role, short: ROLE_SHORT[role], total: ps.length, starters: ps.filter(p => p.starter).length, need: ROLE_NEED[role], thin: ps.length <= ROLE_NEED[role] };
   });
-  return { count: sq.length, avgOvr, avgAge, value, depth, out, tired };
+  return { count: sq.length, avgOvr, avgAge, value, depth, out, tired, wages, expiring };
 });
 // the player profile card (a full dossier on one of your squad)
 const playerCard = ref<SquadPlayer | null>(null);
+// re-sign a player to a fresh deal (re-locks his wage so he can't walk free)
+async function renew(sp: SquadPlayer) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try { const r = await server.value.renew(sp.id, token.value); if (r.ok) await refreshMe(); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
 
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
@@ -789,6 +797,8 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <span class="lv-sqstat"><b>{{ squadSummary.avgOvr }}</b> avg OVR</span>
             <span class="lv-sqstat"><b>{{ squadSummary.avgAge }}</b> avg age</span>
             <span class="lv-sqstat"><b>{{ kfmt(squadSummary.value) }}</b> squad value</span>
+            <span class="lv-sqstat"><b>{{ kfmt(squadSummary.wages) }}</b> wage bill/yr</span>
+            <span v-if="squadSummary.expiring" class="lv-sqalert exp" title="contracts in their final year — renew them or they walk free at season's end">📄 {{ squadSummary.expiring }} expiring</span>
             <span v-if="squadSummary.out" class="lv-sqalert inj" title="players injured — a reserve covers each, or they play hurt">⚕ {{ squadSummary.out }} out</span>
             <span v-if="squadSummary.tired" class="lv-sqalert tired" title="players redlining on fatigue — rotate them out before they break down">◔ {{ squadSummary.tired }} tired</span>
             <span class="lv-sqdepth">
@@ -816,9 +826,12 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                 <span class="lv-mktceil">↗ {{ sp.ceiling[1] }}</span>
                 <span class="lv-room" :class="{ grow: sp.room >= 5, done: sp.room === 0 }">{{ sp.room >= 5 ? `▲ +${sp.room}` : sp.room > 0 ? `+${sp.room}` : 'peaked' }}</span>
               </span>
-              <span class="lv-mktval">{{ kfmt(sp.value) }}</span>
+              <span class="lv-mktval">{{ kfmt(sp.value) }}
+                <i v-if="sp.contractYears" class="lv-sqdeal" :class="{ exp: sp.contractYears <= 1 }" :title="`under contract for ${sp.contractYears} more season(s) at ${kfmt(sp.wage)}/yr — wage locked until it expires`">{{ sp.contractYears }}y · {{ kfmt(sp.wage) }}/y</i>
+              </span>
               <span class="lv-squadacts">
                 <button class="lv-scoutbtn ghost" title="per-skill breakdown" @click="toggleExpand('s:'+sp.id)">{{ expanded.has('s:'+sp.id) ? '▾' : '▸' }}</button>
+                <button v-if="sp.contractYears > 0 && sp.contractYears <= 1" class="lv-scoutbtn renew" :disabled="marketBusy" :title="`re-sign at his current wage (${kfmt(sp.renew)}/yr) — or he walks free at season's end`" @click="renew(sp)">renew</button>
                 <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>
                 <button v-else-if="canBench(sp)" class="lv-scoutbtn" :disabled="marketBusy" title="bench him (a benched player rusts)" @click="benchStarter(sp)">bench</button>
                 <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
@@ -1201,6 +1214,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span><i>Ceiling</i> ↗ {{ playerCard.ceiling[0] }}–{{ playerCard.ceiling[1] }}<em v-if="playerCard.room" class="pc-room"> (+{{ playerCard.room }})</em></span>
           <span v-if="trait(playerCard.id)"><i>Trait</i> ✦ {{ trait(playerCard.id)!.label }}</span>
           <span :class="{ gold: playerCard.injury || playerCard.fatigue >= 70 }"><i>Condition</i> <template v-if="playerCard.injury">⚕ OUT {{ playerCard.injury }}d</template><template v-else>{{ playerCard.fatigue }}% fatigue</template></span>
+          <span :class="{ gold: playerCard.contractYears === 1 }"><i>Contract</i> <template v-if="playerCard.contractYears">{{ playerCard.contractYears }}y · {{ kfmt(playerCard.wage) }}/y</template><template v-else>no deal</template></span>
           <span><i>Value</i> {{ kfmt(playerCard.value) }}</span>
         </div>
         <div class="pc-section">Attributes <span class="pc-ceilkey">current ↗ scouted ceiling</span></div>
