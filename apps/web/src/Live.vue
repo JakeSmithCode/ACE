@@ -1469,8 +1469,15 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span><i>Ceiling</i> ↗ {{ playerCard.ceiling[0] }}–{{ playerCard.ceiling[1] }}<em v-if="playerCard.room" class="pc-room"> (+{{ playerCard.room }})</em></span>
           <span v-if="trait(playerCard.id)"><i>Trait</i> ✦ {{ trait(playerCard.id)!.label }}</span>
           <span :class="{ gold: playerCard.injury || playerCard.fatigue >= 70 }"><i>Condition</i> <template v-if="playerCard.injury">⚕ OUT {{ playerCard.injury }}d</template><template v-else>{{ playerCard.fatigue }}% fatigue</template></span>
+          <span :class="{ gold: playerCard.mood >= 72, muted: playerCard.mood < 48 }"><i>Morale</i> {{ playerCard.mood >= 72 ? '☺' : playerCard.mood < 48 ? '☹' : '·' }} {{ playerCard.mood }}% ({{ moodLabel(playerCard.mood) }})</span>
           <span :class="{ gold: playerCard.contractYears === 1 }"><i>Contract</i> <template v-if="playerCard.contractYears">{{ playerCard.contractYears }}y · {{ kfmt(playerCard.wage) }}/y</template><template v-else>no deal</template></span>
           <span><i>Value</i> {{ kfmt(playerCard.value) }}</span>
+          <span v-if="playerCard.focus"><i>Training</i> ◎ {{ ATTR_LABEL[playerCard.focus] || playerCard.focus }}</span>
+          <span v-if="playerCard.captain || playerCard.mentor || playerCard.mentee"><i>Role</i>
+            <template v-if="playerCard.captain">Ⓒ Captain</template>
+            <template v-if="playerCard.mentor">🎓 Mentor</template>
+            <template v-if="playerCard.mentee">↑ Mentored</template>
+          </span>
         </div>
         <div class="pc-section">Attributes <span class="pc-ceilkey">current ↗ scouted ceiling</span></div>
         <div class="pc-attrs">

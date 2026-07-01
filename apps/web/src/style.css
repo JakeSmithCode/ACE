@@ -503,6 +503,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pc-bio span{display:flex;flex-direction:column;gap:1px}
 .pc-bio i{font-style:normal;font-family:var(--label);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2)}
 .pc-bio span.gold{color:var(--gold)}
+.pc-bio span.muted{color:var(--muted)}
 .pc-section{font-family:var(--label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px;display:flex;justify-content:space-between;align-items:baseline}
 .pc-ceilkey{font-size:9px;letter-spacing:.02em;text-transform:none;color:var(--muted-2)}
 .pc-attrs{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
