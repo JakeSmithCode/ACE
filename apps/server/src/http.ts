@@ -303,7 +303,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // so the season can PROGRESS: `advance` ticks the next day and moves the cursor.
   let liveDay = 0;
   let liveKickoff = clock();
-  await runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
+  // relevance scoping: the Premier is always on air, and ANY division holding a human-owned
+  // club is full-simmed too — so a relegated owner's matches stay watchable and their
+  // match-night levers (fitness/morale/team talk) keep biting the engine, not the quick-resolve.
+  const fullDivs = (w: WorldState) => {
+    const owned = new Set(w.clubs.filter(c => c.owner).map(c => c.tier));
+    return (d: number) => d === 0 || owned.has(d);
+  };
+  await runTick(store, id, { full: fullDivs((await store.loadWorld(id))!), navOf, kickoffAt: liveKickoff, broadcastSecs });
 
   // re-sim each watchable fixture once → the live source the match-center streams.
   // Keyed by season:day:slot, so days accumulate as the season advances.
@@ -320,7 +327,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const advance = async (): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number }> => {
     const tickDay = async (w: WorldState) => {
       liveKickoff = clock();
-      await runTick(store, id, { full: (d) => d === 0, navOf, kickoffAt: liveKickoff, broadcastSecs });
+      await runTick(store, id, { full: fullDivs(w), navOf, kickoffAt: liveKickoff, broadcastSecs });
       liveDay = w.day;
       await cacheDay(w.season, w.day);
     };

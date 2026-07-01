@@ -407,11 +407,11 @@ async function connect() {
   try {
     world.value = await s.world();
     DAY.value = world.value.broadcastDay ?? 0;
-    table.value = (await s.standings(world.value.season, 0, 0)).table;
     server.value = s; status.value = 'live';
     const saved = localStorage.getItem('ace.token');   // stay signed in across refresh
     if (saved && !token.value) token.value = saved;
     await refreshMe();
+    await refreshTable();   // after refreshMe, so the table follows YOUR division if you're not Premier
     await loadHonors();
     await loadNews();
     openStream();
@@ -451,7 +451,11 @@ async function advance() {
     if (cupOpen.value) await loadCup();
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
-async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, 0, 0)).table; } catch { /* transient */ } }
+// the standings follow YOUR division — a relegated/promoted owner sees their own table
+// (an unowned/visitor view defaults to the Premier).
+const tableTier = computed(() => myClub.value?.tier ?? 0);
+const tableGroup = computed(() => (myClub.value as { group?: number } | null)?.group ?? 0);
+async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
@@ -1230,7 +1234,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
       <!-- the day's live matches -->
       <div class="lv-stage">
         <div class="lv-stageh">
-          <span class="lv-kicker">Premier · Match-day {{ DAY + 1 }}<template v-if="world"> / {{ world.lastDay + 1 }}</template></span>
+          <span class="lv-kicker">{{ tableTier > 0 ? `Premier + ${tierName(tableTier)}` : 'Premier' }} · Match-day {{ DAY + 1 }}<template v-if="world"> / {{ world.lastDay + 1 }}</template></span>
           <span class="lv-livetag" :class="{ on: anyLive }">{{ anyLive ? '● LIVE' : allDone ? 'FINAL' : '—' }}</span>
           <span class="lv-embargo" v-if="anyLive">results sealed until each broadcast ends — no spoilers</span>
           <button v-if="myClub && allDone && world && DAY < world.lastDay && !myClub.teamTalk" class="lv-talknudge" title="you haven't set a team talk for the next match — the right tone gives an edge" @click="showPanel('tactics')">◆ set a team talk</button>
@@ -1301,7 +1305,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
       <div class="lv-bottom">
         <!-- Premier standings (embargo-aware: only resolved games count) -->
         <div class="lv-table">
-          <div class="lv-tableh"><span class="lv-kicker">Premier standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
+          <div class="lv-tableh"><span class="lv-kicker">{{ tierName(tableTier) }} standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
           <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
           <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
             <span class="r">{{ rank + 1 }}</span>
