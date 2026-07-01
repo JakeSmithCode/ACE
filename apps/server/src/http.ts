@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -249,6 +249,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
   const notifiedBdays = new Set<string>();   // season:day:playerId birthdays already shouted out
+  const injuredKnown = new Set<string>();    // account:playerId currently known injured (fire once per spell)
   // owner-to-owner mail (human-to-human, DESIGN §16 social) — real CONVERSATIONS: every
   // message is delivered to BOTH participants' mailboxes (sender's copy read, recipient's
   // unread) and tagged with a `threadId` so a reply continues the thread. `mine` is set
@@ -364,7 +365,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
           if (fixtureStatus(f, clock()) === 'resolved' && !notifiedResults.has(k)) {
             notifiedResults.add(k);
             const us = f.home === ci ? f.homeScore : f.awayScore, them = f.home === ci ? f.awayScore : f.homeScore;
-            notify(c.owner, 'result', `${us > them ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`, wn.season, f.day);
+            const won = us > them;
+            // a derby (vs your rival) carries extra weight — bragging rights either way
+            const derby = c.rival === wn.clubs[f.home === ci ? f.away : f.home].id;
+            const msg = derby
+              ? `⚔ ${won ? 'WON the derby' : 'lost the derby'} ${us}–${them} vs ${opp.tag} — ${won ? 'bragging rights are yours' : 'they get the bragging rights'}`
+              : `${won ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`;
+            notify(c.owner, 'result', msg, wn.season, f.day);
           }
         }
         // birthdays: any roster player whose birthday falls between the last match-day and
@@ -379,6 +386,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
             notifiedBdays.add(bk);
             notify(c.owner, 'system', `🎂 ${p.handle} (${personOf(p.id).name}) turns ${displayAge(p.age, bd, today)} today`, wn.season, liveDay);
           }
+        }
+        // injuries: a starter who just picked up a knock — fire once per spell (tracked so a
+        // multi-day injury doesn't re-notify each match-day), clear when he heals up.
+        for (const p of c.roster) {
+          const ik = `${c.owner}:${p.id}`, hurt = injuryOf(wn.fitness, p.id) > 0;
+          if (hurt && !injuredKnown.has(ik)) {
+            injuredKnown.add(ik);
+            notify(c.owner, 'system', `⚕ ${p.handle} picked up an injury — out ${injuryOf(wn.fitness, p.id)} match-day(s); rotate a reserve in`, wn.season, liveDay);
+          } else if (!hurt && injuredKnown.has(ik)) injuredKnown.delete(ik);
         }
         await persistAccount(c.owner);   // durable: the owner's freshly-pushed notifications
       }
