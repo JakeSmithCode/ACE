@@ -278,6 +278,15 @@ async function showPanel(which: string) {
   if (which === 'market' && marketOpen.value && !board.value.length) void loadBoard();
   if (target.value) { await nextTick(); document.querySelector('.lv-planpanel, .lv-mktpanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
 }
+// Escape closes whatever's open (accordion panels + the bell/mail/chat dropdowns) — the
+// expected "get me out of here" gesture, so a manager never has to hunt for the ✕.
+function onKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  if (![...Object.values(PANEL_REFS), notifOpen, mailOpen, chatOpen].some(r => r.value)) return;
+  for (const r of Object.values(PANEL_REFS)) r.value = false;
+  notifOpen.value = false; mailOpen.value = false;
+  if (chatOpen.value) toggleChat();   // routes through the stream cleanup
+}
 async function upgradeAcademy() {
   if (!server.value || !token.value) return; acadBusy.value = true; acadMsg.value = '';
   try {
@@ -641,8 +650,8 @@ const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55)
 const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.max(1, Math.round((rank / total) * 100)) : null);
 const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
 
-onMounted(connect);
-onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); });
+onMounted(() => { connect(); window.addEventListener('keydown', onKey); });
+onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
 </script>
 
 <template>
