@@ -57,6 +57,8 @@ export interface WorldClub {
   focuses?: Record<string, keyof Attributes>;   // an owner's per-player training focus (id → skill); undefined → balanced
   teamTalk?: Talk;      // the owner's chosen pre-match tone (one-shot; consumed + cleared after the match)
   captain?: string;     // the owner's named captain (player id); undefined → the best natural leader in the five
+  rival?: string;       // the owner's derby rival (club id — nearest strength at claim; spans leagues if either moves)
+  derby?: { w: number; l: number };   // head-to-head record vs the rival (builds over the career)
 }
 
 /** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
@@ -65,6 +67,17 @@ export function strengthRankIn(clubs: WorldClub[], i: number): number {
   const c = clubs[i];
   const peers = clubs.map((x, j) => ({ j, s: x.strength })).filter(m => clubs[m.j].tier === c.tier && clubs[m.j].group === c.group).sort((a, b) => b.s - a.s);
   return peers.findIndex(m => m.j === i) + 1;
+}
+
+/** The nearest-strength club in a club's own division — its natural derby rival (picked once at
+ *  claim, then fixed for the career, so the derby spans the leagues even if either side moves).
+ *  Deterministic (ties broken by index). Returns the rival club id, or null if it stands alone. */
+export function pickRival(clubs: WorldClub[], i: number): string | null {
+  const me = clubs[i];
+  const peers = clubs.map((c, j) => ({ j, s: c.strength })).filter(m => m.j !== i && clubs[m.j].tier === me.tier && clubs[m.j].group === me.group);
+  if (!peers.length) return null;
+  peers.sort((a, b) => Math.abs(a.s - me.strength) - Math.abs(b.s - me.strength) || a.j - b.j);
+  return clubs[peers[0].j].id;
 }
 
 /** An owned club's combined development boost: HQ rooms × backroom staff. Undefined for both

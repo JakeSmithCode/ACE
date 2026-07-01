@@ -1524,6 +1524,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-talkread{font-style:normal;font-size:9px;letter-spacing:.02em;color:var(--muted-2)}
 .lv-talkread.great{color:#6fd39a}.lv-talkread.poor{color:#e07a7a}
 .lv-talkbtn.great{border-color:rgba(111,211,154,.4)}.lv-talkbtn.poor{border-color:rgba(224,122,122,.3)}
+/* derby / rivalry: the rival chip on the club bar + the DERBY flag on a fixture */
+.lv-rival{font-family:var(--label);font-size:9.5px;font-weight:700;letter-spacing:.03em;color:#e0906a;background:rgba(224,144,106,.1);border:1px solid rgba(224,144,106,.28);border-radius:5px;padding:2px 7px}
+.lv-rival i{font-style:normal;color:var(--muted);margin-left:3px;font-variant-numeric:tabular-nums}
+.lv-card.derby{border-color:rgba(224,144,106,.45)}
+.lv-derbytag{position:absolute;top:3px;left:50%;transform:translateX(-50%);font-family:var(--label);font-size:8px;font-weight:800;letter-spacing:.08em;color:#1a0f08;background:linear-gradient(90deg,#e0906a,#e6b86a);padding:1px 7px;border-radius:0 0 4px 4px;z-index:2;white-space:nowrap}
 /* the world top-players leaderboard (prestige board) */
 .lv-leaders{margin-top:14px;background:var(--panel,rgba(255,255,255,.02));border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .lv-kicker.btn{background:none;border:none;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;padding:0;display:inline-flex;align-items:center;gap:6px}

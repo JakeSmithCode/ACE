@@ -46,6 +46,11 @@ const authed = computed(() => !!token.value);
 vueWatch(token, (t: string | null) => { if (t) localStorage.setItem('ace.token', t); else localStorage.removeItem('ace.token'); });
 const tierName = (t: number) => RANK_TIERS[t] ?? `T${t}`;
 const mine = (tag: string) => myClub.value?.tag === tag;
+// a derby: your club's fixture where the opponent is your rival (extra morale stakes)
+const isDerby = (f: { home: { tag: string }; away: { tag: string } }) => {
+  const rt = myClub.value?.rival?.tag; if (!rt) return false;
+  return (mine(f.home.tag) && f.away.tag === rt) || (mine(f.away.tag) && f.home.tag === rt);
+};
 
 const verifyNote = ref('');
 async function doAuth() {
@@ -713,6 +718,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <i class="lv-badge id" :style="{ background: `hsl(${hue(myClub.tag)} 60% 24%)`, borderColor: `hsl(${hue(myClub.tag)} 65% 55%)` }">{{ myClub.tag }}</i>
           <b class="lv-myname">{{ myClub.name }}</b>
           <span class="lv-tier">{{ tierName(myClub.tier) }} · {{ myClub.rating }} OVR</span>
+          <span v-if="myClub.rival" class="lv-rival" :title="`your derby rival — ${myClub.rival.name}. Head-to-head ${myClub.derbyRecord?.w ?? 0}–${myClub.derbyRecord?.l ?? 0}`">⚔ {{ myClub.rival.tag }} <i>{{ myClub.derbyRecord?.w ?? 0 }}–{{ myClub.derbyRecord?.l ?? 0 }}</i></span>
           <span class="lv-five">{{ myClub.five.map(p => p.handle).join(' · ') }}</span>
           <span class="lv-btngroup">
             <button class="lv-planbtn" :class="{ on: planOpen }" @click="showPanel('tactics')">✎ tactics</button>
@@ -1142,7 +1148,8 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <span v-else-if="myClub && allDone && world && DAY >= world.lastDay" class="lv-seasondone">season complete · playoffs next</span>
         </div>
         <div class="lv-cards">
-          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag) }]">
+          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag), derby: isDerby(f) }]">
+            <span v-if="isDerby(f)" class="lv-derbytag" title="a derby vs your rival — extra stakes; a win lifts the room, a loss stings">⚔ DERBY</span>
             <div class="lv-team">
               <i class="lv-badge clickable" :style="{ background: `hsl(${hue(f.home.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.home.tag)} 65% 55%)` }" @click="openClub(f.home.tag)">{{ f.home.tag }}</i>
               <span class="lv-tname">{{ f.home.name }}</span>

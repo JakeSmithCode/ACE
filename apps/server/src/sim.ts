@@ -21,7 +21,8 @@ function clubPlan(self: WorldClub, opp: WorldClub, patch: WorldState['patch'], f
   // team (byte-identical). Both are engine-blind — the engine just sees the scaled attrs.
   if (self.owner) {
     const { team, fielded } = fitTeam(self, planFive(self), fitness);
-    const adj = moraleTeam(team, morale, { talk: self.teamTalk, favEdge: self.strength - opp.strength, mood: squadMood(morale, fielded.map(p => p.id)) });
+    const derby = self.rival === opp.id;   // the derby: Big-Game players rise for it
+    const adj = moraleTeam(team, morale, { talk: self.teamTalk, favEdge: self.strength - opp.strength, mood: squadMood(morale, fielded.map(p => p.id)), derby });
     return { team: adj, comp: self.comp, tactics: self.tactics };
   }
   const team = { id: self.id, tag: self.tag, name: self.name, players: aiBestFive(self.roster, patch) };

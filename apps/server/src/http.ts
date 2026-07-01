@@ -982,7 +982,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const favEdge = oppIdx >= 0 ? c.strength - wm.clubs[oppIdx].strength : 0;
       const mood = squadMood(wm.morale, planFive(c).map(p => p.id));
       const talkReads = Object.fromEntries((['calm', 'rally', 'demand'] as const).map(t => [t, talkFit(t, favEdge, mood)]));
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even' });
+      // derby: the rival club + the head-to-head, and whether this match-day's fixture is the derby
+      const rivalClub = c.rival ? wm.clubs.find(x => x.id === c.rival) : null;
+      const rival = rivalClub ? { tag: rivalClub.tag, name: rivalClub.name } : null;
+      const nextDerby = oppIdx >= 0 && c.rival === wm.clubs[oppIdx].id;
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.

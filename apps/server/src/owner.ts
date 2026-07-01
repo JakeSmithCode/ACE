@@ -4,7 +4,7 @@
 // exact same transforms inside a transaction (a row UPDATE of `club.owner_account_id`
 // / `club.plan`). Auth — *which* account may call these — is the HTTP layer's job;
 // here we enforce the world-level invariants (one owner per club, a valid plan).
-import { claimClub, revertClub, setClubPlan, clubOf, planOf, seedContracts, computeObjective, strengthRankIn, CONF_START, type ClubPlan, type WorldClub } from '@ace/world';
+import { claimClub, revertClub, setClubPlan, clubOf, planOf, seedContracts, computeObjective, strengthRankIn, pickRival, CONF_START, type ClubPlan, type WorldClub } from '@ace/world';
 import type { WorldStore } from './store.js';
 
 const load = async (store: WorldStore, id: string) => {
@@ -20,7 +20,7 @@ export async function claim(store: WorldStore, id: string, clubId: string, accou
   // seed the newly-owned squad with staggered contracts, and set the board's opening brief
   // (from its strength rank in its division) + confidence. AI clubs float, untouched.
   const w = { ...claimed, clubs: claimed.clubs.map((c, i) => c.id === clubId
-    ? { ...c, roster: seedContracts(c.roster, claimed.patch), boardObjective: computeObjective(strengthRankIn(claimed.clubs, i), c.tier, claimed.size, claimed.promo), boardConfidence: CONF_START }
+    ? { ...c, roster: seedContracts(c.roster, claimed.patch), boardObjective: computeObjective(strengthRankIn(claimed.clubs, i), c.tier, claimed.size, claimed.promo), boardConfidence: CONF_START, rival: pickRival(claimed.clubs, i) ?? undefined, derby: { w: 0, l: 0 } }
     : c) };
   await store.saveWorld(id, w);
   return w.clubs.find(c => c.id === clubId)!;

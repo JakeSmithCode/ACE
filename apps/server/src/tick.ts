@@ -104,6 +104,7 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
   let morale = w.morale;
   const resultOf = new Map<number, MatchResult>();
   for (const r of results) { resultOf.set(r.home, r); resultOf.set(r.away, r); }
+  const derbyByIdx = new Map<number, boolean>();   // owned club idx → won its derby this day (for the H2H tally)
   let clubsOut = clubs;
   const ownedIdx = w.clubs.map((c, i) => (c.owner ? i : -1)).filter(i => i >= 0);
   if (ownedIdx.length) {
@@ -120,14 +121,20 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
       const won = r ? r.winner === i : null;
       const opp = r ? (r.home === i ? r.away : r.home) : -1;
       const favEdge = opp >= 0 ? c.strength - w.clubs[opp].strength : 0;
+      const derby = opp >= 0 && c.rival === w.clubs[opp].id;   // a derby win/loss hits the room harder + builds the H2H
       mor = updateMorale(mor, c.roster, fivIds, won, {
-        captain: captainOf(fielded, c.captain), talk: c.teamTalk, favEdge, psych: eff?.morale ?? 0,
+        captain: captainOf(fielded, c.captain), talk: c.teamTalk, favEdge, psych: eff?.morale ?? 0, derby,
         injured: id => isInjured(fit, id),
       });
+      if (derby && won != null) derbyByIdx.set(i, won);   // record the derby result for the H2H tally
     }
     fitness = fit; morale = mor;
-    // the team talk was a one-shot for this match — clear it on every owned club
-    clubsOut = clubs.map(c => (c.owner && c.teamTalk ? { ...c, teamTalk: undefined } : c));
+    // the team talk was a one-shot for this match — clear it; a derby updates the H2H record
+    clubsOut = clubs.map((c, idx) => {
+      const d = derbyByIdx.get(idx);
+      const rec = d != null ? { w: (c.derby?.w ?? 0) + (d ? 1 : 0), l: (c.derby?.l ?? 0) + (d ? 0 : 1) } : c.derby;
+      return c.owner && (c.teamTalk || d != null) ? { ...c, teamTalk: undefined, derby: rec } : c;
+    });
   }
 
   const next: WorldState = { ...w, clubs: clubsOut, results: [...w.results, ...results], day: w.day + 1, cup, fitness, morale };
