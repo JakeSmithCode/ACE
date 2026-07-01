@@ -1488,6 +1488,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-attrbar .tick{position:absolute;top:-1px;width:2px;height:8px;background:#7fe3a4;border-radius:1px;transform:translateX(-1px)}
 .lv-attrv{font-family:var(--label);font-size:10px;color:var(--text);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .lv-attrv em{color:#5fd38a;font-style:normal;margin-left:4px;font-size:9px}
+/* training focus — click a skill to direct a player's reps at it */
+.lv-focushint{font-size:9px;color:var(--muted-2);letter-spacing:.02em;margin:1px 0 5px;opacity:.8}
+.lv-attr.foc{cursor:pointer;border-radius:5px;padding:2px 4px;margin:0 -4px;transition:background .12s}
+.lv-attr.foc:hover{background:rgba(90,190,230,.09)}
+.lv-attr.foc.on{background:rgba(90,190,230,.14)}
+.lv-attr.foc.on .lv-attrk{color:#7cc7e6;font-weight:700}
+.lv-focdot{font-style:normal;color:#5abee6;margin-right:3px}
+.lv-sqment{font-style:normal;font-size:9px;font-weight:700;letter-spacing:.02em;padding:0 4px;border-radius:4px}
+.lv-sqment.mentor{color:#e6c15a;background:rgba(230,193,90,.12)}
+.lv-sqment.mentee{color:#7cc7e6;background:rgba(124,199,230,.12)}
+.lv-sqfocus{font-style:normal;font-size:9px;font-weight:700;color:#5abee6;letter-spacing:.02em}
 /* the world top-players leaderboard (prestige board) */
 .lv-leaders{margin-top:14px;background:var(--panel,rgba(255,255,255,.02));border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .lv-kicker.btn{background:none;border:none;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;padding:0;display:inline-flex;align-items:center;gap:6px}

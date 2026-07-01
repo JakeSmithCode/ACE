@@ -261,6 +261,14 @@ async function renew(sp: SquadPlayer) {
   try { const r = await server.value.renew(sp.id, token.value); if (r.ok) await refreshMe(); }
   catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
 }
+// training focus — direct a player's reps at one skill (click the attr to toggle; a tradeoff:
+// that skill grows faster, the rest a touch slower). Clicking the focused skill clears it.
+async function setFocus(sp: SquadPlayer, attr: string) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try { const r = await server.value.setFocus(sp.id, sp.focus === attr ? null : attr, token.value); if (r.ok) await refreshMe(); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
 
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
@@ -895,6 +903,9 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                 <span class="lv-sqperson">{{ person(sp.id).nation.flag }} {{ person(sp.id).name }}
                   <i class="lv-sqsolo" :class="'rk-'+solo(sp.overall).tier.toLowerCase()">{{ solo(sp.overall).label }}</i>
                   <i v-if="trait(sp.id)" class="lv-sqtrait rs-trait" :class="'tr-'+trait(sp.id)!.key" :title="trait(sp.id)!.blurb">✦ {{ trait(sp.id)!.label }}</i>
+                  <i v-if="sp.mentor" class="lv-sqment mentor" title="a veteran leader — he develops your young players faster (mentoring)">🎓 mentor</i>
+                  <i v-else-if="sp.mentee" class="lv-sqment mentee" title="a young player being mentored by a senior leader — he grows faster">↑ mentored</i>
+                  <i v-if="sp.focus" class="lv-sqfocus" :title="`training focus: ${ATTR_LABEL[sp.focus] || sp.focus} grows faster (the rest a touch slower)`">◎ {{ ATTR_LABEL[sp.focus] || sp.focus }}</i>
                   <i v-if="sp.injury" class="lv-sqinj" :title="`injured — out ${sp.injury} more match-day(s); a reserve covers, or he plays hurt`">⚕ OUT {{ sp.injury }}d</i>
                   <i v-else-if="sp.fatigue >= 40" class="lv-sqfat" :class="{ tired: sp.fatigue >= 70 }" :title="`match fatigue ${sp.fatigue}% — rotate him out to recover; high fatigue dulls his game and risks injury`">◔ {{ sp.fatigue }}%</i>
                 </span>
@@ -918,8 +929,9 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
             </div>
             <div v-if="expanded.has('s:'+sp.id)" class="lv-attrs">
-              <div v-for="a in sp.attrs" :key="a.key" class="lv-attr" :class="{ mech: a.mech }">
-                <span class="lv-attrk">{{ ATTR_LABEL[a.key] }}</span>
+              <div class="lv-focushint">◎ click a skill to focus his training on it — it grows faster, the rest a touch slower</div>
+              <div v-for="a in sp.attrs" :key="a.key" class="lv-attr foc" :class="{ mech: a.mech, on: sp.focus === a.key }" :title="sp.focus === a.key ? 'focused — click to clear' : `focus training on ${ATTR_LABEL[a.key]}`" @click="setFocus(sp, a.key)">
+                <span class="lv-attrk"><i v-if="sp.focus === a.key" class="lv-focdot">◎</i>{{ ATTR_LABEL[a.key] }}</span>
                 <span class="lv-attrbar"><i class="fill" :style="{ width: a.cur + '%' }"></i><i v-if="a.ceil > a.cur" class="gap" :style="{ left: a.cur + '%', width: (a.ceil - a.cur) + '%' }"></i><i class="tick" :style="{ left: a.ceil + '%' }"></i></span>
                 <span class="lv-attrv">{{ a.cur }}<em v-if="a.ceil > a.cur">↗{{ a.ceil }}</em></span>
               </div>

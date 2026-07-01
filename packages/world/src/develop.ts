@@ -10,6 +10,7 @@
 import { Rng } from '@ace/engine';
 import type { Player, Attributes, Team } from '@ace/shared';
 import type { Club } from './clubs.js';
+import { traitKeyOf } from './traits.js';
 
 const ATTRS: (keyof Attributes)[] = ['aim', 'movement', 'gameSense', 'utility', 'clutch', 'entry'];
 const MECH = new Set<keyof Attributes>(['aim', 'movement', 'entry']);
@@ -183,6 +184,21 @@ export function developPlayer(p: Player, rng: Rng, frac = 1, boost: DevBoost = N
 
 export const developSquad = (team: Team, rng: Rng): Team =>
   ({ ...team, players: team.players.map(p => developPlayer(p, rng)) });
+
+// --- mentoring: a veteran leader develops the kids faster --------------------
+// A senior pro with leadership (the Natural Leader trait or a strong cerebral head)
+// accelerates the club's YOUNG players' growth — pairing a wise vet with a raw prospect
+// is a real roster-building lever (it ties the Leader trait + the development model + the
+// academy pipeline together). Owner-scoped in the PvP world (applied to the dev boost's
+// `growth`), so it's engine-blind and a no-owner world is byte-identical.
+export const MENTOR_MUL = 1.3;
+/** A leader old enough to mentor: 26+ with the Natural Leader trait or a high gameSense+clutch. */
+export const isMentor = (p: Player): boolean => p.age >= 26 && (traitKeyOf(p.id) === 'leader' || (p.attr.gameSense + p.attr.clutch) / 2 >= 75);
+/** A young player who benefits from a mentor (≤21, not himself a mentor), when the squad has one. */
+export const isMentee = (p: Player, hasMentor: boolean): boolean => hasMentor && p.age <= 21 && !isMentor(p);
+/** Fold the mentor bonus into a dev boost for a mentee (leaves non-mentees untouched). */
+export const mentorBoost = (boost: DevBoost, p: Player, hasMentor: boolean): DevBoost =>
+  isMentee(p, hasMentor) ? { ...boost, growth: boost.growth * MENTOR_MUL } : boost;
 
 // --- retirement: esports careers are short ----------------------------------
 /** Hard cap — nobody plays past this age. */

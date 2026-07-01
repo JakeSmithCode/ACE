@@ -4,7 +4,7 @@
 // (playoffs → settle → develop → patch → promote/relegate). The single-player
 // store will consolidate onto this shape; the server persists it to rows and runs
 // the exact same functions on the tick. No Vue, no I/O.
-import type { Player, Tactics, Comp, Team, PatchState } from '@ace/shared';
+import type { Player, Tactics, Comp, Team, PatchState, Attributes } from '@ace/shared';
 import { Rng, PATCH } from '@ace/engine';
 import { makeLeague, ROLE_AGENTS } from './clubs.js';
 import { divisionSchedule, funnelPromoteRelegate, promoteRelegate, snakeGroup, type DivMove } from './divisions.js';
@@ -14,7 +14,7 @@ import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './pla
 import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
 import type { Fitness } from './fitness.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
-import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST } from './develop.js';
+import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST, isMentor, mentorBoost } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
 import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
 import { sponsorGoalMet, type ActiveSponsor } from './sponsor.js';
@@ -53,6 +53,7 @@ export interface WorldClub {
   boardObjective?: Objective;    // the board's season brief (from pre-season strength rank)
   boardConfidence?: number;      // the board's confidence in the owner (0..100; starts CONF_START)
   boardOutcome?: BoardOutcome;   // last season's verdict (for the off-season banner)
+  focuses?: Record<string, keyof Attributes>;   // an owner's per-player training focus (id → skill); undefined → balanced
 }
 
 /** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
@@ -68,6 +69,28 @@ export function strengthRankIn(clubs: WorldClub[], i: number): number {
 export function clubDevBoost(c: WorldClub): DevBoost {
   const base = c.facilities ? facilityBoost(c.facilities) : NO_BOOST;
   return c.staff ? withStaffBoost(base, staffEffect(c.staff)) : base;
+}
+
+/** Whether a club runs the owner-only development levers (training focus + mentoring). AI
+ *  clubs and no-owner worlds don't — so their development is byte-identical. */
+const hasDevLevers = (c: WorldClub): boolean => !!c.owner && (!!c.focuses || c.roster.some(isMentor));
+
+/** Develop a club's whole roster one in-season match-day. For an OWNED club, the owner's
+ *  training focus (per-player skill bias) and mentoring (a vet leader speeds the kids) fold
+ *  into each player's boost; AI clubs use the plain boost, so a no-owner world is byte-identical. */
+function developClubDay(c: WorldClub, five: Set<string>, total: number, rng: Rng): Player[] {
+  const boost = clubDevBoost(c);
+  if (!hasDevLevers(c)) return c.roster.map(p => developInSeason(p, five.has(p.id), total, rng, boost));
+  const hasM = c.roster.some(isMentor);
+  return c.roster.map(p => developInSeason(p, five.has(p.id), total, rng, mentorBoost(boost, p, hasM), c.focuses?.[p.id]));
+}
+
+/** Develop a club's roster the off-season bootcamp share (age +1). Owner levers as above. */
+function developClubOff(c: WorldClub, rng: Rng, frac: number): Player[] {
+  const boost = clubDevBoost(c);
+  if (!hasDevLevers(c)) return c.roster.map(p => developPlayer(p, rng, frac, boost));
+  const hasM = c.roster.some(isMentor);
+  return c.roster.map(p => developPlayer(p, rng, frac, mentorBoost(boost, p, hasM), c.focuses?.[p.id]));
 }
 
 export interface WorldState {
@@ -216,8 +239,9 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
     // reps and grows; leave him benched and he rusts. For a generated club with no
     // lineup, `planFive` === `startingFive`, so the world/season CLIs are byte-identical.
     const five = new Set(planFive(c).map(p => p.id));
-    const boost = clubDevBoost(c);   // an owner's HQ × staff speeds growth (undefined → no change)
-    const roster = c.roster.map(p => developInSeason(p, five.has(p.id), total, devRng, boost));
+    // an owner's HQ × staff speeds growth, and (owned only) training focus + mentoring bias
+    // it further; AI clubs take the plain boost, so a no-owner world is byte-identical.
+    const roster = developClubDay(c, five, total, devRng);
     return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
   });
   return { results, clubs };
@@ -263,8 +287,7 @@ export function advanceWorld(w: WorldState): Rollover {
   let clubs = w.clubs.map((c, i): WorldClub => {
     const overhead = (c.facilities ? facilityUpkeep(c.facilities) : 0) + (c.staff ? staffWageBill(c.staff) : 0);   // HQ upkeep + staff wages (a ledger line)
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + overhead, playoff: poPrize(i) });
-    const boost = clubDevBoost(c);
-    const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE, boost));  // bootcamp share — the rest grew in-season
+    const roster = developClubOff(c, devRng, 1 - SEASON_SHARE);  // bootcamp share — the rest grew in-season (owner focus + mentoring folded in)
     // board objective (owner-scoped): did you meet the brief? a bonus + a confidence move.
     let boardConfidence = c.boardConfidence, boardOutcome = c.boardOutcome, objMet = false, objBonus = 0;
     if (c.owner && c.boardObjective) {

@@ -1146,6 +1146,28 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });
     }
+    // POST /me/focus  { playerId, attr }  → direct a player's training reps at one skill (that
+    // skill grows faster, the rest a touch slower — a tradeoff). attr null clears to balanced.
+    // Owner-scoped development, engine-blind. Returns the updated squad.
+    if (path[0] === 'me' && path[1] === 'focus' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { playerId?: string; attr?: keyof import('@ace/shared').Attributes | null };
+      if (!mine.roster.some(p => p.id === b.playerId)) return json(res, 404, { error: 'not on your roster' });
+      const ATTR_KEYS = ['aim', 'movement', 'entry', 'gameSense', 'utility', 'clutch'];
+      if (b.attr != null && !ATTR_KEYS.includes(b.attr)) return json(res, 422, { error: 'bad attr' });
+      const w = (await store.loadWorld(id))!;
+      const clubs = w.clubs.map(c => {
+        if (c.id !== mine.id) return c;
+        const focuses = { ...(c.focuses ?? {}) };
+        if (b.attr) focuses[b.playerId!] = b.attr; else delete focuses[b.playerId!];
+        return { ...c, focuses };
+      });
+      await store.saveWorld(id, { ...w, clubs });
+      const after = (await store.loadWorld(id))!;
+      return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });
+    }
     return json(res, 404, { error: 'not found' });
   });
 
