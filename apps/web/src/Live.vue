@@ -231,6 +231,27 @@ async function signSponsor(index: number) {
   catch (e) { sponsorMsg.value = (e as Error).message; } finally { sponsorBusy.value = false; }
 }
 
+// --- the trophy room: your personal career cabinet (titles, promotions, briefs met) --
+const trophiesOpen = ref(false);
+// aggregate the career log into the silverware cabinet + records.
+const trophies = computed(() => {
+  // derive the cabinet from the CAREER LOG — only what you won while owning the club (not the
+  // club's all-time honours, which may include an AI era before you claimed it).
+  const log = myClub.value?.career ?? [];
+  const finishes = log.filter(e => e.finish > 0).map(e => e.finish);
+  return {
+    league: log.filter(e => e.champion).length,
+    cup: log.filter(e => e.cupWon).length,
+    intl: log.filter(e => e.intlWon).length,
+    promotions: log.filter(e => e.promoted).length,
+    briefs: log.filter(e => e.briefMet).length,
+    seasons: log.length,
+    bestFinish: finishes.length ? Math.min(...finishes) : 0,
+    topTier: log.length ? Math.min(...log.map(e => e.tier)) : (myClub.value?.tier ?? 0),
+    log: [...log].sort((a, b) => b.season - a.season),
+  };
+});
+
 // --- the board: the season brief + confidence (a survival narrative) ----------------
 const boardOpen = ref(false);
 const onTrack = () => myClub.value?.objective ? (myClub.value.objectiveRank || 99) <= myClub.value.objective.needRank : false;
@@ -316,7 +337,7 @@ const academy = computed(() => myClub.value?.academy ?? null);
 
 // club-management panels are an ACCORDION — opening one closes the rest (no messy stacking).
 // One coordinator drives all seven toggles; it also lazy-loads the market board on first open.
-const PANEL_REFS: Record<string, { value: boolean }> = { tactics: planOpen, market: marketOpen, academy: academyOpen, hq: hqOpen, staff: staffOpen, sponsor: sponsorOpen, board: boardOpen };
+const PANEL_REFS: Record<string, { value: boolean }> = { tactics: planOpen, market: marketOpen, academy: academyOpen, hq: hqOpen, staff: staffOpen, sponsor: sponsorOpen, board: boardOpen, trophies: trophiesOpen };
 async function showPanel(which: string) {
   const target = PANEL_REFS[which]; const wasOpen = target.value;
   for (const r of Object.values(PANEL_REFS)) r.value = false;
@@ -743,6 +764,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="showPanel('staff')">♦ staff</button>
             <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="showPanel('sponsor')">◈ sponsor</button>
             <button class="lv-planbtn board" :class="{ on: boardOpen }" @click="showPanel('board')">⚑ board</button>
+            <button class="lv-planbtn trophies" :class="{ on: trophiesOpen }" @click="showPanel('trophies')">🏆 trophies</button>
           </span>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
@@ -1055,6 +1077,44 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
         <div v-if="myClub.boardOutcome" class="lv-boardlast" :class="{ met: myClub.boardOutcome.met }">
           Last season: {{ myClub.boardOutcome.met ? '✓ brief met' : '✗ brief missed' }} — finished {{ ord(myClub.boardOutcome.finish) }}<template v-if="myClub.boardOutcome.met"> (+{{ kfmt(myClub.boardOutcome.bonus) }})</template>
         </div>
+      </div>
+
+      <!-- trophy room — your personal career cabinet (silverware + a season-by-season ledger) -->
+      <div v-if="myClub && trophiesOpen" class="lv-mktpanel trophies">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Trophy room</span>
+          <span class="lv-mktsub">your career with {{ myClub.name }} — the silverware you've won and every season you've managed.</span>
+        </div>
+        <div class="lv-cabinet">
+          <div class="lv-trophy" :class="{ lit: trophies.league > 0 }"><b>{{ trophies.league }}</b><span>🏆 League titles</span></div>
+          <div class="lv-trophy" :class="{ lit: trophies.cup > 0 }"><b>{{ trophies.cup }}</b><span>🏆 ACE Cups</span></div>
+          <div class="lv-trophy" :class="{ lit: trophies.intl > 0 }"><b>{{ trophies.intl }}</b><span>🌍 Masters</span></div>
+          <div class="lv-trophy" :class="{ lit: trophies.promotions > 0 }"><b>{{ trophies.promotions }}</b><span>▲ Promotions</span></div>
+          <div class="lv-trophy" :class="{ lit: trophies.briefs > 0 }"><b>{{ trophies.briefs }}</b><span>✓ Briefs met</span></div>
+        </div>
+        <div class="lv-careerrecords">
+          <span class="lv-crstat"><i>Seasons</i> {{ trophies.seasons }}</span>
+          <span class="lv-crstat"><i>Best finish</i> {{ trophies.bestFinish ? ord(trophies.bestFinish) : '—' }}</span>
+          <span class="lv-crstat"><i>Peak division</i> {{ tierName(trophies.topTier) }}</span>
+        </div>
+        <div v-if="trophies.log.length" class="lv-ledger">
+          <div class="lv-ledgerhd"><span>SEASON</span><span>DIVISION</span><span>FINISH</span><span>HONOURS</span></div>
+          <div v-for="e in trophies.log" :key="e.season" class="lv-ledgerrow">
+            <span class="lv-lseason">S{{ e.season }}</span>
+            <span class="lv-ldiv">{{ e.divName }}</span>
+            <span class="lv-lfin" :class="{ gold: e.finish === 1 }">{{ e.finish ? ord(e.finish) : '—' }}</span>
+            <span class="lv-lhon">
+              <i v-if="e.champion" class="lv-hb champ" title="league champion">🏆 champion</i>
+              <i v-if="e.cupWon" class="lv-hb cup" title="ACE Cup winners">🏆 cup</i>
+              <i v-if="e.intlWon" class="lv-hb champ" title="Masters winners">🌍 Masters</i>
+              <i v-if="e.promoted" class="lv-hb up" title="promoted">▲ promoted</i>
+              <i v-if="e.relegated" class="lv-hb down" title="relegated">▼ relegated</i>
+              <i v-if="e.briefMet" class="lv-hb brief" title="board brief met">✓ brief</i>
+              <i v-if="!e.champion && !e.cupWon && !e.intlWon && !e.promoted && !e.relegated && !e.briefMet" class="lv-hb none">—</i>
+            </span>
+          </div>
+        </div>
+        <div v-else class="lv-empty">no seasons finished yet — advance a full season to start your cabinet.</div>
       </div>
 
       <!-- sponsorship — a multi-season commercial deal (base cheque every season + a goal bonus) -->

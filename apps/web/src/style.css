@@ -1530,6 +1530,32 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-talkbtn.camp.on{border-color:#8a6ad0;box-shadow:inset 0 0 0 1px #8a6ad0;background:rgba(138,106,208,.1)}
 .lv-talkbtn.camp:disabled{opacity:.4;cursor:not-allowed}
 .lv-cohi{color:#6fd39a}.lv-colo{color:#e0906a}
+/* trophy room — the personal career cabinet */
+.lv-cabinet{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
+.lv-trophy{display:flex;flex-direction:column;align-items:center;gap:3px;padding:12px 8px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.02);opacity:.42;transition:all .15s}
+.lv-trophy.lit{opacity:1;border-color:rgba(229,181,103,.4);background:rgba(229,181,103,.07)}
+.lv-trophy b{font-size:22px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
+.lv-trophy.lit b{color:var(--gold)}
+.lv-trophy span{font-family:var(--label);font-size:8.5px;letter-spacing:.02em;color:var(--muted-2);text-align:center}
+.lv-careerrecords{display:flex;gap:22px;padding:10px 2px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:10px}
+.lv-crstat{font-size:13px;color:var(--text);font-weight:600}
+.lv-crstat i{font-style:normal;font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2);display:block;margin-bottom:1px}
+.lv-ledger{display:flex;flex-direction:column;gap:0}
+.lv-ledgerhd,.lv-ledgerrow{display:grid;grid-template-columns:56px 1.4fr 70px 2.2fr;align-items:center;gap:10px;padding:6px 4px}
+.lv-ledgerhd{font-family:var(--label);font-size:8.5px;letter-spacing:.06em;color:var(--muted-2);border-bottom:1px solid var(--line)}
+.lv-ledgerrow{border-bottom:1px solid rgba(255,255,255,.04);font-size:12px}
+.lv-lseason{font-family:var(--label);font-weight:700;color:var(--muted)}
+.lv-ldiv{color:var(--text)}
+.lv-lfin{font-variant-numeric:tabular-nums;color:var(--muted)}
+.lv-lfin.gold{color:var(--gold);font-weight:700}
+.lv-lhon{display:flex;flex-wrap:wrap;gap:5px}
+.lv-hb{font-style:normal;font-size:9px;font-weight:700;letter-spacing:.02em;padding:1px 6px;border-radius:4px}
+.lv-hb.champ{color:#1a1408;background:linear-gradient(90deg,#e0906a,#e6b86a)}
+.lv-hb.cup{color:#e6b86a;background:rgba(230,184,106,.14)}
+.lv-hb.up{color:#6fd39a;background:rgba(111,211,154,.12)}
+.lv-hb.down{color:#e07a7a;background:rgba(224,122,122,.12)}
+.lv-hb.brief{color:#7cc7e6;background:rgba(124,199,230,.12)}
+.lv-hb.none{color:var(--muted-2);background:none;font-weight:400}
 /* pre-match team-talk nudge by the advance button (only shows when unset + actionable) */
 .lv-talknudge{font-family:var(--label);font-size:10px;font-weight:600;letter-spacing:.02em;color:#5b9bd5;background:rgba(91,155,213,.08);border:1px solid rgba(91,155,213,.3);border-radius:6px;padding:4px 10px;cursor:pointer;transition:all .12s}
 .lv-talknudge:hover{background:rgba(91,155,213,.16)}

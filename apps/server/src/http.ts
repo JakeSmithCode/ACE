@@ -256,6 +256,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // per copy (did this mailbox's owner send it). Keyed by account.
   interface MailMsg { id: number; threadId: number; fromAccount: string; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
   const mailboxes = new Map<string, MailMsg[]>();
+  // the owner's CAREER LOG — one record per season at the rollover (the personal legacy the
+  // Trophy Room aggregates: titles, promotions, cup wins, briefs met). Persisted per account.
+  interface CareerEntry { season: number; tier: number; divName: string; finish: number; champion: boolean; promoted: boolean; relegated: boolean; cupWon: boolean; intlWon: boolean; briefMet: boolean }
+  const careers = new Map<string, CareerEntry[]>();
   let mailSeq = 0;
   const pushMail = (account: string, m: MailMsg) => { const box = mailboxes.get(account) ?? []; box.unshift(m); if (box.length > 200) box.length = 200; mailboxes.set(account, box); };
   // The academy + scout + notif + mail Maps are a write-through CACHE over the store's
@@ -267,12 +271,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     scout: Object.fromEntries(scoutReports.get(account) ?? []),
     notifs: notifs.get(account) ?? [],
     mail: mailboxes.get(account) ?? [],
+    career: careers.get(account) ?? [],
   });
   for (const { account, data } of await store.listAccountData(id)) {
     if (data.academy) academies.set(account, data.academy as Academy);
     if (data.scout) scoutReports.set(account, new Map(Object.entries(data.scout as Record<string, number>)));
     if (Array.isArray(data.notifs)) notifs.set(account, data.notifs as Notif[]);
     if (Array.isArray(data.mail)) mailboxes.set(account, data.mail as MailMsg[]);
+    if (Array.isArray(data.career)) careers.set(account, data.career as CareerEntry[]);
   }
   for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
   for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
@@ -452,6 +458,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // the pre-rollover world `w` for the right tier), the title, and your-player-is-MVP.
     {
       const rows = await store.fixtures(id, roll.season);
+      const postWorld = (await store.loadWorld(id))!;   // season+1: tiers reflect promotion/relegation
       for (const c of ownedClubs(w)) {
         if (!c.owner) continue;
         const table = standingsView(w, rows, c.tier, c.group, clock());
@@ -459,6 +466,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (pos) notify(c.owner, 'season', `Season ${roll.season}: ${c.tag} finished ${ord(pos)} in ${tierName(c.tier)}`, roll.season, liveDay);
         if (roll.champion === c.tag) notify(c.owner, 'award', `🏆 ${c.tag} are Season ${roll.season} champions!`, roll.season, liveDay);
         if (mvp && c.roster.some(p => p.handle === mvp.handle)) notify(c.owner, 'award', `★ Your player ${mvp.handle} won Season ${roll.season} MVP (${mvp.kills} kills)`, roll.season, liveDay);
+        // career log: one record for the season just finished (the Trophy Room aggregates these).
+        const post = postWorld.clubs.find(x => x.id === c.id);
+        const promoted = !!post && post.tier < c.tier, relegated = !!post && post.tier > c.tier;
+        const entry: CareerEntry = {
+          season: roll.season, tier: c.tier, divName: tierName(c.tier), finish: pos || 0,
+          champion: roll.champion === c.tag, promoted, relegated,
+          cupWon: cupChampClub?.id === c.id, intlWon: !!post && (post.intlTitles ?? 0) > (c.intlTitles ?? 0),
+          briefMet: !!post?.boardOutcome?.met,
+        };
+        const log = careers.get(c.owner) ?? [];
+        if (!log.some(e => e.season === entry.season)) careers.set(c.owner, [...log, entry]);   // idempotent per season
+        if (promoted) notify(c.owner, 'season', `▲ ${c.tag} PROMOTED to ${tierName(post!.tier)}!`, roll.season, liveDay);
+        else if (relegated) notify(c.owner, 'season', `▼ ${c.tag} relegated to ${tierName(post!.tier)}`, roll.season, liveDay);
         await persistAccount(c.owner);
       }
     }
@@ -1002,7 +1022,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const rivalClub = c.rival ? wm.clubs.find(x => x.id === c.rival) : null;
       const rival = rivalClub ? { tag: rivalClub.tag, name: rivalClub.name } : null;
       const nextDerby = oppIdx >= 0 && c.rival === wm.clubs[oppIdx].id;
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100) });
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0 });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.
