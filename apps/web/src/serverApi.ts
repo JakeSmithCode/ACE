@@ -23,6 +23,7 @@ export interface Session { accountId: string; accessToken: string; refreshToken:
  *  verification inline — a real account must be verified before it can claim a club. */
 export interface RegisterResult extends Session { verifyToken: string }
 export interface StaffMember { id: string; name: string; role: string; rating: number; wage: number }
+export interface SponsorOffer { name: string; base: number; bonus: number; goal: string; goalN: number; years: number; goalText?: string }
 export interface AttrScout { key: string; cur: number; ceil: number; mech: boolean }
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
@@ -34,7 +35,7 @@ export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lin
 export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface Dossier { attack: string; defense: string; lurk: boolean; counter: string }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; cupTitles?: number; facilities?: { bootcamp: number; recovery: number; analyst: number }; facilityUpkeep?: number; staff?: Record<string, StaffMember>; staffMarket?: Record<string, StaffMember[]>; staffWageBill?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number } }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; cupTitles?: number; facilities?: { bootcamp: number; recovery: number; analyst: number }; facilityUpkeep?: number; staff?: Record<string, StaffMember>; staffMarket?: Record<string, StaffMember[]>; staffWageBill?: number; sponsor?: (SponsorOffer & { yearsLeft: number }) | null; sponsorOffers?: SponsorOffer[]; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number } }
 
 export interface LeaderRow { rank: number; handle: string; name?: string; flag?: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
@@ -275,6 +276,8 @@ export class AceServer {
   upgradeFacility(room: string, token: string): Promise<{ ok: boolean; reason?: string; cost?: number; facilities?: { bootcamp: number; recovery: number; analyst: number }; balance?: number; facilityUpkeep?: number }> { return this.post('/me/facility', { room }, token); }
   /** Hire a backroom staffer from the shortlist (no fee, a recurring wage) or release one. */
   staffAction(body: { role: string; id?: string; release?: boolean }, token: string): Promise<{ ok: boolean; staff?: Record<string, StaffMember>; staffWageBill?: number }> { return this.post('/me/staff', body, token); }
+  /** Sign one of the three offered multi-season sponsorship deals (paid at each settle). */
+  signSponsor(index: number, token: string): Promise<{ ok: boolean; reason?: string; sponsor?: SponsorOffer & { yearsLeft: number } }> { return this.post('/me/sponsor', { index }, token); }
 
   /** Subscribe to a day's synced live match-center (SSE). `onFrame` fires ~1/s with
    *  every watched fixture's running score; returns an unsubscribe fn. Falls back to

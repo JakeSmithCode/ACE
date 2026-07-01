@@ -17,6 +17,7 @@ import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
 import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
+import { sponsorGoalMet, type ActiveSponsor } from './sponsor.js';
 import type { DevBoost } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
 import { fullPatch, patchMeta, type MetaChange } from './meta.js';
@@ -47,6 +48,7 @@ export interface WorldClub {
   cupTitles?: number;  // domestic ACE Cup wins — additive/opt-in (crowned at the rollover)
   facilities?: Facilities;   // an owner's HQ rooms (the dev money-sink); undefined → no boost (AI/abstract)
   staff?: StaffHires;        // an owner's backroom staff (coach/analyst/psych); undefined → no effect
+  sponsor?: ActiveSponsor;   // an owner's signed sponsorship (a season income stream + a goal)
 }
 
 /** An owned club's combined development boost: HQ rooms × backroom staff. Undefined for both
@@ -251,7 +253,17 @@ export function advanceWorld(w: WorldState): Rollover {
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + overhead, playoff: poPrize(i) });
     const boost = clubDevBoost(c);
     const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE, boost));  // bootcamp share — the rest grew in-season
-    return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0) };
+    // sponsorship: the base cheque always, the bonus if its goal was met this season; then the
+    // deal ticks down and clears when it expires (fresh offers appear next season).
+    let sponsor = c.sponsor, sponsorPay = 0;
+    if (sponsor) {
+      const wins = w.results.filter(r => r.winner === i).length;
+      const met = sponsorGoalMet(sponsor.goal, sponsor.goalN, { objMet: false, finish: rankIn(i), divSize: w.size, promo: w.promo, wins });
+      sponsorPay = sponsor.base + (met ? sponsor.bonus : 0);
+      const yl = sponsor.yearsLeft - 1;
+      sponsor = yl > 0 ? { ...sponsor, yearsLeft: yl } : undefined;
+    }
+    return { ...c, sponsor, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0) };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP

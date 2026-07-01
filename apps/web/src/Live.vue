@@ -216,6 +216,17 @@ async function releaseStaff(role: string) {
   catch (e) { staffMsg.value = (e as Error).message; } finally { staffBusy.value = false; }
 }
 
+// --- sponsorship: a multi-season commercial deal (base cheque + a goal bonus) --------
+const sponsorOpen = ref(false);
+const sponsorBusy = ref(false);
+const sponsorMsg = ref('');
+async function signSponsor(index: number) {
+  if (!server.value || !token.value) return;
+  sponsorBusy.value = true; sponsorMsg.value = '';
+  try { const r = await server.value.signSponsor(index, token.value); if (r.ok) { await refreshMe(); sponsorMsg.value = '✓ deal signed'; } else sponsorMsg.value = r.reason ?? 'rejected'; }
+  catch (e) { sponsorMsg.value = (e as Error).message; } finally { sponsorBusy.value = false; }
+}
+
 // --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
 const ROLE_ORDER = ['duelist', 'initiator', 'controller', 'sentinel'] as const;
 const ROLE_SHORT: Record<string, string> = { duelist: 'DUE', initiator: 'INI', controller: 'CON', sentinel: 'SEN' };
@@ -657,6 +668,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <button class="lv-planbtn acad" :class="{ on: academyOpen }" @click="toggleAcademy">⬡ academy</button>
           <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="hqOpen = !hqOpen">⌂ HQ</button>
           <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="staffOpen = !staffOpen">♦ staff</button>
+          <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="sponsorOpen = !sponsorOpen">◈ sponsor</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
@@ -907,6 +919,26 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
         </div>
         <span v-if="hqMsg" class="lv-wire" :class="{ ok: hqMsg.startsWith('✓') }">{{ hqMsg }}</span>
+      </div>
+
+      <!-- sponsorship — a multi-season commercial deal (base cheque every season + a goal bonus) -->
+      <div v-if="myClub && sponsorOpen" class="lv-mktpanel spon">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Sponsorship</span>
+          <span class="lv-mktsub">a multi-season commercial deal — a base cheque every season, plus a bonus if you hit its goal. Paid at the season settle.</span>
+        </div>
+        <div v-if="myClub.sponsor" class="lv-sponactive">
+          <div class="lv-sponname"><b>{{ myClub.sponsor.name }}</b><span class="lv-sponyears">{{ myClub.sponsor.yearsLeft }}y left</span></div>
+          <div class="lv-spondetail"><span><b>{{ kfmt(myClub.sponsor.base) }}</b>/season</span><span class="lv-sponbonus">+ <b>{{ kfmt(myClub.sponsor.bonus) }}</b> if you {{ myClub.sponsor.goalText }}</span></div>
+        </div>
+        <div v-else class="lv-sponoffers">
+          <div v-for="(o, i) in (myClub.sponsorOffers || [])" :key="i" class="lv-sponoffer">
+            <div class="lv-sponname"><b>{{ o.name }}</b><span class="lv-sponyears">{{ o.years }}y deal</span></div>
+            <div class="lv-spondetail"><span><b>{{ kfmt(o.base) }}</b>/s base</span><span class="lv-sponbonus">+ <b>{{ kfmt(o.bonus) }}</b> if you {{ o.goalText }}</span></div>
+            <button class="lv-go sm" :disabled="sponsorBusy" @click="signSponsor(i)">sign</button>
+          </div>
+        </div>
+        <span v-if="sponsorMsg" class="lv-wire" :class="{ ok: sponsorMsg.startsWith('✓') }">{{ sponsorMsg }}</span>
       </div>
 
       <!-- backroom staff — coach (development) · analyst (ceiling + cheaper scouting) · psych (fitness) -->
