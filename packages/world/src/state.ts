@@ -14,6 +14,7 @@ import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './pla
 import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
 import type { Fitness } from './fitness.js';
 import type { Morale, Talk } from './morale.js';
+import { CAMP_CHEM, type Camp } from './camps.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST, isMentor, mentorBoost } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
@@ -59,6 +60,7 @@ export interface WorldClub {
   captain?: string;     // the owner's named captain (player id); undefined → the best natural leader in the five
   rival?: string;       // the owner's derby rival (club id — nearest strength at claim; spans leagues if either moves)
   derby?: { w: number; l: number };   // head-to-head record vs the rival (builds over the career)
+  camp?: Camp;          // the owner's pre-season training camp (fitness/chemistry/sharpness); reset each rollover
 }
 
 /** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
@@ -304,7 +306,11 @@ export function advanceWorld(w: WorldState): Rollover {
   let clubs = w.clubs.map((c, i): WorldClub => {
     const overhead = (c.facilities ? facilityUpkeep(c.facilities) : 0) + (c.staff ? staffWageBill(c.staff) : 0);   // HQ upkeep + staff wages (a ledger line)
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + overhead, playoff: poPrize(i) });
-    const roster = developClubOff(c, devRng, 1 - SEASON_SHARE);  // bootcamp share — the rest grew in-season (owner focus + mentoring folded in)
+    let roster = developClubOff(c, devRng, 1 - SEASON_SHARE);  // bootcamp share — the rest grew in-season (owner focus + mentoring folded in)
+    // team chemistry gels a season for an OWNED club — a fresh signing (tenure 0) settles,
+    // the core deepens (a chemistry camp gels faster). Grown +1/season (the engine's teamChem
+    // clamps the effect at CHEM_CAP). Owner-scoped, so AI clubs + a no-owner world are byte-identical.
+    if (c.owner) { const gel = c.camp === 'chemistry' ? CAMP_CHEM : 1; roster = roster.map(p => ({ ...p, tenure: (p.tenure ?? 0) + gel })); }
     // board objective (owner-scoped): did you meet the brief? a bonus + a confidence move.
     let boardConfidence = c.boardConfidence, boardOutcome = c.boardOutcome, objMet = false, objBonus = 0;
     if (c.owner && c.boardObjective) {
@@ -324,7 +330,7 @@ export function advanceWorld(w: WorldState): Rollover {
       const yl = sponsor.yearsLeft - 1;
       sponsor = yl > 0 ? { ...sponsor, yearsLeft: yl } : undefined;
     }
-    return { ...c, sponsor, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
+    return { ...c, sponsor, roster, camp: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP

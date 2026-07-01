@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, CAMP_FAT, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -116,7 +116,8 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
       const fielded = fitFive(c.roster, planFive(c), fit).five;   // who actually played (pre-match fitness)
       const fivIds = new Set(fielded.map(p => p.id));
       const eff = c.staff ? staffEffect(c.staff) : null;          // a sports psych cuts fatigue + injury rates + lifts mood
-      fit = tickFitness(fit, c.roster, fivIds, fr, fitId => traitKeyOf(fitId) === 'workhorse', eff?.fatigueMul ?? 1, eff?.injuryMul ?? 1).fitness;
+      const campFat = c.camp === 'fitness' ? CAMP_FAT : 1;        // a fitness camp slows the fatigue burn all season
+      fit = tickFitness(fit, c.roster, fivIds, fr, fitId => traitKeyOf(fitId) === 'workhorse', (eff?.fatigueMul ?? 1) * campFat, eff?.injuryMul ?? 1).fitness;
       const r = resultOf.get(i);
       const won = r ? r.winner === i : null;
       const opp = r ? (r.home === i ? r.away : r.home) : -1;
@@ -124,7 +125,7 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
       const derby = opp >= 0 && c.rival === w.clubs[opp].id;   // a derby win/loss hits the room harder + builds the H2H
       mor = updateMorale(mor, c.roster, fivIds, won, {
         captain: captainOf(fielded, c.captain), talk: c.teamTalk, favEdge, psych: eff?.morale ?? 0, derby,
-        injured: id => isInjured(fit, id),
+        injured: id => isInjured(fit, id), sharpnessCamp: c.camp === 'sharpness',
       });
       if (derby && won != null) derbyByIdx.set(i, won);   // record the derby result for the H2H tally
     }

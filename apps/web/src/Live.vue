@@ -295,6 +295,18 @@ async function setCaptain(sp: SquadPlayer) {
   catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
 }
 function moodLabel(m: number): string { return m >= 78 ? 'buzzing' : m >= 62 ? 'good' : m >= 45 ? 'flat' : 'low'; }
+// pre-season training camp — a once-per-season prep choice (locked once the campaign's underway).
+const CAMPS = [
+  { key: 'fitness', icon: '⛰', label: 'Fitness camp', blurb: 'slower fatigue all season — your stars stay fresh' },
+  { key: 'chemistry', icon: '⬡', label: 'Team building', blurb: 'the squad gels faster — chemistry builds quicker' },
+  { key: 'sharpness', icon: '◎', label: 'Scrim block', blurb: 'sharper out the gate — higher morale all season' },
+] as const;
+async function setCamp(camp: string) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try { const r = await server.value.setCamp(myClub.value?.camp === camp ? null : camp, token.value); if (r.ok) await refreshMe(); else errMsg.value = r.error ?? ''; }
+  catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
 
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
@@ -884,6 +896,22 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
           <span class="lv-plannote">the right tone gives a one-match edge + lifts the room; the wrong one backfires. It lands next match, then clears.</span>
         </div>
+        <!-- pre-season training camp: a once-a-season prep choice, locked once the campaign's underway -->
+        <div class="lv-camp">
+          <div class="lv-talkhd">
+            <span class="lv-planh">⛰ Pre-season camp</span>
+            <span class="lv-talkctx">cohesion <i class="lv-talkmood" :class="{ hi: (myClub.cohesion||0) >= 66, lo: (myClub.cohesion||0) < 40 }">{{ myClub.cohesion ?? 0 }}%</i>
+              <template v-if="!myClub.campOpen"> · <i>window closed for this season</i></template>
+            </span>
+          </div>
+          <div class="lv-talkrow">
+            <button v-for="cp in CAMPS" :key="cp.key" class="lv-talkbtn camp" :class="{ on: myClub.camp === cp.key }" :disabled="marketBusy || (!myClub.campOpen && myClub.camp !== cp.key)" :title="cp.blurb" @click="setCamp(cp.key)">
+              <b>{{ cp.icon }} {{ cp.label }}</b>
+              <i class="lv-talkread">{{ cp.blurb }}</i>
+            </button>
+          </div>
+          <span class="lv-plannote">one focus for the whole campaign — it plugs into fitness, chemistry, or the room. Reset each season.</span>
+        </div>
       </div>
 
       <!-- the transfer market — bid on free agents (a real bidding war vs the AI clubs) -->
@@ -929,6 +957,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <span class="lv-sqstat"><b>{{ squadSummary.avgAge }}</b> avg age</span>
             <span class="lv-sqstat"><b>{{ kfmt(squadSummary.value) }}</b> squad value</span>
             <span class="lv-sqstat"><b>{{ kfmt(squadSummary.wages) }}</b> wage bill/yr</span>
+            <span class="lv-sqstat" title="team cohesion — a settled core out-duels an equal-talent brand-new roster; a fresh signing gels over a season"><b :class="{ 'lv-cohi': (myClub.cohesion||0) >= 66, 'lv-colo': (myClub.cohesion||0) < 40 }">{{ myClub.cohesion ?? 0 }}%</b> cohesion</span>
             <span v-if="squadSummary.expiring" class="lv-sqalert exp" title="contracts in their final year — renew them or they walk free at season's end">📄 {{ squadSummary.expiring }} expiring</span>
             <span v-if="squadSummary.out" class="lv-sqalert inj" title="players injured — a reserve covers each, or they play hurt">⚕ {{ squadSummary.out }} out</span>
             <span v-if="squadSummary.tired" class="lv-sqalert tired" title="players redlining on fatigue — rotate them out before they break down">◔ {{ squadSummary.tired }} tired</span>

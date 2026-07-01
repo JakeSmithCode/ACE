@@ -1524,6 +1524,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-talkread{font-style:normal;font-size:9px;letter-spacing:.02em;color:var(--muted-2)}
 .lv-talkread.great{color:#6fd39a}.lv-talkread.poor{color:#e07a7a}
 .lv-talkbtn.great{border-color:rgba(111,211,154,.4)}.lv-talkbtn.poor{border-color:rgba(224,122,122,.3)}
+/* pre-season camp (reuses the talk-strip layout) + cohesion readout */
+.lv-camp{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.lv-talkbtn.camp.on{border-color:#8a6ad0;box-shadow:inset 0 0 0 1px #8a6ad0;background:rgba(138,106,208,.1)}
+.lv-talkbtn.camp:disabled{opacity:.4;cursor:not-allowed}
+.lv-cohi{color:#6fd39a}.lv-colo{color:#e0906a}
 /* derby / rivalry: the rival chip on the club bar + the DERBY flag on a fixture */
 .lv-rival{font-family:var(--label);font-size:9.5px;font-weight:700;letter-spacing:.03em;color:#e0906a;background:rgba(224,144,106,.1);border:1px solid rgba(224,144,106,.28);border-radius:5px;padding:2px 7px}
 .lv-rival i{font-style:normal;color:var(--muted);margin-left:3px;font-variant-numeric:tabular-nums}
