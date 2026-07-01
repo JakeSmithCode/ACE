@@ -18,6 +18,7 @@ import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
 import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
 import { sponsorGoalMet, type ActiveSponsor } from './sponsor.js';
+import { computeObjective, confDelta, CONF_START, type Objective, type BoardOutcome } from './objectives.js';
 import type { DevBoost } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
 import { fullPatch, patchMeta, type MetaChange } from './meta.js';
@@ -49,6 +50,17 @@ export interface WorldClub {
   facilities?: Facilities;   // an owner's HQ rooms (the dev money-sink); undefined → no boost (AI/abstract)
   staff?: StaffHires;        // an owner's backroom staff (coach/analyst/psych); undefined → no effect
   sponsor?: ActiveSponsor;   // an owner's signed sponsorship (a season income stream + a goal)
+  boardObjective?: Objective;    // the board's season brief (from pre-season strength rank)
+  boardConfidence?: number;      // the board's confidence in the owner (0..100; starts CONF_START)
+  boardOutcome?: BoardOutcome;   // last season's verdict (for the off-season banner)
+}
+
+/** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
+ *  the board objective (a favourite gets a harder brief). */
+export function strengthRankIn(clubs: WorldClub[], i: number): number {
+  const c = clubs[i];
+  const peers = clubs.map((x, j) => ({ j, s: x.strength })).filter(m => clubs[m.j].tier === c.tier && clubs[m.j].group === c.group).sort((a, b) => b.s - a.s);
+  return peers.findIndex(m => m.j === i) + 1;
 }
 
 /** An owned club's combined development boost: HQ rooms × backroom staff. Undefined for both
@@ -253,17 +265,26 @@ export function advanceWorld(w: WorldState): Rollover {
     const led = settleClub({ rank: rankIn(i), divSize: w.size, tier: c.tier, wages: squadWageBill(c.roster) + overhead, playoff: poPrize(i) });
     const boost = clubDevBoost(c);
     const roster = c.roster.map(p => developPlayer(p, devRng, 1 - SEASON_SHARE, boost));  // bootcamp share — the rest grew in-season
-    // sponsorship: the base cheque always, the bonus if its goal was met this season; then the
-    // deal ticks down and clears when it expires (fresh offers appear next season).
+    // board objective (owner-scoped): did you meet the brief? a bonus + a confidence move.
+    let boardConfidence = c.boardConfidence, boardOutcome = c.boardOutcome, objMet = false, objBonus = 0;
+    if (c.owner && c.boardObjective) {
+      const finish = rankIn(i);
+      objMet = finish > 0 && finish <= c.boardObjective.needRank;
+      objBonus = objMet ? c.boardObjective.bonus : 0;
+      boardOutcome = { met: objMet, label: c.boardObjective.label, bonus: objBonus, finish };
+      boardConfidence = Math.max(0, Math.min(100, (c.boardConfidence ?? CONF_START) + confDelta(objMet, c.boardObjective.needRank, finish)));
+    }
+    // sponsorship: the base cheque always, the bonus if its goal was met this season (the
+    // 'objective' goal reads the board brief above); then the deal ticks down + clears.
     let sponsor = c.sponsor, sponsorPay = 0;
     if (sponsor) {
       const wins = w.results.filter(r => r.winner === i).length;
-      const met = sponsorGoalMet(sponsor.goal, sponsor.goalN, { objMet: false, finish: rankIn(i), divSize: w.size, promo: w.promo, wins });
+      const met = sponsorGoalMet(sponsor.goal, sponsor.goalN, { objMet, finish: rankIn(i), divSize: w.size, promo: w.promo, wins });
       sponsorPay = sponsor.base + (met ? sponsor.bonus : 0);
       const yl = sponsor.yearsLeft - 1;
       sponsor = yl > 0 ? { ...sponsor, yearsLeft: yl } : undefined;
     }
-    return { ...c, sponsor, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0) };
+    return { ...c, sponsor, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP
@@ -290,6 +311,8 @@ export function advanceWorld(w: WorldState): Rollover {
     clubs = clubs.map((c, i) => ({ ...c, tier: fr.tiers[i], group: fr.groups[i] }));
     moves = fr.moves;
   }
+  // the board sets a fresh brief for owned clubs from their NEW division + strength rank
+  clubs = clubs.map((c, i) => c.owner ? { ...c, boardObjective: computeObjective(strengthRankIn(clubs, i), c.tier, w.size, w.promo) } : c);
   // open a fresh cup for the new season (every club re-entered; club indices are stable)
   const cup = createCup(clubs.map((_, i) => i), w.season + 1);
   // the off-season heals everyone — fitness resets for the new campaign

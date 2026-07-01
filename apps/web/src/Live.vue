@@ -227,6 +227,10 @@ async function signSponsor(index: number) {
   catch (e) { sponsorMsg.value = (e as Error).message; } finally { sponsorBusy.value = false; }
 }
 
+// --- the board: the season brief + confidence (a survival narrative) ----------------
+const boardOpen = ref(false);
+const onTrack = () => myClub.value?.objective ? (myClub.value.objectiveRank || 99) <= myClub.value.objective.needRank : false;
+
 // --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
 const ROLE_ORDER = ['duelist', 'initiator', 'controller', 'sentinel'] as const;
 const ROLE_SHORT: Record<string, string> = { duelist: 'DUE', initiator: 'INI', controller: 'CON', sentinel: 'SEN' };
@@ -669,6 +673,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <button class="lv-planbtn hq" :class="{ on: hqOpen }" @click="hqOpen = !hqOpen">⌂ HQ</button>
           <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="staffOpen = !staffOpen">♦ staff</button>
           <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="sponsorOpen = !sponsorOpen">◈ sponsor</button>
+          <button class="lv-planbtn board" :class="{ on: boardOpen }" @click="boardOpen = !boardOpen">⚑ board</button>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
@@ -919,6 +924,25 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           </div>
         </div>
         <span v-if="hqMsg" class="lv-wire" :class="{ ok: hqMsg.startsWith('✓') }">{{ hqMsg }}</span>
+      </div>
+
+      <!-- the board — the season brief + the board's confidence in you (a survival arc) -->
+      <div v-if="myClub && boardOpen" class="lv-mktpanel board">
+        <div class="lv-mkth">
+          <span class="lv-kicker">The board</span>
+          <span class="lv-mktsub">your brief for the season — meet it for a bonus; the board's confidence in you moves with how you do.</span>
+        </div>
+        <div v-if="myClub.objective" class="lv-boardbrief">
+          <div class="lv-briefmain"><b>{{ myClub.objective.label }}</b><span class="lv-briefbonus">{{ kfmt(myClub.objective.bonus) }} bonus if met</span></div>
+          <div class="lv-briefnow" :class="{ ok: onTrack() }">currently <b>{{ ord(myClub.objectiveRank || 0) }}</b> · target top {{ myClub.objective.needRank }} · <b>{{ onTrack() ? '✓ on track' : '✗ off pace' }}</b></div>
+        </div>
+        <div class="lv-boardconf">
+          <div class="lv-confbar"><i :class="'cf-'+(myClub.boardStatus?.key || 'stable')" :style="{ width: (myClub.boardConfidence || 60)+'%' }"></i></div>
+          <div class="lv-confstatus" :class="'cf-'+(myClub.boardStatus?.key || 'stable')">{{ myClub.boardConfidence }}% confidence — {{ myClub.boardStatus?.label }}</div>
+        </div>
+        <div v-if="myClub.boardOutcome" class="lv-boardlast" :class="{ met: myClub.boardOutcome.met }">
+          Last season: {{ myClub.boardOutcome.met ? '✓ brief met' : '✗ brief missed' }} — finished {{ ord(myClub.boardOutcome.finish) }}<template v-if="myClub.boardOutcome.met"> (+{{ kfmt(myClub.boardOutcome.bonus) }})</template>
+        </div>
       </div>
 
       <!-- sponsorship — a multi-season commercial deal (base cheque every season + a goal bonus) -->
