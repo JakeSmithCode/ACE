@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, traitKeyOf, staffEffect, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -96,23 +96,41 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
     });
   }
 
-  // fitness ticks for HUMAN-OWNED clubs (depth matters on match night): the five who played
-  // tire + risk injury, the rest recover. Only owned clubs model it — a world with no owners
-  // is byte-identical. Seeded on its own stream so it never perturbs resolution.
+  // fitness + morale tick for HUMAN-OWNED clubs (depth + man-management matter on match night):
+  // the five who played tire + risk injury (the rest recover), and the room's mood drifts from
+  // the result, minutes, the captain, a psychologist, and the pre-match team talk (then the talk
+  // is consumed). Only owned clubs model either — a world with no owners is byte-identical.
   let fitness = w.fitness;
-  const owned = w.clubs.filter(c => c.owner);
-  if (owned.length) {
+  let morale = w.morale;
+  const resultOf = new Map<number, MatchResult>();
+  for (const r of results) { resultOf.set(r.home, r); resultOf.set(r.away, r); }
+  let clubsOut = clubs;
+  const ownedIdx = w.clubs.map((c, i) => (c.owner ? i : -1)).filter(i => i >= 0);
+  if (ownedIdx.length) {
     const fr = new Rng((devSeed(w.seed, w.season, w.day) ^ 0xF17a7) >>> 0);
     let fit = fitness ?? emptyFitness();
-    for (const c of owned) {
+    let mor = morale ?? emptyMorale();
+    for (const i of ownedIdx) {
+      const c = w.clubs[i];
       const fielded = fitFive(c.roster, planFive(c), fit).five;   // who actually played (pre-match fitness)
-      const eff = c.staff ? staffEffect(c.staff) : null;          // a sports psych cuts fatigue + injury rates
-      fit = tickFitness(fit, c.roster, new Set(fielded.map(p => p.id)), fr, fitId => traitKeyOf(fitId) === 'workhorse', eff?.fatigueMul ?? 1, eff?.injuryMul ?? 1).fitness;
+      const fivIds = new Set(fielded.map(p => p.id));
+      const eff = c.staff ? staffEffect(c.staff) : null;          // a sports psych cuts fatigue + injury rates + lifts mood
+      fit = tickFitness(fit, c.roster, fivIds, fr, fitId => traitKeyOf(fitId) === 'workhorse', eff?.fatigueMul ?? 1, eff?.injuryMul ?? 1).fitness;
+      const r = resultOf.get(i);
+      const won = r ? r.winner === i : null;
+      const opp = r ? (r.home === i ? r.away : r.home) : -1;
+      const favEdge = opp >= 0 ? c.strength - w.clubs[opp].strength : 0;
+      mor = updateMorale(mor, c.roster, fivIds, won, {
+        captain: captainOf(fielded, c.captain), talk: c.teamTalk, favEdge, psych: eff?.morale ?? 0,
+        injured: id => isInjured(fit, id),
+      });
     }
-    fitness = fit;
+    fitness = fit; morale = mor;
+    // the team talk was a one-shot for this match — clear it on every owned club
+    clubsOut = clubs.map(c => (c.owner && c.teamTalk ? { ...c, teamTalk: undefined } : c));
   }
 
-  const next: WorldState = { ...w, clubs, results: [...w.results, ...results], day: w.day + 1, cup, fitness };
+  const next: WorldState = { ...w, clubs: clubsOut, results: [...w.results, ...results], day: w.day + 1, cup, fitness, morale };
 
   const rows = results.map((r, slot) => {
     const row = fixtureRow(id, w.season, w.day, slot, r);

@@ -269,6 +269,27 @@ async function setFocus(sp: SquadPlayer, attr: string) {
   try { const r = await server.value.setFocus(sp.id, sp.focus === attr ? null : attr, token.value); if (r.ok) await refreshMe(); }
   catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
 }
+// team talk — set the pre-match tone (calm/rally/demand); the read grades it against the matchup.
+// Clicking the chosen tone clears it. It lands next match then is consumed by the tick.
+const TALK_TONES = [
+  { key: 'calm', icon: '○', label: 'Stay calm' },
+  { key: 'rally', icon: '▲', label: 'Rally them' },
+  { key: 'demand', icon: '✦', label: 'Demand more' },
+] as const;
+async function setTalk(tone: string) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try { const r = await server.value.setTalk(myClub.value?.teamTalk === tone ? null : tone, token.value); void r; await refreshMe(); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
+// captaincy — name the armband (a leader steadies + lifts the room). Click the current captain to auto.
+async function setCaptain(sp: SquadPlayer) {
+  if (!server.value || !token.value || !sp.starter) return;
+  marketBusy.value = true;
+  try { const r = await server.value.setCaptain(sp.captain ? null : sp.id, token.value); if (r.ok) await refreshMe(); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
+}
+function moodLabel(m: number): string { return m >= 78 ? 'buzzing' : m >= 62 ? 'good' : m >= 45 ? 'flat' : 'low'; }
 
 // --- the academy — your homegrown youth pipeline (build → intake → develop → graduate)
 const academyOpen = ref(false);
@@ -840,6 +861,23 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <span class="lv-plannote">authored tactics resolve on the server tick (the read-vs-site mind-game is real)</span>
           </div>
         </div>
+        <!-- pre-match team talk: pick a tone; the read grades it against the matchup + the room -->
+        <div class="lv-talk">
+          <div class="lv-talkhd">
+            <span class="lv-planh">◈ Team talk</span>
+            <span class="lv-talkctx">
+              <i class="lv-talkfav" :class="myClub.favourite">{{ myClub.favourite === 'fav' ? 'favourite' : myClub.favourite === 'dog' ? 'underdog' : 'even matchup' }}</i>
+              · room <i class="lv-talkmood" :class="{ hi: (myClub.squadMood||65) >= 62, lo: (myClub.squadMood||65) < 45 }">{{ moodLabel(myClub.squadMood || 65) }} {{ myClub.squadMood || 65 }}%</i>
+            </span>
+          </div>
+          <div class="lv-talkrow">
+            <button v-for="t in TALK_TONES" :key="t.key" class="lv-talkbtn" :class="[myClub.talkReads?.[t.key]?.fit, { on: myClub.teamTalk === t.key }]" :disabled="marketBusy" @click="setTalk(t.key)">
+              <b>{{ t.icon }} {{ t.label }}</b>
+              <i class="lv-talkread" :class="myClub.talkReads?.[t.key]?.fit">{{ myClub.talkReads?.[t.key]?.fit === 'great' ? '✓ reads the room' : myClub.talkReads?.[t.key]?.fit === 'poor' ? '✗ wrong tone' : 'neutral' }}</i>
+            </button>
+          </div>
+          <span class="lv-plannote">the right tone gives a one-match edge + lifts the room; the wrong one backfires. It lands next match, then clears.</span>
+        </div>
       </div>
 
       <!-- the transfer market — bid on free agents (a real bidding war vs the AI clubs) -->
@@ -899,7 +937,10 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <div class="lv-mktrow squad">
               <span class="rs-role" :class="sp.role">{{ sp.role.slice(0, 3).toUpperCase() }}</span>
               <div class="lv-sqid">
-                <b class="lv-mkthandle clk" title="open profile card" @click="playerCard = sp">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i><i v-if="sp.igl" class="lv-iglb">IGL</i></b>
+                <span class="lv-sqnamerow">
+                  <b class="lv-mkthandle clk" title="open profile card" @click="playerCard = sp">{{ sp.handle }}<i v-if="sp.starter" class="lv-starter">XI</i><i v-if="sp.igl" class="lv-iglb">IGL</i></b>
+                  <button v-if="sp.starter" class="lv-capb" :class="{ on: sp.captain }" :disabled="marketBusy" :title="sp.captain ? 'club captain — click to clear (auto-picks the best leader)' : 'name him captain (a leader steadies + lifts the room)'" @click="setCaptain(sp)">C</button>
+                </span>
                 <span class="lv-sqperson">{{ person(sp.id).nation.flag }} {{ person(sp.id).name }}
                   <i class="lv-sqsolo" :class="'rk-'+solo(sp.overall).tier.toLowerCase()">{{ solo(sp.overall).label }}</i>
                   <i v-if="trait(sp.id)" class="lv-sqtrait rs-trait" :class="'tr-'+trait(sp.id)!.key" :title="trait(sp.id)!.blurb">✦ {{ trait(sp.id)!.label }}</i>
@@ -908,6 +949,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
                   <i v-if="sp.focus" class="lv-sqfocus" :title="`training focus: ${ATTR_LABEL[sp.focus] || sp.focus} grows faster (the rest a touch slower)`">◎ {{ ATTR_LABEL[sp.focus] || sp.focus }}</i>
                   <i v-if="sp.injury" class="lv-sqinj" :title="`injured — out ${sp.injury} more match-day(s); a reserve covers, or he plays hurt`">⚕ OUT {{ sp.injury }}d</i>
                   <i v-else-if="sp.fatigue >= 40" class="lv-sqfat" :class="{ tired: sp.fatigue >= 70 }" :title="`match fatigue ${sp.fatigue}% — rotate him out to recover; high fatigue dulls his game and risks injury`">◔ {{ sp.fatigue }}%</i>
+                  <i class="lv-sqmood" :class="{ hi: sp.mood >= 72, lo: sp.mood < 48 }" :title="`morale ${sp.mood}% — high lifts his match game a touch, low drags it`">{{ sp.mood >= 72 ? '☺' : sp.mood < 48 ? '☹' : '·' }} {{ sp.mood }}%</i>
                 </span>
               </div>
               <span class="lv-mktage">age {{ sp.age }}</span>

@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, type Talk, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -974,7 +974,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const meTable = standingsView(wm, meRows, c.tier, c.group, clock());
       const objectiveRank = meTable.findIndex(t => t.club === c.tag) + 1;
       const conf = c.boardConfidence ?? 60;
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null });
+      // team-talk read: find the next fixture's opponent → favourite/underdog edge + squad mood,
+      // then grade each tone (great/ok/poor) so the manager can read the room before the match.
+      const divSched = divisionSchedule(membersOfDiv(wm.clubs.map(x => x.tier), wm.clubs.map(x => x.group), c.tier, c.group));
+      const dayFx = (divSched[wm.day] ?? []).find(f => f.home === ci || f.away === ci);
+      const oppIdx = dayFx ? (dayFx.home === ci ? dayFx.away : dayFx.home) : -1;
+      const favEdge = oppIdx >= 0 ? c.strength - wm.clubs[oppIdx].strength : 0;
+      const mood = squadMood(wm.morale, planFive(c).map(p => p.id));
+      const talkReads = Object.fromEntries((['calm', 'rally', 'demand'] as const).map(t => [t, talkFit(t, favEdge, mood)]));
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even' });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.
@@ -1164,6 +1172,33 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (b.attr) focuses[b.playerId!] = b.attr; else delete focuses[b.playerId!];
         return { ...c, focuses };
       });
+      await store.saveWorld(id, { ...w, clubs });
+      const after = (await store.loadWorld(id))!;
+      return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });
+    }
+    // POST /me/talk  { tone }  → set the pre-match team talk (calm/rally/demand); it lands next
+    // match then clears. tone null clears it. Owner-scoped, engine-blind (a one-match attr edge).
+    if (path[0] === 'me' && path[1] === 'talk' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { tone?: Talk | null };
+      if (b.tone != null && !['calm', 'rally', 'demand'].includes(b.tone)) return json(res, 422, { error: 'bad tone' });
+      const w = (await store.loadWorld(id))!;
+      const clubs = w.clubs.map(c => c.id === mine.id ? { ...c, teamTalk: b.tone ?? undefined } : c);
+      await store.saveWorld(id, { ...w, clubs });
+      return json(res, 200, { ok: true, teamTalk: b.tone ?? null });
+    }
+    // POST /me/captain  { playerId }  → name the club captain (a leader steadies + lifts the room).
+    // Must be one of your players; null clears to the auto pick (best leader). Engine-blind (morale).
+    if (path[0] === 'me' && path[1] === 'captain' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { playerId?: string | null };
+      if (b.playerId != null && !mine.roster.some(p => p.id === b.playerId)) return json(res, 404, { error: 'not on your roster' });
+      const w = (await store.loadWorld(id))!;
+      const clubs = w.clubs.map(c => c.id === mine.id ? { ...c, captain: b.playerId ?? undefined } : c);
       await store.saveWorld(id, { ...w, clubs });
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });

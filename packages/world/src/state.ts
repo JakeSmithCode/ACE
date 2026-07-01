@@ -13,6 +13,7 @@ import { standings, fixtureSeed, type MatchResult } from './season.js';
 import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './playoffs.js';
 import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
 import type { Fitness } from './fitness.js';
+import type { Morale, Talk } from './morale.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST, isMentor, mentorBoost } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
@@ -54,6 +55,8 @@ export interface WorldClub {
   boardConfidence?: number;      // the board's confidence in the owner (0..100; starts CONF_START)
   boardOutcome?: BoardOutcome;   // last season's verdict (for the off-season banner)
   focuses?: Record<string, keyof Attributes>;   // an owner's per-player training focus (id → skill); undefined → balanced
+  teamTalk?: Talk;      // the owner's chosen pre-match tone (one-shot; consumed + cleared after the match)
+  captain?: string;     // the owner's named captain (player id); undefined → the best natural leader in the five
 }
 
 /** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
@@ -103,6 +106,7 @@ export interface WorldState {
   results: MatchResult[];   // the current season's fixtures
   cup?: CupState;           // the season's domestic cup (ticks day-by-day; opt-in/additive)
   fitness?: Fitness;        // fatigue + injuries for HUMAN-OWNED clubs' players (opt-in/additive)
+  morale?: Morale;          // per-player mood for HUMAN-OWNED clubs (opt-in/additive; no owners → absent)
 }
 
 /** Every `(tier, group)` division and its member club indices, tier-major. A flat
