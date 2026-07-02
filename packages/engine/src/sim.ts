@@ -45,6 +45,12 @@ const FIGHT_FACE = 0.03;   // round-t the winner stays focused down the kill lin
                            // realistically flankable from their travel direction)
 const WOUND_PEN = 0.08;    // duel-edge lost per missing HP — a 50hp fighter duels at −4
 const CHIP_LO = 8, CHIP_HI = 70;  // return-damage band; scaled by how contested the duel was
+// Wounded BEHAVIOUR (not just a stat penalty): a fighter who comes out of ANY exchange
+// badly hurt hesitates — patches up, resets their crosshair, moves off more carefully —
+// before continuing. Visible on the map as a hitch after a bloody fight, and a real cost:
+// the wounded arrive later, out of sync with their team.
+const WOUNDED_HP = 35;     // below this, a survivor is visibly playing hurt
+const WOUND_PAUSE = 0.018; // the extra beat a badly wounded survivor takes before moving on
 // Non-lethal EXCHANGES: a near-coin-flip duel can break off without a kill — both trade
 // shots, take damage, and disengage for a beat. The wounds escalate the next exchange
 // (WOUND_PEN), so firefights BUILD: poke → poke → kill, instead of every contact being
@@ -428,6 +434,9 @@ function resolveRound(
     ag.pauses = [];   // the old path's fight halts are spent; the new journey starts clean
   };
 
+  // still mid-journey at t (a pause only makes sense for someone with ground left to cover)
+  const midTravel = (ag: Ag, t: number) => ag.departT !== Infinity && t > ag.departT && t - ag.departT - pausedTime(ag.pauses, t) < ag.arrive;
+
   const resolvedThisStep = new Set<string>();
   for (let t = 0; t <= 1 + 1e-9; t += STEP) {
     resolvedThisStep.clear();
@@ -503,6 +512,9 @@ function resolveRound(
           a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
           a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
           d.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pd, pa) };
+          // a badly wounded survivor HESITATES before moving on (playing hurt, visibly)
+          if (a.hp < WOUNDED_HP && midTravel(a, t)) a.pauses.push({ t, dur: WOUND_PAUSE });
+          if (d.hp < WOUNDED_HP && midTravel(d, t)) d.pauses.push({ t, dur: WOUND_PAUSE });
           resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
           events.push({ t, kind: 'dmg', from: a.handle, to: d.handle, dmg: dmgD, hp: d.hp });
           events.push({ t, kind: 'dmg', from: d.handle, to: a.handle, dmg: dmgA, hp: a.hp });
@@ -534,9 +546,9 @@ function resolveRound(
         //    The RECOVERY scales with the gun (rate of fire made real): an Op re-chambers,
         //    an SMG is instantly ready — and fights during it carry RELOAD_PEN.
         const wPos = posAt(winnerAg, t);
-        if (winnerAg.departT !== Infinity && t > winnerAg.departT
-          && t - winnerAg.departT - pausedTime(winnerAg.pauses, t) < winnerAg.arrive) {
-          winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) });
+        if (midTravel(winnerAg, t)) {
+          // the recovery beat, extended when the winner came out badly hurt (playing hurt)
+          winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) + (winnerAg.hp < WOUNDED_HP ? WOUND_PAUSE : 0) });
         }
         // 3) tunnel vision down the kill line — realistically flankable from behind
         const ffDir = dist(wPos, loser.deathPos!) > 1e-6 ? unit(wPos, loser.deathPos!) : facingAt(winnerAg, t);

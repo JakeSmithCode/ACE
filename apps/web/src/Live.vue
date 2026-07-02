@@ -1394,14 +1394,14 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
         </div>
         <template v-if="statsOpen">
           <div class="lv-ldboard">
-            <div class="lv-strow lv-sthead"><span class="lv-ldrank">#</span><span></span><span>Player</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span title="headshot kill rate">HS%</span><span>MVP</span><span>GP</span></div>
+            <div class="lv-strow lv-sthead"><span class="lv-ldrank">#</span><span></span><span>Player</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span title="headshot kill rate">HS%</span><span title="1vX clutches converted">CL</span><span>MVP</span><span>GP</span></div>
             <div v-for="s in statRows" :key="s.handle" class="lv-strow">
               <span class="lv-ldrank" :class="{ top: s.rank <= 3 }">{{ s.rank }}</span>
               <span class="rs-role" :class="s.role">{{ s.role.slice(0,3).toUpperCase() }}</span>
               <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i></b>
               <span class="lv-stk">{{ s.kills }}</span><span>{{ s.deaths }}</span>
               <span :class="s.kd >= 1 ? 'pos' : 'neg'">{{ s.kd.toFixed(2) }}</span>
-              <span>{{ s.fb }}</span><span :class="{ 'lv-hshot': (s.hsPct || 0) >= 40 }">{{ s.hsPct ?? 0 }}%</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
+              <span>{{ s.fb }}</span><span :class="{ 'lv-hshot': (s.hsPct || 0) >= 40 }">{{ s.hsPct ?? 0 }}%</span><span class="lv-stcl">{{ s.clutch || '' }}</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
             </div>
             <div v-if="!statRows.length" class="lv-empty">no matches resolved yet — advance a match-day</div>
           </div>

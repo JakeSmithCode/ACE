@@ -39,18 +39,36 @@ const key = (f: { season: number; day: number; slot: number }) => `${f.season}:$
 // Season player stats — accumulated from the full-simmed (watched) match timelines.
 // The engine keys every kill by player handle, so this is a pure tally; the match's
 // top fragger earns an MVP. Gives the watched division real player careers.
-interface PlayerStat { handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; hs: number }
+interface PlayerStat { handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; hs: number; clutch: number }
 function tallyTimeline(tl: MatchTimeline, into: Map<string, PlayerStat>): void {
-  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {}, hs: Record<string, number> = {};
+  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {}, hs: Record<string, number> = {}, clutch: Record<string, number> = {};
+  const sideOf = new Map<string, 0 | 1>();
+  tl.teams.forEach((tm, ti) => tm.players.forEach(p => sideOf.set(p.handle, ti as 0 | 1)));
   for (const r of tl.rounds) {
     const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
-    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; if (e.hs) hs[e.killer] = (hs[e.killer] || 0) + 1; });
+    // clutch detection: replay the round's alive counts — when a side first drops to a
+    // LONE survivor facing 2+ enemies, that player is "in a clutch"; if their side then
+    // wins the round, it converts (the 1vX every highlight reel is made of).
+    const alive: [Set<string>, Set<string>] = [new Set(tl.teams[0].players.map(p => p.handle)), new Set(tl.teams[1].players.map(p => p.handle))];
+    const clutcher: (string | null)[] = [null, null];
+    ks.forEach((e, i) => {
+      kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1;
+      if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1;
+      if (e.hs) hs[e.killer] = (hs[e.killer] || 0) + 1;
+      const vs = sideOf.get(e.victim);
+      if (vs != null) {
+        alive[vs].delete(e.victim);
+        if (alive[vs].size === 1 && alive[1 - vs].size >= 2 && clutcher[vs] == null) clutcher[vs] = [...alive[vs]][0];
+      }
+    });
+    const c = clutcher[r.winner];
+    if (c) clutch[c] = (clutch[c] || 0) + 1;
   }
   let mvp = '', best = -1;
   for (const tm of tl.teams) for (const p of tm.players) { const k = kills[p.handle] || 0; if (k > best) { best = k; mvp = p.handle; } }
   tl.teams.forEach(tm => tm.players.forEach(p => {
-    const s = into.get(p.handle) ?? { handle: p.handle, club: tm.tag, role: p.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0 };
-    s.kills += kills[p.handle] || 0; s.deaths += deaths[p.handle] || 0; s.fb += fb[p.handle] || 0; s.hs += hs[p.handle] || 0; s.matches += 1;
+    const s = into.get(p.handle) ?? { handle: p.handle, club: tm.tag, role: p.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0, clutch: 0 };
+    s.kills += kills[p.handle] || 0; s.deaths += deaths[p.handle] || 0; s.fb += fb[p.handle] || 0; s.hs += hs[p.handle] || 0; s.clutch += clutch[p.handle] || 0; s.matches += 1;
     if (p.handle === mvp) s.mvp += 1;
     into.set(p.handle, s);
   }));
