@@ -76,6 +76,8 @@ const CTRL_RESMOKE_U = 0.5;                   // utility a controller needs to t
 const RESMOKE_T0 = 0.30;                      // the second smoke blooms just after the first — sustained coverage through the hit
 const RESMOKE_R = 50, RESMOKE_R_UTIL = 38;    // a focused second wall on the connector (50..88)
 const RESMOKE_DUR = 0.16, RESMOKE_DUR_UTIL = 0.12;
+const RETAKE_SMOKE_U = 0.35;                  // utility a defense controller needs to have SAVED a retake smoke
+const RETAKE_DELAY = 0.02;                    // beat after the plant before the retake smoke blooms on the spike
 const PULSE_R = 84, PULSE_R_UTIL = 70;       // recon/flash reach: 84..154
 const PULSE_DUR = 0.07, PULSE_DUR_UTIL = 0.10;
 const TRAP_R = 60, TRAP_R_UTIL = 48;         // sentinel trap watch-zone reach: 60..108
@@ -412,6 +414,10 @@ function resolveRound(
   agents: Ag[], smokes: Smoke[], pulses: Pulse[], nav: Navmesh,
   sitePt: Vec2, site: SiteId, attacker: 0 | 1, defender: 0 | 1, scale: number, rng: Rng,
 ): { winner: 0 | 1; method: RoundMethod; events: MatchEvent[] } {
+  // work on a PER-RUN copy of the smokes: the retake smoke below is planned at
+  // plant time, and pushing it into the shared setup array would leak one run's
+  // smoke into every other fork + the canonical pass (the fork-hygiene rule).
+  smokes = smokes.slice();
   // a smoke is directional: it blinds the ENEMY's vision through it, not the
   // side that threw it (you play around your own smoke).
   const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
@@ -584,6 +590,31 @@ function resolveRound(
         planted = true; plantBy = atkAtSite[0].handle; plantPos = posAt(atkAtSite[0], t);
         detonateAt = Math.min(0.99, t + SPIKE_TIME);
         events.push({ t, kind: 'plant', agent: plantBy, site });
+        // RETAKE SMOKE: a defense controller with kit to spare has SAVED one for
+        // exactly this — it blooms a beat after the plant ON THE RETAKE LANE (between
+        // the planted spike and where the retakers actually are), cutting the
+        // attackers' held sightlines onto the incoming push (defender-side, so it
+        // blinds the attackers through it, never the retakers — blindedThrough holds).
+        // NOT on the spike itself: that placement was tried and BACKFIRED (it shielded
+        // the post-plant attackers from being acquired, fights never fired, and the
+        // clock ran to detonation — bind jumped +6 ATK). PLANNED, not thrown: centre/
+        // time/reach are pure functions of the plant + the live defenders + the
+        // caster's utility (zero new rng draws), and it lives on the per-run smokes
+        // copy so every fork plans its own and the shared setup array is untouched.
+        const ctrl = def().find(d2 => d2.agentRole === 'controller');
+        if (ctrl) {
+          const cu = (ctrl.p.attr.utility / 100) * ctrl.utilFactor;
+          if (cu >= RETAKE_SMOKE_U) {
+            const live = def();
+            let mx = 0, my = 0;
+            for (const d2 of live) { const p2 = posAt(d2, t); mx += p2[0]; my += p2[1]; }
+            const lane: Vec2 = lerp(plantPos, [mx / live.length, my / live.length], 0.45);
+            const rt0 = t + RETAKE_DELAY, rr = RESMOKE_R + RESMOKE_R_UTIL * cu;
+            const rt1 = rt0 + RESMOKE_DUR + RESMOKE_DUR_UTIL * cu;
+            smokes.push({ side: defender, c: lane, r: rr, t0: rt0, t1: rt1 });
+            events.push({ t: rt0, kind: 'ability', agent: ctrl.handle, ability: 'smoke', side: defender, at: lane, r: rr, until: rt1 });
+          }
+        }
       }
     }
 
@@ -776,13 +807,14 @@ function simulateRound(
     // rotations away. Two-site reduces exactly to the original A/off/mid split.
     const readSite = SITES[readIndex(defTac.defense.read, SITES.length)];
     const otherSites = SITES.filter(s => s !== readSite);   // each gets one watcher, in order
+    // (a 3-site read-stack floor of 2 was tried against haven/lotus's ATK lean and
+    // made BOTH worse — 60.9→68.4 / 62→65: a 3-site read is right only ~1/3 of the
+    // time, so extra commit mostly pays the wrong-read rotation tax; the mid pool IS
+    // the three-site flexibility. Their fix is per-map anchor work, not this split.)
     const onRead = Math.max(1, Math.min(3, 1 + Math.round(Math.abs(defTac.defense.read) * 2)));
     const rotSpeed = ROTATE_SPEED * iglRotateMul(defTeam) * scale;   // sharp IGL + map-scale normalized
     const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
     const slots: { from: Vec2; site: SiteId | 'M' }[] = [];
-    // every hold tucks to the nearest wall that keeps its lane toward the entry
-    // (post-jitter, no rng): defenders post at corners/edges like real players
-    // instead of floating mid-room — and earn the SET cover edge for it
     // NOTE: defenders deliberately do NOT cover-seek. It was tried three ways (spawn /
     // mid / own-room watch references) and every variant broke the pool — split sank
     // DEF-SIDED (37-38), breeze swung ATK or STALLY — because the procedural defense's
