@@ -19,8 +19,13 @@ export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
  *  mid-path its facing is the path's own direction. path + departT + arrive +
  *  hold reconstruct position and facing at any t. Additive since v1. */
 export type MatchEvent =
-  | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2 }
-  | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string }
+  // `pauses` (additive): moments the agent HALTED mid-travel — winning a fight costs a
+  // beat stationary at the kill spot. Each pause extends the effective journey: position
+  // is path-progress over (t − departT − paused time so far) / arrive.
+  | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2; pauses?: { t: number; dur: number }[] }
+  // `hp` (additive): the winner's remaining health after the fight — duels chip the
+  // victor, so a contested kill leaves a wounded player for the next contact to clean up.
+  | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string; hp?: number }
   | { t: number; kind: 'plant'; agent: string; site: SiteId }
   | { t: number; kind: 'defuse'; agent: string }
   // `at`/`r`/`until` give the ability its geometry on the map (a circle at `at` of

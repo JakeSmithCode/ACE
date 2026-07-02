@@ -36,6 +36,15 @@ function teamChem(players: { tenure?: number }[]): number {
 const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
+// Fights are neither instant nor free (the "actual players" layer):
+const FIGHT_PAUSE = 0.012; // round-t a duel WINNER halts at the kill spot (~1.2s) — fights take time,
+                           // so a contested push arrives late, and a fresh killer is a stationary,
+                           // known-position target for the trade window. Balance-sensitive: 0.018
+                           // tipped split DEF-SIDED (41.8) — pauses tax the pushing side hardest.
+const FIGHT_FACE = 0.03;   // round-t the winner stays focused down the kill line (tunnel vision —
+                           // realistically flankable from their travel direction)
+const WOUND_PEN = 0.08;    // duel-edge lost per missing HP — a 50hp fighter duels at −4
+const CHIP_LO = 8, CHIP_HI = 70;  // return-damage band; scaled by how contested the duel was
 const ROTATE_SPEED = 0.85; // a rotator's travel speed once it has info and moves with purpose
 const ATK_SPREAD = 18;     // lateral fan across the site entry — pushers hit distinct angles, not one stacked point
 
@@ -157,6 +166,9 @@ interface Ag {
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
+  hp: number;            // 100 at round start; a duel chips the WINNER too (attrition carries)
+  pauses: { t: number; dur: number }[];   // halts mid-travel (won a fight); extend the journey
+  fightFace: { from: number; until: number; dir: Vec2 } | null;   // focused down the kill line
   // kill point: rotate here when the trigger fires (death's player resolved to a handle)
   rotatePlan: { pos: Vec2; route?: Vec2[]; trigger: { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number } } | null;
 }
@@ -205,17 +217,28 @@ function pathHitsZone(path: Vec2[], c: Vec2, r: number): boolean {
   return false;
 }
 
+/** Total halted time inside `pauses` up to round-time t (pauses are sequential). */
+function pausedTime(pauses: { t: number; dur: number }[], t: number): number {
+  let s = 0;
+  for (const p of pauses) s += Math.min(p.dur, Math.max(0, t - p.t));
+  return s;
+}
+
 function posAt(a: Ag, t: number): Vec2 {
   if (a.deathT != null && t >= a.deathT) return a.deathPos!;
   if (t <= a.departT) return a.path[0];            // holding at start (e.g. a rotator on info-hold)
-  return posAlong(a.path, ease(Math.min(1, (t - a.departT) / a.arrive)));
+  // fight pauses freeze the journey: progress runs on travel time NET of halts
+  const local = t - a.departT - (a.pauses.length ? pausedTime(a.pauses, t) : 0);
+  return posAlong(a.path, ease(Math.min(1, Math.max(0, local) / a.arrive)));
 }
 
-/** Where an agent is looking at time t: down their travel vector while moving,
- *  and down their held angle (holdDir) while holding or once arrived. */
+/** Where an agent is looking at time t: down the kill line for a beat after winning
+ *  a fight (tunnel vision — flankable), down their travel vector while moving, and
+ *  down their held angle (holdDir) while holding or once arrived. */
 function facingAt(a: Ag, t: number): Vec2 {
   if (a.deathT != null && t >= a.deathT) return a.holdDir;
-  const moveEnd = a.departT + a.arrive;
+  if (a.fightFace && t >= a.fightFace.from && t <= a.fightFace.until) return a.fightFace.dir;
+  const moveEnd = a.departT + a.arrive + (a.pauses.length ? pausedTime(a.pauses, t) : 0);
   if (t > a.departT && t < moveEnd - 1e-6) {
     const here = posAt(a, t);
     const ahead = posAt(a, Math.min(moveEnd, t + STEP));
@@ -264,18 +287,21 @@ function readIndex(read: number, n: number): number {
   return clampN(Math.round((1 - read) / 2 * (n - 1)), 0, n - 1);
 }
 
-/** Resolve one attacker-vs-defender duel. Returns true if the attacker wins.
+/** Resolve one attacker-vs-defender duel. Returns whether the attacker wins AND
+ *  the probability it did (so the caller can scale the winner's return damage —
+ *  a dominant duel is near-free, a coin flip leaves the victor hurting).
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
- *  / pulse / trade), -ve favours the defender. */
-function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number): boolean {
+ *  / pulse / trade), -ve favours the defender. A WOUNDED fighter duels worse
+ *  (WOUND_PEN per missing HP) — attrition carries between fights. */
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number): { atkWins: boolean; p: number } {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery)
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge + atk.chem;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge + def.chem;
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN;
   // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
-  return rng.chance(p);
+  return { atkWins: rng.chance(p), p };
 }
 
 function pickWeapon(rng: Rng, buy: Buy, role: string): string {
@@ -320,6 +346,7 @@ function resolveRound(
     const rp = ag.rotatePlan!, here = posAt(ag, t);
     ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
     ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED * scale); ag.rotatePlan = null;
+    ag.pauses = [];   // the old path's fight halts are spent; the new journey starts clean
   };
 
   const resolvedThisStep = new Set<string>();
@@ -370,18 +397,37 @@ function resolveRound(
         else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
         const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
-        const atkWins = duel(rng, a, d, surprise, holdEdge);
+        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge);
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;
-        loser.alive = false; loser.deathT = t; loser.deathPos = posAt(loser, t);
+        // capture the death spot BEFORE marking dead — posAt short-circuits to deathPos
+        // once deathT is set, so the old order left deathPos null forever (latent; never
+        // read until the fight-facing below needed it)
+        const lPos = posAt(loser, t);
+        loser.alive = false; loser.deathT = t; loser.deathPos = lPos;
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
+        // the fight COSTS the winner (actual players, not a coin toss):
+        // 1) return damage scaled by how contested it was — a dominant duel is near-free,
+        //    a coin flip leaves the victor hurting; the wound carries into the next fight
+        const q = atkWins ? p : 1 - p;                 // the winner's own win probability
+        winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8)));
+        // 2) a beat stationary at the kill spot (fights take time) — the push arrives
+        //    later, and a fresh killer is a known, standing target for the trade window
+        const wPos = posAt(winnerAg, t);
+        if (winnerAg.departT !== Infinity && t > winnerAg.departT
+          && t - winnerAg.departT - pausedTime(winnerAg.pauses, t) < winnerAg.arrive) {
+          winnerAg.pauses.push({ t, dur: FIGHT_PAUSE });
+        }
+        // 3) tunnel vision down the kill line — realistically flankable from behind
+        const ffDir = dist(wPos, loser.deathPos!) > 1e-6 ? unit(wPos, loser.deathPos!) : facingAt(winnerAg, t);
+        winnerAg.fightFace = { from: t, until: t + FIGHT_FACE, dir: ffDir };
         hadKill = true;                                 // first blood = info for the defense
         // kill point: teammates whose death-trigger names this victim rotate now
         for (const ag of agents) {
           if (ag.alive && ag.rotatePlan?.trigger.kind === 'death' && ag.rotatePlan.trigger.handle === loser.handle) fireRotation(ag, t);
         }
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
-        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon });
+        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon, hp: winnerAg.hp });
         break;
       }
     }
@@ -491,7 +537,7 @@ function simulateRound(
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
-        exposedUntil: -1,
+        exposedUntil: -1, hp: 100, pauses: [], fightFace: null,
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
@@ -533,7 +579,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         // the lurker holds toward the fight (catches unaware rotators); others push to site
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-        exposedUntil: -1, rotatePlan: null,
+        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
@@ -566,7 +612,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1,
+        exposedUntil: -1, hp: 100, pauses: [], fightFace: null,
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
       });
     });
@@ -603,7 +649,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, rotatePlan: null,
+        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null,
       });
     });
   }
@@ -704,7 +750,9 @@ function simulateRound(
   // the match rng, so the canonical timeline stays byte-identical.
   let atkForkWins = 0;
   for (let i = 0; i < forks; i++) {
-    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1 }));
+    // fresh hp/pauses/fightFace per clone — `pauses` MUST be a new array (a shared ref
+    // would leak fork fight-halts into the canonical pass and break byte-identity)
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }
@@ -713,12 +761,14 @@ function simulateRound(
   const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, scale, rng);
   events.push(...res.events);
 
-  // emit one move event per agent (full path + arrival); viewer freezes on death
+  // emit one move event per agent (full path + arrival); viewer freezes on death.
+  // `pauses` carries the fight halts (winner stationary at the kill spot) so the
+  // viewer replays the exact same journey — omitted when empty (additive field).
   const spawns: Record<string, Vec2> = {};
   for (const a of agents) {
     spawns[a.handle] = a.path[0];
     // a rotator that never got contact held all round → departT clamps to 1
-    events.push({ t: 0, arrive: a.arrive, departT: Math.min(1, a.departT), kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir });
+    events.push({ t: 0, arrive: a.arrive, departT: Math.min(1, a.departT), kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir, ...(a.pauses.length ? { pauses: a.pauses } : {}) });
   }
   events.sort((x, y) => x.t - y.t);
 

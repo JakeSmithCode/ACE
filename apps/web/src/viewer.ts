@@ -23,12 +23,24 @@ const unit = (dx: number, dy: number): Vec2 => { const d = Math.hypot(dx, dy) ||
  *  hitches where an enemy trap slowed it. Purely a render concern (no contract). */
 interface Hitch { frac: number; dur: number; start: number; end: number; }
 
+/** Total halted time inside engine fight-pauses up to round-time t — mirrors the
+ *  engine's pausedTime exactly (a duel winner stands at the kill spot for a beat). */
+type Pause = { t: number; dur: number };
+function pausedTime(pauses: Pause[] | undefined, t: number): number {
+  if (!pauses || !pauses.length) return 0;
+  let s = 0;
+  for (const p of pauses) s += Math.min(p.dur, Math.max(0, t - p.t));
+  return s;
+}
+
 /** Position respecting a hold-then-move: stays at path[0] until departT, then
- *  travels over `arrive`. Mirrors the engine's posAt. An optional `hitch` injects
+ *  travels over `arrive`. Mirrors the engine's posAt — including the engine's
+ *  fight `pauses` (halts that EXTEND the journey). An optional `hitch` injects
  *  the trap pause without changing where the agent ends up at `arrive`. */
-function posWithDepart(path: Vec2[], departT: number, arrive: number, prog: number, hitch?: Hitch): Vec2 {
+function posWithDepart(path: Vec2[], departT: number, arrive: number, prog: number, hitch?: Hitch, pauses?: Pause[]): Vec2 {
   if (prog <= departT) return path[0] ?? [0, 0];
-  const local = prog - departT;
+  const local = prog - departT - pausedTime(pauses, prog);
+  if (local <= 0) return path[0] ?? [0, 0];
   let lin: number;
   if (hitch && arrive > hitch.dur) {
     // steal `dur` from the travel, spent paused at `frac`: the agent reaches the
@@ -68,14 +80,21 @@ function headingAtEnd(path: Vec2[]): Vec2 {
   return [0, -1];
 }
 
-/** Reconstruct where an agent looks at progress `prog`: down its travel vector
- *  while moving, down its held angle while holding or once arrived. Mirrors
- *  engine facingAt(). */
-function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number, hitch?: Hitch): Vec2 {
-  const moveEnd = departT + arrive;
+/** A fight-face window: after a kill the winner looks down the kill line for a
+ *  beat (tunnel vision) — mirrors the engine's fightFace, reconstructed from the
+ *  kill events (killer → victim positions at the kill t). */
+type FightFace = { from: number; until: number; dir: Vec2 };
+const FIGHT_FACE = 0.03;   // mirrors the engine constant
+
+/** Reconstruct where an agent looks at progress `prog`: down the kill line for a
+ *  beat after winning a fight, down its travel vector while moving, down its held
+ *  angle while holding or once arrived. Mirrors engine facingAt(). */
+function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number, hitch?: Hitch, pauses?: Pause[], ff?: FightFace[]): Vec2 {
+  if (ff) for (const f of ff) if (prog >= f.from && prog <= f.until) return f.dir;
+  const moveEnd = departT + arrive + pausedTime(pauses, prog);
   if (prog > departT && prog < moveEnd - 1e-6) {
-    const here = posWithDepart(path, departT, arrive, prog, hitch);
-    const ahead = posWithDepart(path, departT, arrive, Math.min(moveEnd, prog + 0.02), hitch);
+    const here = posWithDepart(path, departT, arrive, prog, hitch, pauses);
+    const ahead = posWithDepart(path, departT, arrive, Math.min(moveEnd, prog + 0.02), hitch, pauses);
     const dx = ahead[0] - here[0], dy = ahead[1] - here[1];
     if (Math.hypot(dx, dy) > 1e-6) return unit(dx, dy);
   }
@@ -100,6 +119,8 @@ const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clippe
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
   hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch; spawnFan?: Vec2;
+  pauses: Pause[];             // engine fight-halts (winner stationary at the kill spot) — extend the journey
+  ff: FightFace[];             // fight-face windows (winner looks down the kill line for a beat)
   // presentation-only render state (never feeds the x-ray/heatmap reconstructions):
   rox: number; roy: number;    // smoothed separation offset (kills pile-up jitter)
   rang: number | null;         // smoothed facing angle — cones SWEEP between headings, never snap
@@ -410,13 +431,13 @@ export class Viewer {
     const HEAT_R = 46;
     let n0 = 0, n1 = 0;
     for (const r of this.tl.rounds) {
-      const moves = new Map<string, { path: Vec2[]; departT: number; arrive: number }>();
-      for (const e of r.events) if (e.kind === 'move') moves.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive });
+      const moves = new Map<string, { path: Vec2[]; departT: number; arrive: number; pauses?: Pause[] }>();
+      for (const e of r.events) if (e.kind === 'move') moves.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, pauses: e.pauses });
       for (const e of r.events) {
         if (e.kind !== 'kill') continue;
         const v = moves.get(e.victim);
         if (!v) continue;
-        const p = posWithDepart(v.path, v.departT, v.arrive, e.t);
+        const p = posWithDepart(v.path, v.departT, v.arrive, e.t, undefined, v.pauses);
         const side = this.teamOf.get(e.victim) ?? 0;
         side === 0 ? n0++ : n1++;
         const c = svg('circle');
@@ -445,9 +466,9 @@ export class Viewer {
   // the engine duels on (vision cones + LOS, active utility, the trade window). The
   // product's core bet ("a tactical instrument you can x-ray") made literal. ────────
   /** Reconstruct a round's agents (path/facing/side) for the x-ray — playback's data. */
-  private roundRecs(r: Round): Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1 }> {
-    const m = new Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1 }>();
-    for (const e of r.events) if (e.kind === 'move') m.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, hold: e.hold ?? headingAtEnd(e.path), side: this.teamOf.get(e.agent) ?? 0 });
+  private roundRecs(r: Round): Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[] }> {
+    const m = new Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[] }>();
+    for (const e of r.events) if (e.kind === 'move') m.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, hold: e.hold ?? headingAtEnd(e.path), side: this.teamOf.get(e.agent) ?? 0, pauses: e.pauses });
     return m;
   }
   /** Is the segment a→b wall-clear (the engine's LOS, sampled on the navmesh)? */
@@ -475,8 +496,8 @@ export class Viewer {
   private xrayReport(r: Round, e: Extract<Round['events'][number], { kind: 'kill' }>) {
     const recs = this.roundRecs(r);
     const K = recs.get(e.killer), V = recs.get(e.victim);
-    const at = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2 }): Vec2 => rec ? posWithDepart(rec.path, rec.departT, rec.arrive, e.t) : [500, 500];
-    const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2 }): Vec2 => rec ? facingOf(rec.path, rec.departT, rec.arrive, rec.hold, e.t) : [1, 0];
+    const at = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[] }): Vec2 => rec ? posWithDepart(rec.path, rec.departT, rec.arrive, e.t, undefined, rec.pauses) : [500, 500];
+    const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[] }): Vec2 => rec ? facingOf(rec.path, rec.departT, rec.arrive, rec.hold, e.t, undefined, rec.pauses) : [1, 0];
     const pK = at(K), pV = at(V), fK = face(K), fV = face(V);
     const kSeesV = this.seesTarget(pK, fK, pV), vSeesK = this.seesTarget(pV, fV, pK);
     const dist = Math.hypot(pK[0] - pV[0], pK[1] - pV[1]);
@@ -609,8 +630,22 @@ export class Viewer {
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, rox: 0, roy: 0, rang: null };
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], rox: 0, roy: 0, rang: null };
     });
+
+    // fight-face windows (mirrors the engine): after each kill the winner looks down
+    // the kill line for a beat — reconstructed from the kill events' positions, so the
+    // cone snaps onto the fight exactly where the engine's did.
+    const byHandle = new Map(this.agents.map(a => [a.handle, a] as const));
+    for (const e of r.events) {
+      if (e.kind !== 'kill') continue;
+      const k = byHandle.get(e.killer), v = byHandle.get(e.victim);
+      if (!k || !v) continue;
+      const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch, k.pauses);
+      const vp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch, v.pauses);
+      const d = Math.hypot(vp[0] - kp[0], vp[1] - kp[1]);
+      if (d > 1e-6) k.ff.push({ from: e.t, until: e.t + FIGHT_FACE, dir: [(vp[0] - kp[0]) / d, (vp[1] - kp[1]) / d] });
+    }
 
     // trap STUTTER: an agent whose path crosses an ENEMY trap was slowed by the
     // engine (its `arrive` already carries TRAP_SLOW). Surface that as a visible
@@ -651,7 +686,7 @@ export class Viewer {
     const plant = r.events.find(e => e.kind === 'plant') as Extract<Round['events'][number], { kind: 'plant' }> | undefined;
     if (plant) {
       const planter = this.agents.find(a => a.handle === plant.agent);
-      if (planter) { this.spikePlantT = plant.t; this.spikePos = posWithDepart(planter.path, planter.departT, planter.arrive, plant.t); }
+      if (planter) { this.spikePlantT = plant.t; this.spikePos = posWithDepart(planter.path, planter.departT, planter.arrive, plant.t, planter.hitch, planter.pauses); }
     }
 
     this.roundLabel.innerHTML = `<b>ROUND ${r.n}</b> · <span class="${r.attacker === 0 ? 'att' : 'def'}">${this.tl.teams[r.attacker].tag}</span> attacking site ${r.site}`;
@@ -785,14 +820,14 @@ export class Viewer {
         // an expanding ring at the death spot + a TRACER from the killer, so the eye is
         // drawn to where the fight happened and who took it.
         if (live) {
-          const dp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch);
+          const dp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch, v.pauses);
           const pop = svg('g') as SVGGElement; pop.setAttribute('class', 'ace-killpop ' + vc);
           pop.setAttribute('transform', `translate(${dp[0].toFixed(1)},${dp[1].toFixed(1)})`);
           pop.innerHTML = `<circle class="kp-ring" r="5"></circle>`;
           this.agLayer.appendChild(pop);
           setTimeout(() => pop.remove(), 680);
           if (k) {
-            const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch);
+            const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch, k.pauses);
             const tr = svg('line');
             tr.setAttribute('class', 'ace-tracer ' + kc);
             tr.setAttribute('x1', kp[0].toFixed(1)); tr.setAttribute('y1', kp[1].toFixed(1));
@@ -966,7 +1001,7 @@ export class Viewer {
     const frame = this.agents.map(a => {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      const base = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch);
+      const base = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch, a.pauses);
       const p: Vec2 = [base[0], base[1]];   // copy — posWithDepart can return the path[0] ref
       if (a.spawnFan && !dead && prog < SPAWN_CONVERGE) {
         const k = 1 - prog / SPAWN_CONVERGE; p[0] += a.spawnFan[0] * k; p[1] += a.spawnFan[1] * k;
@@ -1025,7 +1060,7 @@ export class Viewer {
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
       if (cones && !dead) {
-        const f = facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch);
+        const f = facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch, a.pauses, a.ff);
         const ta = Math.atan2(f[1], f[0]);
         if (a.rang == null || snap) a.rang = ta;
         else {
