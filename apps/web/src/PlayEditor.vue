@@ -9,7 +9,7 @@
 import { computed, ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
 import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
-import { coverOf, type Navmesh } from '@ace/maps';
+import { coverOf, pathfind, type Navmesh } from '@ace/maps';
 
 const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
@@ -59,6 +59,42 @@ function faceNub(pl: PlayerPlan): Vec2 {
   const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
   return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
 }
+// --- vision cones: each hold's ACTUAL wall-clipped awareness cone (the engine's
+// FOV half-angle ~60° and duel range 150u, raycast on the same navmesh), rotating
+// live as you drag the facing nub — so authoring a CROSSFIRE is a visual act:
+// you see exactly what each player watches, and the dead lanes nobody covers.
+const FOV_HALF = 1.05, CONE_RANGE = 150, CONE_RAYS = 14;
+const showCones = ref(true);
+const showLanes = ref(true);
+function coneD(pl: PlayerPlan): string {
+  if (inWall(pl.pos)) return '';
+  const nb = faceNub(pl);
+  const base = Math.atan2(nb[1] - pl.pos[1], nb[0] - pl.pos[0]);
+  const step = props.nav.cell * 0.6;
+  let d = `M${pl.pos[0]} ${pl.pos[1]}`;
+  for (let i = 0; i <= CONE_RAYS; i++) {
+    const ang = base - FOV_HALF + (2 * FOV_HALF) * (i / CONE_RAYS);
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    let hit = CONE_RANGE;
+    for (let s = step; s <= CONE_RANGE; s += step) {
+      if (inWall([pl.pos[0] + dx * s, pl.pos[1] + dy * s])) { hit = s - step; break; }
+    }
+    d += ` L${(pl.pos[0] + dx * hit).toFixed(1)} ${(pl.pos[1] + dy * hit).toFixed(1)}`;
+  }
+  return d + 'Z';
+}
+
+// --- approach lanes: the A* routes the attack actually travels (the engine's own
+// pathfind, spawn → each site) — the lanes your holds and crossfires must cover.
+// Attack mode shows the lane to the forced execute site.
+const lanes = computed<Vec2[][]>(() => {
+  const sites = props.mode === 'attack'
+    ? [props.sites[(props.play.site ?? 'A') as SiteId]!]
+    : (['A', 'B', 'C'] as SiteId[]).filter(s => props.sites[s]).map(s => props.sites[s]!);
+  return sites.map(sp => pathfind(props.nav, props.atkSpawn, sp)).filter(p => p.length > 1);
+});
+const lanePts = (p: Vec2[]) => p.map(q => q.join(',')).join(' ');
+
 // --- cover feedback: the ENGINE's own coverOf, against the angle this hold
 // watches. A tucked hold (⛨) earns the set-fighter cover edge in real duels —
 // the whole point of authoring against walls — so the editor shows it live.
@@ -280,6 +316,16 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
       <image :href="mapUrl" x="0" y="0" width="1000" height="1000" preserveAspectRatio="none" />
       <rect x="0" y="0" width="1000" height="1000" class="pe-scrim" @pointerdown="onBg" />
 
+      <!-- attacker approach lanes (the engine's A*): what the defense must cover -->
+      <g v-if="showLanes">
+        <polyline v-for="(ln, i) in lanes" :key="'lane' + i" :points="lanePts(ln)" class="pe-lane" />
+      </g>
+
+      <!-- vision cones: the wall-clipped angle each hold actually watches -->
+      <g v-if="showCones">
+        <path v-for="pl in play.plans" :key="'cone' + pl.player" :d="coneD(pl)" class="pe-cone" :class="side" />
+      </g>
+
       <!-- utility lineups: translucent reach circles (drawn low, click-through) -->
       <circle v-for="(ln, i) in (play.lineups || [])" :key="'uc' + i"
               :cx="ln.at[0]" :cy="ln.at[1]" :r="utilRadius(ln)" class="pe-util-r" :class="ln.kind" />
@@ -369,6 +415,10 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
       <div v-if="warnCount" class="pe-warnline">⚠ {{ warnCount }} off-mesh — a spot or path crosses a wall (red); the player can't stand or walk there.</div>
       <div class="pe-covline" :class="{ some: coveredCount }" title="a hold tucked at a wall exposes less body — a real duel edge the engine measures from this exact geometry">
         ⛨ {{ coveredCount }}/{{ play.plans.length }} holds in cover — tuck a dot against a wall (facing its angle) to earn the cover edge
+        <span class="pe-layers">
+          <button :class="{ on: showCones }" @click="showCones = !showCones" title="each hold's wall-clipped vision cone — what they actually watch">◔ cones</button>
+          <button :class="{ on: showLanes }" @click="showLanes = !showLanes" title="the A* approach lanes the attack travels — what your setup must cover">≈ lanes</button>
+        </span>
       </div>
       <div v-for="pl in play.plans" :key="pl.player" class="pe-row"
            :class="{ keyed: pl.rotate, routing: routing?.player === pl.player }">

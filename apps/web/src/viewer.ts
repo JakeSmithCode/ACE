@@ -117,6 +117,9 @@ const VISION = 150;        // cone reach in image units (engine ENGAGE)
 const FOV_HALF = 1.05;     // cone half-angle in radians (~60°, engine FOV)
 const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clipped edge
 const HP_C = 2 * Math.PI * 15;   // hp arc circumference (r=15 ring segment)
+const CAM_TAU = 850;       // director-camera easing time-constant (ms) — stately, not twitchy
+const CAM_MIN = 430;       // tightest frame (world units) — never over-magnifies
+const CAM_PAD = 130;       // breathing room around the interest bbox
 
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
@@ -161,6 +164,13 @@ export class Viewer {
   private agents: VAg[] = [];
   private spikePos: Vec2 | null = null; private spikePlantT = Infinity;
   private showCones = true;
+  // DIRECTOR CAMERA — the broadcast observer: auto-frames the action (contact
+  // clusters, the push, the spike) with stately smoothed motion; toggles back to
+  // the full map. Pure presentation: a viewBox animation over the same world.
+  private camAuto = true;
+  private cam: { x: number; y: number; w: number } | null = null;
+  private fullBox = { x: 0, y: 0, w: 1000 };
+  private camBtn!: HTMLElement;
   // live scoreboard (kills/deaths through the current moment) — form made visible
   private scores = new Map<string, { k: number; d: number }>();
   private deadNow = new Set<string>();   // handles down in the CURRENT round at the current moment
@@ -246,6 +256,7 @@ export class Viewer {
     const wrap = el('div', 'ace-mapwrap');
     wrap.innerHTML = `<div class="ace-overlay"><span class="ovl" id="ace-phase">Round start</span></div><div class="ace-banner" id="ace-banner"></div><div class="ace-endcard" id="ace-endcard"></div><div class="ace-heatkey" id="ace-heatkey"></div>`;
     const s = svg('svg'); s.setAttribute('class', 'ace-map'); s.setAttribute('viewBox', this.playViewBox()); this.mapSvg = s as unknown as SVGSVGElement;
+    { const [fx, fy, fw] = this.playViewBox().split(' ').map(Number); this.fullBox = { x: fx, y: fy, w: fw }; }
     const img = svg('image'); img.setAttribute('href', this.mapUrl); img.setAttribute('x', '0'); img.setAttribute('y', '0'); img.setAttribute('width', '1000'); img.setAttribute('height', '1000'); img.setAttribute('preserveAspectRatio', 'none');
     const scrim = svg('rect'); scrim.setAttribute('x', '0'); scrim.setAttribute('y', '0'); scrim.setAttribute('width', '1000'); scrim.setAttribute('height', '1000'); scrim.setAttribute('class', 'ace-scrim');
     // site callouts (A/B/C) — the orientation every caster + viewer navigates by.
@@ -296,6 +307,7 @@ export class Viewer {
         <button class="speed vis on" id="ace-vis" title="Toggle vision cones">◔ Vision</button>
         <button class="speed vis on" id="ace-util" title="Toggle utility (smokes / flashes / traps)">✦ Utility</button>
         <button class="speed heat" id="ace-heat" title="Match heatmap — where each side dies across the whole match">▦ Heatmap</button>
+        <button class="speed cam on" id="ace-cam" title="Director camera — auto-frames the action like a broadcast observer; off = full map">🎥 Director</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -363,6 +375,13 @@ export class Viewer {
     this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.abLayer.style.display = this.showUtil ? '' : 'none'; this.render(); };
     this.heatBtn = ctl.querySelector('#ace-heat') as HTMLElement;
     this.heatBtn.onclick = () => this.toggleHeat();
+    this.camBtn = ctl.querySelector('#ace-cam') as HTMLElement;
+    this.camBtn.onclick = () => {
+      this.camAuto = !this.camAuto;
+      this.camBtn.classList.toggle('on', this.camAuto);
+      if (!this.camAuto) { this.cam = null; this.mapSvg.setAttribute('viewBox', this.playViewBox()); }
+      this.snapNext = true; this.render();
+    };
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
     (ctl.querySelector('#ace-next') as HTMLElement).onclick = () => this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
     const seekTo = (clientX: number) => { const r = this.seek.getBoundingClientRect(); this.scrubTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width))); };
@@ -463,7 +482,11 @@ export class Viewer {
     this.heatBtn.classList.toggle('on', this.showHeat);
     this.mapSvg.classList.toggle('heat-on', this.showHeat);
     this.heatLegend.classList.toggle('show', this.showHeat);
-    if (this.showHeat) { this.playing = false; this.playBtn.textContent = '▶'; this.clearAdvance(); this.hideEndCard(); this.buildHeat(); }
+    if (this.showHeat) {
+      this.playing = false; this.playBtn.textContent = '▶'; this.clearAdvance(); this.hideEndCard(); this.buildHeat();
+      // the aggregate view reads on the FULL map — park the director camera
+      this.cam = null; this.mapSvg.setAttribute('viewBox', this.playViewBox());
+    } else this.snapNext = true;
   }
 
   // ── duel x-ray: click a kill → reconstruct WHY it resolved, from the same geometry
@@ -1138,13 +1161,16 @@ export class Viewer {
     // angle instead of snapping. Both are presentation-only: the x-ray/heatmap always
     // reconstruct from the raw engine-mirrored math.
     const k = snap ? 1 : 1 - Math.exp(-dt / SEP_TAU);
+    // counter-scale markers against the director zoom (last frame's camera) so a
+    // tight frame magnifies the WORLD but keeps rings/nameplates broadcast-sized
+    const agK = this.camAuto && this.cam ? Math.max(0.55, Math.min(1, 0.45 + 0.55 * (this.cam.w / this.fullBox.w))) : 1;
     for (const { a, dead, prog, p, bx, by } of frame) {
       if (!dead) {
         a.rox += (p[0] - bx - a.rox) * k; a.roy += (p[1] - by - a.roy) * k;
       }
       const px = bx + a.rox, py = by + a.roy;    // dead: offset frozen at the death frame (no corpse slide)
       const q: Vec2 = this.nav && !dead && !this.walkAt(px, py) ? (this.nearestWalkable([px, py]) ?? [px, py]) : [px, py];
-      a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})`);
+      a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})${agK !== 1 ? ` scale(${agK.toFixed(3)})` : ''}`);
       a.node.classList.toggle('clutch', a === clutcher);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
@@ -1177,6 +1203,35 @@ export class Viewer {
       } else a.cone.style.display = 'none';
     }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
+    // DIRECTOR CAMERA — frame the story like a broadcast observer. The interest
+    // set: agents IN CONTACT (an enemy within ~260u — a fight brewing or live);
+    // before any contact, the attacking push (that's the narrative); the spike
+    // once planted. The frame is their padded bbox, floor-zoomed so it never
+    // over-magnifies, clamped inside the map, and eased exponentially — snapped
+    // on round load/scrub so it never lags in.
+    if (this.camAuto && !this.showHeat) {
+      const live = frame.filter(f => !f.dead);
+      const pts: Vec2[] = [];
+      for (const f of live) {
+        if (live.some(g => g.a.side !== f.a.side && Math.hypot(g.p[0] - f.p[0], g.p[1] - f.p[1]) < 260)) pts.push([f.p[0], f.p[1]]);
+      }
+      if (!pts.length) for (const f of live) if (f.a.side === 'att') pts.push([f.p[0], f.p[1]]);
+      if (this.spikePos && this.T >= this.spikePlantT) pts.push(this.spikePos);
+      if (pts.length) {
+        let mnX = 1e9, mnY = 1e9, mxX = -1e9, mxY = -1e9;
+        for (const p of pts) { mnX = Math.min(mnX, p[0]); mxX = Math.max(mxX, p[0]); mnY = Math.min(mnY, p[1]); mxY = Math.max(mxY, p[1]); }
+        let w = Math.max(CAM_MIN, Math.min(this.fullBox.w, Math.max(mxX - mnX, mxY - mnY) + CAM_PAD * 2));
+        const cl = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+        const tx = cl((mnX + mxX) / 2 - w / 2, this.fullBox.x, this.fullBox.x + this.fullBox.w - w);
+        const ty = cl((mnY + mxY) / 2 - w / 2, this.fullBox.y, this.fullBox.y + this.fullBox.w - w);
+        if (!this.cam || snap) this.cam = { x: tx, y: ty, w };
+        else {
+          const ck = 1 - Math.exp(-dt / CAM_TAU);
+          this.cam.x += (tx - this.cam.x) * ck; this.cam.y += (ty - this.cam.y) * ck; this.cam.w += (w - this.cam.w) * ck;
+        }
+        this.mapSvg.setAttribute('viewBox', `${this.cam.x.toFixed(1)} ${this.cam.y.toFixed(1)} ${this.cam.w.toFixed(1)} ${this.cam.w.toFixed(1)}`);
+      }
+    }
     this.seekFill.style.width = (this.T * 100) + '%';
     this.seekHead.style.left = (this.T * 100) + '%';
     // round clock + phase — driven into both the control-bar timer and the broadcast
