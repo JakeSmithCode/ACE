@@ -25,7 +25,9 @@ export type MatchEvent =
   | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2; pauses?: { t: number; dur: number }[] }
   // `hp` (additive): the winner's remaining health after the fight — duels chip the
   // victor, so a contested kill leaves a wounded player for the next contact to clean up.
-  | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string; hp?: number }
+  // `hs` (additive): the kill was a headshot — a clean one-tap (high-aim players land
+  // them more), which is why the winner took almost no return damage.
+  | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string; hp?: number; hs?: boolean }
   // a non-lethal EXCHANGE (additive kind): a close duel that broke off without a kill —
   // `from` hit `to` for `dmg`, leaving them at `hp`. Emitted per direction (a graze wounds
   // both). Consumers that only know kills simply skip it.

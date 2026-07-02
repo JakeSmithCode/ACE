@@ -169,6 +169,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-panel .kill .mk{font-family:var(--label);font-weight:800;font-size:8px;letter-spacing:.06em;color:#2a1404;background:#ffb454;border-radius:2px;padding:1px 4px}
 .ace-panel .kill .mk.s5{background:var(--gold);animation:mpt-pulse 1.2s ease-in-out infinite}
 .ace-panel .kill .khp{font-family:var(--label);font-weight:700;font-size:8px;letter-spacing:.03em;color:#e0b06a;border:1px solid rgba(224,176,106,.35);border-radius:2px;padding:0 3px;font-variant-numeric:tabular-nums}
+.ace-panel .kill .hstag{font-style:normal;color:var(--def);font-size:11px;font-weight:800;text-shadow:0 0 6px rgba(255,92,110,.6)}
 .ace-panel .kill .khp.crit{color:var(--def);border-color:rgba(255,92,110,.4)}
 /* end-card extras: the round's star + the THRIFTY tag */
 .ace-endcard .ec-mvp{font-family:var(--label);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--text);margin-top:9px}

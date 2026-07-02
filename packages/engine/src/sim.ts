@@ -91,6 +91,20 @@ const W_DMG: Record<string, number> = {
   Operator: 1.5, Marshal: 1.2, Vandal: 1.15, Phantom: 1.1, Bulldog: 1.0,
   Spectre: 0.95, Sheriff: 1.05, Ghost: 0.8, Frenzy: 0.75, Classic: 0.7,
 };
+// ...a HANDLING identity (rate of fire made real at this timescale): the post-kill
+// recovery — re-chamber, reload, re-set — scales with the gun. An Op winner stands
+// exposed longest; an SMG is instantly ready. Scales the winner's FIGHT_PAUSE.
+const W_HANDLING: Record<string, number> = {
+  Operator: 1.6, Marshal: 1.35, Vandal: 1.0, Phantom: 0.95, Bulldog: 1.0,
+  Spectre: 0.8, Sheriff: 0.9, Ghost: 0.85, Frenzy: 0.75, Classic: 0.8,
+};
+const RELOAD_PEN = 6;      // duel edge lost while mid-recovery (reloading/re-chambering after a kill) —
+                           // getting traded mid-reload is now mechanically true, not just narratively
+// ...and HEADSHOTS: a clean one-tap, rolled per kill from the winner's AIM + how dominant
+// the duel was. A headshot kill takes almost no return chip (the loser never got to spray
+// back). Pro-level HS rates land ~25-35%; sharp aim pushes toward 45%+ on dominant duels.
+const HS_BASE = 0.22, HS_AIM = 0.006, HS_DOM = 0.25;   // P(hs) = base + (aim−65)·aim + (q−0.5)·dom
+const HS_CHIP = 0.3;       // a headshot's return-chip multiplier (near-instant kill)
 // ...and a RANGE personality inside the engage envelope (0..ENGAGE): a sniper dominates
 // a held max-distance angle and crumbles when rushed; SMGs/pistols invert. A pure
 // function of the duel distance — no rng, and mirror-symmetric so the pool stays fair.
@@ -279,6 +293,11 @@ function isSet(a: Ag, t: number): boolean {
   if (t <= a.departT) return true;
   const local = t - a.departT - (a.pauses.length ? pausedTime(a.pauses, t) : 0);
   if (local >= a.arrive) return true;
+  return inPause(a, t);
+}
+/** Inside a post-kill recovery window (reloading / re-chambering / re-setting)? Fights
+ *  during it carry RELOAD_PEN and forfeit the set-weapon bonus — the trade window's teeth. */
+function inPause(a: Ag, t: number): boolean {
   for (const p of a.pauses) if (t >= p.t && t <= p.t + p.dur) return true;
   return false;
 }
@@ -344,12 +363,13 @@ function readIndex(read: number, n: number): number {
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
  *  / pulse / trade), -ve favours the defender. A WOUNDED fighter duels worse
  *  (WOUND_PEN per missing HP) — attrition carries between fights. */
-function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number, range = 100, atkSet = true, defSet = true): { atkWins: boolean; p: number } {
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number, range = 100, atkSet = true, defSet = true, atkReload = false, defReload = false): { atkWins: boolean; p: number } {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery); rangeEdge is
-  // the weapon's identity at this distance (a SET Op owns the long angle, a Spectre the rush)
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + rangeEdge(atk.weapon, range, atkSet) + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + rangeEdge(def.weapon, range, defSet) + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN;
+  // the weapon's identity at this distance (a SET Op owns the long angle, a Spectre the
+  // rush); a mid-RECOVERY fighter (reloading after a kill) duels at RELOAD_PEN
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + rangeEdge(atk.weapon, range, atkSet) + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN - (atkReload ? RELOAD_PEN : 0);
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + rangeEdge(def.weapon, range, defSet) + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN - (defReload ? RELOAD_PEN : 0);
   // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
@@ -451,7 +471,10 @@ function resolveRound(
         else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
         const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
-        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, isSet(a, t), isSet(d, t));
+        // recovery state: a fighter mid-reload after a kill loses their set-weapon bonus
+        // (you're not scoped while re-chambering) and duels at a penalty
+        const aReload = inPause(a, t), dReload = inPause(d, t);
+        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, isSet(a, t) && !aReload, isSet(d, t) && !dReload, aReload, dReload);
         // a CLOSE duel can break off without a kill: both trade shots, take damage, and
         // disengage for a beat, watching each other. The wounds make the NEXT exchange
         // deadlier (WOUND_PEN), so firefights escalate: poke → poke → kill. URGENCY:
@@ -464,10 +487,10 @@ function resolveRound(
         // graze. This is what keeps plant timings honest (lotus stalled at 14-17% otherwise).
         const nearSite = dist(pa, sitePt) < SITE_R * 1.5 || dist(pd, sitePt) < SITE_R * 1.5;
         if (!nearSite && rng.chance(GRAZE_MAX * closeness * urgency)) {
-          // graze damage carries the SHOOTER's weapon (post-draw scale, same rng count):
-          // an Op body-shot poke hurts; a Classic poke stings
-          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[a.weapon] ?? 1));
-          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[d.weapon] ?? 1));
+          // graze damage carries the SHOOTER's weapon AND aim (post-draw scale, same rng
+          // count): an Op body-shot poke hurts; a sharp-aim poke tags heads, not shoulders
+          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[a.weapon] ?? 1) * (0.8 + a.p.attr.aim * 0.004));
+          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[d.weapon] ?? 1) * (0.8 + d.p.attr.aim * 0.004));
           d.hp = Math.max(1, d.hp - dmgD); a.hp = Math.max(1, a.hp - dmgA);
           a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
           a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
@@ -486,18 +509,26 @@ function resolveRound(
         loser.alive = false; loser.deathT = t; loser.deathPos = lPos;
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         // the fight COSTS the winner (actual players, not a coin toss):
-        // 1) return damage scaled by how contested it was — a dominant duel is near-free,
-        //    a coin flip leaves the victor hurting; the wound carries into the next fight
+        // 0) HEADSHOT roll — the winner's AIM + dominance decide if it was a clean one-tap
+        //    (drawn BEFORE the chip so the chip can shrink; fixed draw order for determinism)
         const q = atkWins ? p : 1 - p;                 // the winner's own win probability
-        // ...scaled by the LOSER's weapon: beating an eco Classic is near-free, but
-        // trading up into a rifle (or eating an Op body-shot on the way in) costs real HP
-        winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8 * (W_DMG[loser.weapon] ?? 1))));
+        const wAim = winnerAg.p.attr.aim;
+        const hs = rng.chance(Math.max(0.02, Math.min(0.75, HS_BASE + (wAim - 65) * HS_AIM + (q - 0.5) * HS_DOM)));
+        // 1) return damage scaled by how contested it was — a dominant duel is near-free,
+        //    a coin flip leaves the victor hurting; the wound carries into the next fight.
+        //    Scaled by the LOSER's weapon (beating an eco Classic is near-free, a rifle
+        //    sprays back), shrunk by the winner's AIM (sharp aim finishes fights faster),
+        //    and near-zero on a headshot (the loser never got to shoot back).
+        const chipScale = (hs ? HS_CHIP : 1) * (1.3 - wAim * 0.005) * (W_DMG[loser.weapon] ?? 1);
+        winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8 * chipScale)));
         // 2) a beat stationary at the kill spot (fights take time) — the push arrives
-        //    later, and a fresh killer is a known, standing target for the trade window
+        //    later, and a fresh killer is a known, standing target for the trade window.
+        //    The RECOVERY scales with the gun (rate of fire made real): an Op re-chambers,
+        //    an SMG is instantly ready — and fights during it carry RELOAD_PEN.
         const wPos = posAt(winnerAg, t);
         if (winnerAg.departT !== Infinity && t > winnerAg.departT
           && t - winnerAg.departT - pausedTime(winnerAg.pauses, t) < winnerAg.arrive) {
-          winnerAg.pauses.push({ t, dur: FIGHT_PAUSE });
+          winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) });
         }
         // 3) tunnel vision down the kill line — realistically flankable from behind
         const ffDir = dist(wPos, loser.deathPos!) > 1e-6 ? unit(wPos, loser.deathPos!) : facingAt(winnerAg, t);
@@ -508,7 +539,7 @@ function resolveRound(
           if (ag.alive && ag.rotatePlan?.trigger.kind === 'death' && ag.rotatePlan.trigger.handle === loser.handle) fireRotation(ag, t);
         }
         resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
-        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon, hp: winnerAg.hp });
+        events.push({ t, kind: 'kill', killer: winnerAg.handle, victim: loser.handle, weapon: winnerAg.weapon, hp: winnerAg.hp, ...(hs ? { hs: true } : {}) });
         break;
       }
     }

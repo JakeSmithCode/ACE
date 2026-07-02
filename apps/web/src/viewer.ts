@@ -514,6 +514,7 @@ export class Viewer {
       : { tag: 'BLIND DUEL', cls: 'blind', text: `Neither had a clean cone — a close, scrappy break.` };
     const factors: { icon: string; text: string }[] = [];
     if (traded) factors.push({ icon: '⇄', text: `Trade — ${e.victim} had just fragged and was punished` });
+    if (e.hs) factors.push({ icon: '⊙', text: `Headshot — a clean one-tap, ${e.victim} never got to shoot back` });
     if (e.hp != null && e.hp <= 50) factors.push({ icon: '♥', text: `${e.killer} walked away at ${e.hp}hp — wounded into the next fight` });
     if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
     if (flash) factors.push({ icon: '✲', text: `${e.victim} was caught by a ${flash.ability}` });
@@ -820,7 +821,7 @@ export class Viewer {
       const mkTag = streak >= 3 ? `<span class="mk s${streak}">${streak >= 5 ? 'ACE' : streak + 'K'}</span>` : '';
       // attrition made visible: a winner who barely survived shows their exit HP
       const hpTag = e.hp != null && e.hp <= 50 ? `<span class="khp${e.hp <= 25 ? ' crit' : ''}" title="the winner walked away at ${e.hp}hp — wounded into the next fight">${e.hp}hp</span>` : '';
-      d.innerHTML = `${fb ? '<span class="fbtag" title="first blood">FB</span>' : ''}${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span>${hpTag}<span class="wp">${e.weapon}</span><span class="vc ${vc}">${e.victim}</span>${mkTag}<i class="kill-xray" title="x-ray this duel">⌕</i>`;
+      d.innerHTML = `${fb ? '<span class="fbtag" title="first blood">FB</span>' : ''}${traded ? '<span class="trade" title="traded">⇄</span>' : ''}<span class="kr ${kc}">${e.killer}</span>${hpTag}<span class="wp">${e.weapon}${e.hs ? '<em class="hstag" title="headshot — a clean one-tap">⊙</em>' : ''}</span><span class="vc ${vc}">${e.victim}</span>${mkTag}<i class="kill-xray" title="x-ray this duel">⌕</i>`;
       const ke = e; d.classList.add('clickable'); d.onclick = () => this.openXray(this.tl.rounds[this.roundIdx], ke);   // duel x-ray
       this.feed.appendChild(d); this.feedItems.push(d);
       while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
