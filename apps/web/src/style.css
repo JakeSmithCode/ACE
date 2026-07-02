@@ -311,6 +311,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-seed input{width:96px;background:var(--bg-3);border:1px solid var(--line-2);color:var(--text);padding:6px 8px;font-family:var(--display);font-size:16px}
 .ace-editor .ed-seed button{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10px;letter-spacing:.08em;padding:5px;cursor:pointer}
 .ace-editor .ed-score{font-family:var(--display);font-weight:700;font-size:24px;font-variant-numeric:tabular-nums;margin-top:2px}
+.ace-editor .ed-odds{display:flex;gap:8px;align-items:center;margin-left:12px;cursor:help}
+.ace-editor .ed-odd{font-family:var(--label);font-size:12px;letter-spacing:.06em;font-weight:700;padding:4px 9px;font-variant-numeric:tabular-nums;background:rgba(34,211,238,.1);color:var(--att);border:1px solid rgba(34,211,238,.35);clip-path:var(--bevel)}
+.ace-editor .ed-odd.def{background:rgba(255,92,110,.1);color:var(--def);border-color:rgba(255,92,110,.35)}
 .ace-editor .ed-presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%;padding:9px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);order:5}
 .ace-editor .ed-presets label{font-family:var(--label);font-size:10px;letter-spacing:.12em;color:var(--muted-2)}
 .ed-preset{display:inline-flex;align-items:stretch;border:1px solid rgba(34,211,238,.3);clip-path:var(--bevel);overflow:hidden}
@@ -383,6 +386,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-warn{fill:none;stroke:var(--live);stroke-width:2.5;stroke-dasharray:3 4;opacity:.9;pointer-events:none}
 .pe-badseg{fill:none;stroke:var(--live);stroke-width:4;opacity:.85;pointer-events:none}
 .pe-warnline{font-family:var(--label);font-size:11px;letter-spacing:.03em;color:var(--live);background:rgba(255,70,85,.08);border:1px solid rgba(255,70,85,.3);padding:6px 9px}
+.pe-covline{font-family:var(--label);font-size:11px;letter-spacing:.03em;color:var(--muted);background:rgba(127,227,168,.05);border:1px solid rgba(127,227,168,.18);padding:6px 9px;cursor:help}
+.pe-covline.some{color:#7fe3a8;border-color:rgba(127,227,168,.4);background:rgba(127,227,168,.09)}
+.pe-covchip{color:#7fe3a8;font-size:13px;font-style:normal;cursor:help}
 /* utility lineups */
 .pe-util-r{pointer-events:none}
 .pe-util-r.smoke{fill:rgba(220,225,235,.16);stroke:rgba(220,225,235,.5);stroke-width:1.5;stroke-dasharray:5 5}
@@ -408,6 +414,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-mark.hold.def .pe-dot{fill:rgba(255,92,110,.32);stroke:var(--def)}
 .pe-mark.rot .pe-dot{fill:rgba(229,181,103,.16);stroke:var(--gold);stroke-dasharray:4 4}
 .pe-hl{fill:var(--text);font-family:var(--label);font-size:21px;font-weight:600;text-anchor:middle;paint-order:stroke;stroke:#0a0e13;stroke-width:4px}
+.pe-cov{fill:#7fe3a8;font-size:19px;text-anchor:middle;paint-order:stroke;stroke:#0a0e13;stroke-width:3px;opacity:.85}
+.pe-cov.full{fill:#a5f3c4;opacity:1;font-size:21px}
 .pe-rot-ic{fill:var(--gold);font-size:19px;text-anchor:middle;font-weight:700}
 .pe-list{flex:1;min-width:260px;display:flex;flex-direction:column;gap:7px}
 .pe-hint{font-family:var(--body);font-size:11.5px;line-height:1.5;color:var(--muted);margin-bottom:4px}

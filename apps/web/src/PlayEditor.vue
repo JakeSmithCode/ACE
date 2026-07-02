@@ -9,7 +9,7 @@
 import { computed, ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
 import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
-import type { Navmesh } from '@ace/maps';
+import { coverOf, type Navmesh } from '@ace/maps';
 
 const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
@@ -59,6 +59,28 @@ function faceNub(pl: PlayerPlan): Vec2 {
   const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
   return [pl.pos[0] + dx * FACE_LEN, pl.pos[1] + dy * FACE_LEN];
 }
+// --- cover feedback: the ENGINE's own coverOf, against the angle this hold
+// watches. A tucked hold (⛨) earns the set-fighter cover edge in real duels —
+// the whole point of authoring against walls — so the editor shows it live.
+// The expected enemy is probed ~110u out along the watched angle (falling back
+// closer when that lands in a wall; no probe = no badge, never a false one).
+function watchProbe(pl: PlayerPlan): Vec2 | null {
+  const nb = faceNub(pl);
+  let dx = nb[0] - pl.pos[0], dy = nb[1] - pl.pos[1];
+  const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+  for (const L of [110, 70, 40]) {
+    const p: Vec2 = [pl.pos[0] + dx * L, pl.pos[1] + dy * L];
+    if (walkable(p)) return p;
+  }
+  return null;
+}
+function coverAt(pl: PlayerPlan): number {
+  if (inWall(pl.pos)) return 0;
+  const probe = watchProbe(pl);
+  return probe ? coverOf(props.nav, probe, pl.pos) : 0;
+}
+const coveredCount = computed(() => props.play.plans.filter(pl => coverAt(pl) >= 0.5).length);
+
 // the sites this map fields (A/B, or A/B/C on a three-site map)
 const siteList = computed<SiteId[]>(() => (['A', 'B', 'C'] as SiteId[]).filter(s => props.sites[s]));
 const siteAt = (s: SiteId): Vec2 => props.sites[s]!;
@@ -302,6 +324,8 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
          :transform="`translate(${pl.pos[0]},${pl.pos[1]})`"
          @pointerdown="startDrag(pl.player, 'pos', 'hold', 0, $event)">
         <circle v-if="inWall(pl.pos)" r="23" class="pe-warn" /><circle r="17" class="pe-dot" /><text class="pe-hl" y="-24">{{ handleOf(pl.player) }}</text>
+        <text v-if="coverAt(pl) >= 0.5" class="pe-cov" :class="{ full: coverAt(pl) >= 1 }" y="36"
+              ><title>in cover from the angle they watch — earns the set-fighter cover edge in duels</title>⛨</text>
       </g>
 
       <!-- facing handles: the angle each defender watches (drag to aim) -->
@@ -343,9 +367,13 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         a teammate's death, first contact, or the clock. Up to {{ CAP }} waypoints each.
       </div>
       <div v-if="warnCount" class="pe-warnline">⚠ {{ warnCount }} off-mesh — a spot or path crosses a wall (red); the player can't stand or walk there.</div>
+      <div class="pe-covline" :class="{ some: coveredCount }" title="a hold tucked at a wall exposes less body — a real duel edge the engine measures from this exact geometry">
+        ⛨ {{ coveredCount }}/{{ play.plans.length }} holds in cover — tuck a dot against a wall (facing its angle) to earn the cover edge
+      </div>
       <div v-for="pl in play.plans" :key="pl.player" class="pe-row"
            :class="{ keyed: pl.rotate, routing: routing?.player === pl.player }">
         <span class="pe-name" :class="side">{{ handleOf(pl.player) }}</span>
+        <i v-if="coverAt(pl) >= 0.5" class="pe-covchip" :title="coverAt(pl) >= 1 ? 'only a sliver exposed from their angle' : 'a shoulder tucked behind the corner'">⛨</i>
         <button class="pe-rt-btn" :class="{ on: isRouting(pl.player, 'hold') }" @click="toggleRouting(pl.player, 'hold')">
           {{ isRouting(pl.player, 'hold') ? 'done' : 'route' }}<i v-if="routeLen(pl.player, 'hold')">{{ routeLen(pl.player, 'hold') }}</i>
         </button>

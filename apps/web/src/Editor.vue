@@ -51,6 +51,11 @@ type Side = 'attack' | 'defense';
 const host = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const score = ref<[number, number]>([0, 0]);
+// the authored setup's MEASURED strength: your True Odds aggregated over the
+// re-simmed match's rounds (attacker winPct when you attack, 1−winPct when you
+// defend) — ~50 counterfactual re-runs per round, so the number moves honestly
+// as you drag holds around. This is the x-ray thesis as an authoring instrument.
+const odds = ref<{ atk: number | null; def: number | null }>({ atk: null, def: null });
 const seed = ref(42);
 // re-render the dials when the underlying tactics objects change (e.g. play edits)
 const bump = reactive({ n: 0 });
@@ -83,6 +88,12 @@ function resim() {
     };
     const tl = simulateMatch(input, nav, FORKS);
     score.value = tl.finalScore;
+    let aSum = 0, aN = 0, dSum = 0, dN = 0;
+    for (const r of tl.rounds) {
+      if (r.winPct == null) continue;
+      if (r.attacker === 0) { aSum += r.winPct; aN++; } else { dSum += 1 - r.winPct; dN++; }
+    }
+    odds.value = { atk: aN ? aSum / aN : null, def: dN ? dSum / dN : null };
     viewer?.destroy();
     viewer = new Viewer(host.value!, tl, `/${MAP}.png`, nav as any);
     busy.value = false;
@@ -107,6 +118,11 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
       <input type="number" v-model.number="seed" @change="schedule" />
       <button @click="seed = Math.floor(Math.random() * 100000); schedule()">⟲ random</button>
       <div class="ed-score">{{ score[0] }} – {{ score[1] }}<span class="ed-busy" v-if="busy">simulating…</span></div>
+      <div class="ed-odds" v-if="odds.atk != null || odds.def != null"
+           title="your True Odds under this exact setup, averaged over the match's rounds (50× counterfactual re-runs each) — edit a hold and watch it move">
+        <span class="ed-odd atk" v-if="odds.atk != null">ATK {{ Math.round(odds.atk * 100) }}%</span>
+        <span class="ed-odd def" v-if="odds.def != null">DEF {{ Math.round(odds.def * 100) }}%</span>
+      </div>
     </div>
     <div class="ed-presets">
       <label>PLAYBOOK</label>
