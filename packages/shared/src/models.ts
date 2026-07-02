@@ -104,16 +104,22 @@ export type RotateTrigger =
   | { kind: 'contact' }                 // first contact on the contested site
   | { kind: 'time'; t: number };        // round time reaches t (0..1)
 
+/** One kill-point step: rotate to `pos` when `trigger` fires. `then` CHAINS the
+ *  next step (an N-step play: "hold mid → fall to site on contact → collapse to
+ *  the back corner when X dies"), armed only after this step has fired — capped
+ *  at MAX_ROTATE_STEPS (a play is a sketch, not a script). */
+export interface RotateStep {
+  pos: Vec2;                                      // the spot to collapse onto
+  trigger: RotateTrigger;                         // what releases the rotation
+  route?: Vec2[];                                 // optional authored path for this rotation
+  then?: RotateStep;                              // the NEXT step, armed once this one fires
+}
 export interface PlayerPlan {
   player: string;                                 // player id
   pos: Vec2;                                      // where they set up / hold (the destination)
   face?: Vec2;                                    // a point to watch from the hold (sets the held angle)
   route?: Vec2[];                                 // optional waypoints walked before reaching pos
-  rotate?: {                                      // kill point: rotate when the trigger fires
-    pos: Vec2;                                    //   the spot to collapse onto
-    trigger: RotateTrigger;                       //   what releases the rotation
-    route?: Vec2[];                               //   optional authored path for the rotation itself
-  };
+  rotate?: RotateStep;                            // kill point: rotate when the trigger fires (chainable via `then`)
 }
 export interface Play {
   plans: PlayerPlan[];                            // one entry per player on this side
@@ -141,3 +147,7 @@ export interface Lineup {
  *  editor enforces it; the hold route and a kill-point's rotation route each get
  *  their own budget. */
 export const MAX_ROUTE_WAYPOINTS = 5;
+
+/** Cap on chained kill-point steps per player (`RotateStep.then` depth). Three
+ *  conditional moves is a coordinated play; more is scripting. */
+export const MAX_ROTATE_STEPS = 3;

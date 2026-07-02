@@ -7,8 +7,8 @@
 // authored route. Routes are capped at MAX_ROUTE_WAYPOINTS (a play is a sketch,
 // not micro). Mutations clone-and-emit so the parent re-sims.
 import { computed, ref } from 'vue';
-import { MAX_ROUTE_WAYPOINTS as CAP } from '@ace/shared';
-import type { Play, PlayerPlan, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
+import { MAX_ROUTE_WAYPOINTS as CAP, MAX_ROTATE_STEPS } from '@ace/shared';
+import type { Play, PlayerPlan, RotateStep, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
 import { coverOf, pathfind, type Navmesh } from '@ace/maps';
 
 const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh }>();
@@ -38,7 +38,7 @@ function badSegs(points: Vec2[]): [Vec2, Vec2][] {
 // pathfound (A*, wall-aware) by the engine, so only flag a rotation's segments
 // when the owner authored its route (then it IS walked verbatim).
 const holdBad = (pl: PlayerPlan) => badSegs(holdPath(pl));
-const rotBad = (pl: PlayerPlan) => (pl.rotate?.route?.length ? badSegs(rotPath(pl)) : []);
+const rotBad = (pl: PlayerPlan) => (pl.rotate?.route?.length ? badSegs(rotVerbatim(pl)) : []);
 
 type Target = 'hold' | 'rotate';
 const handleOf = (id: string) => props.team.players.find(p => p.id === id)?.handle ?? id;
@@ -182,7 +182,7 @@ function onMove(ev: PointerEvent) {
     const pl = p.plans.find(q => q.player === d.player);
     if (!pl) return;
     if (d.which === 'pos') pl.pos = pt;
-    else if (d.which === 'rotate' && pl.rotate) pl.rotate.pos = pt;
+    else if (d.which === 'rotate') { const st = stepAt(pl, d.idx); if (st) st.pos = pt; }
     else if (d.which === 'face') { if (pt[0] !== pl.pos[0] || pt[1] !== pl.pos[1]) pl.face = pt; }
     else if (d.which === 'wp') { const arr = d.tgt === 'hold' ? pl.route : pl.rotate?.route; if (arr) arr[d.idx] = pt; }
   });
@@ -235,7 +235,9 @@ function clearRoute(player: string, tgt: Target) {
   });
 }
 
-// --- kill points ----------------------------------------------------------
+// --- kill points (N-STEP CHAINS: rotate.then arms the next step) -----------
+const stepsOf = (pl: PlayerPlan): RotateStep[] => { const out: RotateStep[] = []; let s = pl.rotate; while (s) { out.push(s); s = s.then; } return out; };
+const stepAt = (pl: PlayerPlan | undefined, i: number): RotateStep | undefined => { let s = pl?.rotate; for (let k = 0; k < i && s; k++) s = s.then; return s; };
 function toggleKill(player: string) {
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
@@ -246,28 +248,48 @@ function toggleKill(player: string) {
   });
   if (routing.value?.player === player && routing.value.tgt === 'rotate') routing.value = null;
 }
-const triggerKind = (id: string) => planOf(id)?.rotate?.trigger.kind;
-const deathPlayer = (id: string) => { const tr = planOf(id)?.rotate?.trigger; return tr?.kind === 'death' ? tr.player : ''; };
-const timeT = (id: string) => { const tr = planOf(id)?.rotate?.trigger; return tr?.kind === 'time' ? tr.t : 0.4; };
-function setTriggerKind(player: string, kind: RotateTrigger['kind']) {
+function addStep(player: string) {
+  commit(p => {
+    const pl = p.plans.find(q => q.player === player);
+    const steps = pl ? stepsOf(pl) : [];
+    if (!pl || !steps.length || steps.length >= MAX_ROTATE_STEPS) return;
+    const last = steps[steps.length - 1];
+    last.then = { pos: [Math.min(1000, last.pos[0] + 80), Math.min(1000, last.pos[1] + 80)], trigger: { kind: 'contact' } };
+  });
+}
+function removeStep(player: string, si: number) {
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
     if (!pl?.rotate) return;
-    pl.rotate.trigger = kind === 'death' ? { kind: 'death', player: props.team.players.find(q => q.id !== player)!.id }
+    if (si === 0) { const nxt = pl.rotate.then; if (nxt) pl.rotate = nxt; else delete pl.rotate; return; }
+    const parent = stepAt(pl, si - 1), me = stepAt(pl, si);
+    if (parent && me) parent.then = me.then;
+  });
+}
+const triggerKind = (id: string, si: number) => stepAt(planOf(id), si)?.trigger.kind;
+const deathPlayer = (id: string, si: number) => { const tr = stepAt(planOf(id), si)?.trigger; return tr?.kind === 'death' ? tr.player : ''; };
+const timeT = (id: string, si: number) => { const tr = stepAt(planOf(id), si)?.trigger; return tr?.kind === 'time' ? tr.t : 0.4; };
+function setTriggerKind(player: string, si: number, kind: RotateTrigger['kind']) {
+  commit(p => {
+    const st = stepAt(p.plans.find(q => q.player === player), si);
+    if (!st) return;
+    st.trigger = kind === 'death' ? { kind: 'death', player: props.team.players.find(q => q.id !== player)!.id }
       : kind === 'time' ? { kind: 'time', t: 0.4 } : { kind: 'contact' };
   });
 }
-function setDeathPlayer(player: string, who: string) {
-  commit(p => { const pl = p.plans.find(q => q.player === player); if (pl?.rotate) pl.rotate.trigger = { kind: 'death', player: who }; });
+function setDeathPlayer(player: string, si: number, who: string) {
+  commit(p => { const st = stepAt(p.plans.find(q => q.player === player), si); if (st) st.trigger = { kind: 'death', player: who }; });
 }
-function setTime(player: string, t: number) {
-  commit(p => { const pl = p.plans.find(q => q.player === player); if (pl?.rotate) pl.rotate.trigger = { kind: 'time', t }; });
+function setTime(player: string, si: number, t: number) {
+  commit(p => { const st = stepAt(p.plans.find(q => q.player === player), si); if (st) st.trigger = { kind: 'time', t }; });
 }
 
 // polyline point strings: the hold path ends AT the hold; the rotation path
 // runs hold → waypoints → rotate target.
 const holdPath = (pl: PlayerPlan): Vec2[] => [...(pl.route ?? []), pl.pos];
-const rotPath = (pl: PlayerPlan): Vec2[] => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), pl.rotate.pos] : [];
+const rotPath = (pl: PlayerPlan): Vec2[] => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), ...stepsOf(pl).map(st => st.pos)] : [];
+// only the step-1 authored route is walked verbatim (later steps are A*-pathed) — only it gets the wall check
+const rotVerbatim = (pl: PlayerPlan): Vec2[] => pl.rotate ? [pl.pos, ...(pl.rotate.route ?? []), pl.rotate.pos] : [];
 const holdPts = (pl: PlayerPlan) => holdPath(pl).map(p => p.join(',')).join(' ');
 const rotPts = (pl: PlayerPlan) => rotPath(pl).map(p => p.join(',')).join(' ');
 const segStr = (s: [Vec2, Vec2]) => `${s[0][0]},${s[0][1]} ${s[1][0]},${s[1][1]}`;
@@ -355,12 +377,12 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         <polyline v-for="(s, i) in rotBad(pl)" :key="'br' + i" :points="segStr(s)" class="pe-badseg" />
       </g>
 
-      <!-- rotate targets -->
+      <!-- rotate targets: one marker per chain step (↻, ↻2, ↻3) -->
       <g v-for="pl in play.plans" :key="'r' + pl.player">
-        <g v-if="pl.rotate" class="pe-mark rot" :class="side"
-           :transform="`translate(${pl.rotate.pos[0]},${pl.rotate.pos[1]})`"
-           @pointerdown="startDrag(pl.player, 'rotate', 'rotate', 0, $event)">
-          <circle v-if="inWall(pl.rotate.pos)" r="21" class="pe-warn" /><circle r="15" class="pe-dot" /><text class="pe-rot-ic" y="5">↻</text>
+        <g v-for="(st, si) in stepsOf(pl)" :key="'rs' + si" class="pe-mark rot" :class="side"
+           :transform="`translate(${st.pos[0]},${st.pos[1]})`"
+           @pointerdown="startDrag(pl.player, 'rotate', 'rotate', si, $event)">
+          <circle v-if="inWall(st.pos)" r="21" class="pe-warn" /><circle r="15" class="pe-dot" /><text class="pe-rot-ic" y="5">↻{{ si > 0 ? si + 1 : '' }}</text>
         </g>
       </g>
 
@@ -432,23 +454,27 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
           <input type="checkbox" :checked="!!pl.rotate" @change="toggleKill(pl.player)" /> kill point
         </label>
         <template v-if="pl.rotate">
-          <span class="pe-trig">
-            <select class="pe-tk" :value="triggerKind(pl.player)"
-                    @change="setTriggerKind(pl.player, ($event.target as HTMLSelectElement).value as any)">
+          <span v-for="(_, si) in stepsOf(pl)" :key="'tg' + si" class="pe-trig" :class="{ chained: si > 0 }">
+            <i v-if="si > 0" class="pe-step-ix" title="armed once the previous step has fired">↻{{ si + 1 }}</i>
+            <select class="pe-tk" :value="triggerKind(pl.player, si)"
+                    @change="setTriggerKind(pl.player, si, ($event.target as HTMLSelectElement).value as any)">
               <option value="death">when… dies</option>
               <option value="contact">on contact</option>
               <option value="time">at time</option>
             </select>
-            <select v-if="triggerKind(pl.player) === 'death'" :value="deathPlayer(pl.player)"
-                    @change="setDeathPlayer(pl.player, ($event.target as HTMLSelectElement).value)">
+            <select v-if="triggerKind(pl.player, si) === 'death'" :value="deathPlayer(pl.player, si)"
+                    @change="setDeathPlayer(pl.player, si, ($event.target as HTMLSelectElement).value)">
               <option v-for="o in team.players.filter(q => q.id !== pl.player)" :key="o.id" :value="o.id">{{ o.handle }}</option>
             </select>
-            <span v-else-if="triggerKind(pl.player) === 'time'" class="pe-time">
-              <input type="range" min="0.1" max="0.9" step="0.05" :value="timeT(pl.player)"
-                     @input="setTime(pl.player, +($event.target as HTMLInputElement).value)" />
-              <i>{{ Math.round(timeT(pl.player) * 100) }}%</i>
+            <span v-else-if="triggerKind(pl.player, si) === 'time'" class="pe-time">
+              <input type="range" min="0.1" max="0.9" step="0.05" :value="timeT(pl.player, si)"
+                     @input="setTime(pl.player, si, +($event.target as HTMLInputElement).value)" />
+              <i>{{ Math.round(timeT(pl.player, si) * 100) }}%</i>
             </span>
+            <button v-if="si > 0" class="pe-rt-clear" title="remove this step" @click="removeStep(pl.player, si)">✕</button>
           </span>
+          <button v-if="stepsOf(pl).length < 3" class="pe-rt-btn" title="chain another conditional move — armed once the previous step fires"
+                  @click="addStep(pl.player)">+ step</button>
           <button class="pe-rt-btn gold" :class="{ on: isRouting(pl.player, 'rotate') }" @click="toggleRouting(pl.player, 'rotate')">
             {{ isRouting(pl.player, 'rotate') ? 'done ↻' : 'route ↻' }}<i v-if="routeLen(pl.player, 'rotate')">{{ routeLen(pl.player, 'rotate') }}</i>
           </button>

@@ -1,7 +1,7 @@
 import type {
-  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState, RotateTrigger, SiteId,
+  MatchInput, MatchTimeline, Round, MatchEvent, RoundMethod, Player, Vec2, Team, Tactics, Comp, Role, PatchState, RotateTrigger, RotateStep, SiteId,
 } from '@ace/shared';
-import { DEFAULT_TACTICS } from '@ace/shared';
+import { DEFAULT_TACTICS, MAX_ROTATE_STEPS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
 import { ANCHORS, pathfind, inView, posAlong, coverOf, seekCover, siteIds, sitePt as siteAnchor, type Navmesh, type MapAnchors } from '@ace/maps';
@@ -198,9 +198,21 @@ function iglEco(team: Team): number {
 /** A kill-point trigger with a death's player id resolved to a handle (the form
  *  the engine fires on). Returns null if the named teammate doesn't exist. */
 type ResolvedTrig = { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number };
+/** The ACTIVE kill-point step on an Ag — a resolved RotateStep; `.then` is the rest of the chain. */
+type RotPlan = { pos: Vec2; route?: Vec2[]; trigger: ResolvedTrig; then: RotPlan | null };
 function resolveTrig(trigger: RotateTrigger, byId: Map<string, Player>): ResolvedTrig | null {
   if (trigger.kind === 'death') { const h = byId.get(trigger.player)?.handle; return h ? { kind: 'death', handle: h } : null; }
   return trigger;
+}
+
+/** Resolve an authored kill-point CHAIN (RotateStep.then) into the Ag's linked
+ *  rotatePlan: each step's death trigger resolved to a handle, depth-capped at
+ *  MAX_ROTATE_STEPS, truncated at the first unresolvable step. */
+function resolveChain(rt: RotateStep | undefined, byId: Map<string, Player>, depth = 0): RotPlan | null {
+  if (!rt || depth >= MAX_ROTATE_STEPS) return null;
+  const trig = resolveTrig(rt.trigger, byId);
+  if (!trig) return null;
+  return { pos: rt.pos, route: rt.route, trigger: trig, then: resolveChain(rt.then, byId, depth + 1) };
 }
 
 function addLoadouts(into: Map<string, Loadout>, team: Team, comp: Comp | undefined, patch: PatchState): void {
@@ -245,7 +257,7 @@ interface Ag {
                                     // (per-pair, not per-agent — an anchor who traded pokes with one
                                     // pusher still punishes the four walking past)
   // kill point: rotate here when the trigger fires (death's player resolved to a handle)
-  rotatePlan: { pos: Vec2; route?: Vec2[]; trigger: { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number } } | null;
+  rotatePlan: RotPlan | null;   // the ACTIVE kill-point step; firing advances to .then (the chain)
   // journeys COMPLETED before a mid-round re-path (kill-point rotation, post-plant
   // re-setup). Emission-only: during resolution t only moves forward past each
   // re-path, so posAt/facingAt always operate on the CURRENT leg's fields — these
@@ -438,6 +450,7 @@ function resolveRound(
   let planted = false, plantBy = '';
   let detonateAt = Infinity;
   let plantPos: Vec2 | null = null, defuseStart = -1;
+  let spikeRunner: Ag | null = null;   // the defender assigned to actually get on the spike
   let winner: 0 | 1 | null = null;
   let method: RoundMethod = 'time';
   let hadKill = false, contactT = Infinity;
@@ -455,7 +468,7 @@ function resolveRound(
   const fireRotation = (ag: Ag, t: number) => {
     const rp = ag.rotatePlan!, here = posAt(ag, t);
     beginLeg(ag, rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos), t, ROTATE_SPEED * scale);
-    ag.rotatePlan = null;
+    ag.rotatePlan = rp.then ?? null;   // an N-step chain arms its next step; a single step ends
   };
 
   // still mid-journey at t (a pause only makes sense for someone with ground left to cover)
@@ -591,7 +604,11 @@ function resolveRound(
         //    an SMG is instantly ready — and fights during it carry RELOAD_PEN.
         const wPos = posAt(winnerAg, t);
         if (midTravel(winnerAg, t)) {
-          // the recovery beat, extended when the winner came out badly hurt (playing hurt)
+          // the recovery beat, extended when the winner came out badly hurt (playing
+          // hurt). A winner-side RETREAT was tried here and MEASURED HARMFUL (split
+          // 42.9→41.6, ascent stalls 1→4%): unlike the graze survivor, the winner's
+          // immediate threat is DEAD — breaking off the push after winning is bad
+          // play, and the model correctly priced it. Don't re-add.
           winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) + (winnerAg.hp < WOUNDED_HP ? WOUND_PAUSE : 0) });
         }
         // 3) tunnel vision down the kill line — realistically flankable from behind
@@ -659,6 +676,21 @@ function resolveRound(
     if (planted && plantPos) {
       const defuser = def().find(d => dist(posAt(d, t), plantPos!) < DEFUSE_R);
       const contested = atk().some(a => dist(posAt(a, t), plantPos!) < SITE_R);
+      // THE SPIKE RUNNER (multi-leg): retakers converge on the SITE, but somebody
+      // has to actually get on the spike. Once the site is CLEARED (not contested)
+      // and nobody stands in defuse range, the nearest live defender walks to it —
+      // re-assigned if he falls. Deterministic (nearest by distance), zero rng.
+      if (!contested && !defuser && (!spikeRunner || !spikeRunner.alive)) {
+        let best: Ag | null = null, bd = Infinity;
+        for (const d of def()) {
+          const dd = dist(posAt(d, t), plantPos!);
+          if (dd < SITE_R * 1.5 && dd < bd) { best = d; bd = dd; }
+        }
+        if (best) {
+          beginLeg(best, pathfind(nav, posAt(best, t), plantPos!), t, scale);
+          spikeRunner = best;
+        }
+      }
       if (defuser && !contested) {
         if (defuseStart < 0) defuseStart = t;
         if (t - defuseStart >= DEFUSE_TIME) {
@@ -741,7 +773,7 @@ function simulateRound(
       const route = plan?.route?.length ? plan.route : null;
       const path = route ? [spawn, ...route, pos] : pathfind(nav, spawn, pos);
       const isEntry = p.id === entryId;
-      const rt = plan?.rotate, trig = rt ? resolveTrig(rt.trigger, byIdA) : null;
+      const rotChain = resolveChain(plan?.rotate, byIdA);
       agents.push({
         p, side: attacker, handle: p.handle, path, departT: 0,
         arrive: arriveTime(path, isEntry ? atkSpeed * 1.15 : atkSpeed),
@@ -749,7 +781,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
         exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
-        rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
+        rotatePlan: rotChain,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
@@ -820,7 +852,7 @@ function simulateRound(
       const route = plan?.route?.length ? plan.route : null;
       const path = route ? [...route, pos] : [pos];
       // resolve the kill-point trigger; a death trigger's player id → a handle
-      const rt = plan?.rotate, trig = rt ? resolveTrig(rt.trigger, byId) : null;
+      const rotChain = resolveChain(plan?.rotate, byId);
       agents.push({
         p, side: defender, handle: p.handle, path, departT: 0,
         arrive: route ? arriveTime(path, scale) : 0.12,     // a longer route = set up later
@@ -832,7 +864,7 @@ function simulateRound(
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
-        rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
+        rotatePlan: rotChain,
       });
     });
   } else {
