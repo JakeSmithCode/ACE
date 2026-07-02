@@ -91,6 +91,12 @@ const W_DMG: Record<string, number> = {
   Operator: 1.5, Marshal: 1.2, Vandal: 1.15, Phantom: 1.1, Bulldog: 1.0,
   Spectre: 0.95, Sheriff: 1.05, Ghost: 0.8, Frenzy: 0.75, Classic: 0.7,
 };
+// Armor rides the BUY (a full buy includes heavy shields): incoming attrition damage is
+// scaled by the shield tier, so a bought-up team SUSTAINS multi-fight rounds while an eco
+// is fragile flesh. Applied to chip + graze damage only, never the duel win itself (the
+// weapon TIER already carries buy quality there) — so it deepens the economy's stakes:
+// winning a gun round leaves you healthier than winning the same fights on a save.
+const ARMOR_MUL: Record<Buy, number> = { full: 0.72, force: 0.84, pistol: 0.92, eco: 1.0 };
 // ...a HANDLING identity (rate of fire made real at this timescale): the post-kill
 // recovery — re-chamber, reload, re-set — scales with the gun. An Op winner stands
 // exposed longest; an SMG is instantly ready. Scales the winner's FIGHT_PAUSE.
@@ -219,6 +225,7 @@ interface Ag {
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
   hp: number;            // 100 at round start; a duel chips the WINNER too (attrition carries)
+  armor: number;         // incoming-damage multiplier from the buy's shields (full 0.72 .. eco 1.0)
   pauses: { t: number; dur: number }[];   // halts mid-travel (won a fight); extend the journey
   fightFace: { from: number; until: number; dir: Vec2 } | null;   // focused down the kill line
   grazed: Record<string, number>;   // per-OPPONENT round-t until which this matchup is disengaged
@@ -487,10 +494,11 @@ function resolveRound(
         // graze. This is what keeps plant timings honest (lotus stalled at 14-17% otherwise).
         const nearSite = dist(pa, sitePt) < SITE_R * 1.5 || dist(pd, sitePt) < SITE_R * 1.5;
         if (!nearSite && rng.chance(GRAZE_MAX * closeness * urgency)) {
-          // graze damage carries the SHOOTER's weapon AND aim (post-draw scale, same rng
-          // count): an Op body-shot poke hurts; a sharp-aim poke tags heads, not shoulders
-          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[a.weapon] ?? 1) * (0.8 + a.p.attr.aim * 0.004));
-          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[d.weapon] ?? 1) * (0.8 + d.p.attr.aim * 0.004));
+          // graze damage carries the SHOOTER's weapon AND aim, absorbed by the TARGET's
+          // armor (all post-draw scales, same rng count): an Op body-shot poke hurts, a
+          // sharp-aim poke tags heads, heavy shields shrug off the chip
+          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[a.weapon] ?? 1) * (0.8 + a.p.attr.aim * 0.004) * d.armor);
+          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[d.weapon] ?? 1) * (0.8 + d.p.attr.aim * 0.004) * a.armor);
           d.hp = Math.max(1, d.hp - dmgD); a.hp = Math.max(1, a.hp - dmgA);
           a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
           a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
@@ -519,7 +527,7 @@ function resolveRound(
         //    Scaled by the LOSER's weapon (beating an eco Classic is near-free, a rifle
         //    sprays back), shrunk by the winner's AIM (sharp aim finishes fights faster),
         //    and near-zero on a headshot (the loser never got to shoot back).
-        const chipScale = (hs ? HS_CHIP : 1) * (1.3 - wAim * 0.005) * (W_DMG[loser.weapon] ?? 1);
+        const chipScale = (hs ? HS_CHIP : 1) * (1.3 - wAim * 0.005) * (W_DMG[loser.weapon] ?? 1) * winnerAg.armor;
         winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8 * chipScale)));
         // 2) a beat stationary at the kill spot (fights take time) — the push arrives
         //    later, and a fresh killer is a known, standing target for the trade window.
@@ -649,7 +657,7 @@ function simulateRound(
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
-        exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
@@ -691,7 +699,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         // the lurker holds toward the fight (catches unaware rotators); others push to site
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
@@ -724,7 +732,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
       });
     });
@@ -761,7 +769,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
       });
     });
   }

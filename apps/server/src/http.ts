@@ -39,18 +39,18 @@ const key = (f: { season: number; day: number; slot: number }) => `${f.season}:$
 // Season player stats — accumulated from the full-simmed (watched) match timelines.
 // The engine keys every kill by player handle, so this is a pure tally; the match's
 // top fragger earns an MVP. Gives the watched division real player careers.
-interface PlayerStat { handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number }
+interface PlayerStat { handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; hs: number }
 function tallyTimeline(tl: MatchTimeline, into: Map<string, PlayerStat>): void {
-  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {};
+  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {}, hs: Record<string, number> = {};
   for (const r of tl.rounds) {
     const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
-    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; });
+    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; if (e.hs) hs[e.killer] = (hs[e.killer] || 0) + 1; });
   }
   let mvp = '', best = -1;
   for (const tm of tl.teams) for (const p of tm.players) { const k = kills[p.handle] || 0; if (k > best) { best = k; mvp = p.handle; } }
   tl.teams.forEach(tm => tm.players.forEach(p => {
-    const s = into.get(p.handle) ?? { handle: p.handle, club: tm.tag, role: p.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0 };
-    s.kills += kills[p.handle] || 0; s.deaths += deaths[p.handle] || 0; s.fb += fb[p.handle] || 0; s.matches += 1;
+    const s = into.get(p.handle) ?? { handle: p.handle, club: tm.tag, role: p.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0 };
+    s.kills += kills[p.handle] || 0; s.deaths += deaths[p.handle] || 0; s.fb += fb[p.handle] || 0; s.hs += hs[p.handle] || 0; s.matches += 1;
     if (p.handle === mvp) s.mvp += 1;
     into.set(p.handle, s);
   }));
@@ -728,7 +728,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const players = [...acc.values()]
         .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
         .slice(0, 25)
-        .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills }));
+        .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills, hsPct: s.kills ? Math.round((s.hs / s.kills) * 100) : 0 }));
       return json(res, 200, { season: w.season, players });
     }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread

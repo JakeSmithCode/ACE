@@ -625,15 +625,15 @@ const loadingWatch = ref(false);
 // the post-match box score — derived client-side from the re-simmed timeline's kill
 // events (the engine keys kills by player handle). Each player's K/D, first bloods,
 // and a Player of the Match (most kills, K−D tiebreak). The watch view is the product.
-interface BoxRow { handle: string; name?: string; flag?: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; mvp: boolean }
+interface BoxRow { handle: string; name?: string; flag?: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; hsPct: number; mvp: boolean }
 const boxScore = ref<{ teams: [BoxRow[], BoxRow[]]; mvp: string } | null>(null);
 function computeBox(tl: import('@ace/shared').MatchTimeline) {
-  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {};
+  const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {}, hs: Record<string, number> = {};
   for (const r of tl.rounds) {
     const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
-    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; });
+    ks.forEach((e, i) => { kills[e.killer] = (kills[e.killer] || 0) + 1; deaths[e.victim] = (deaths[e.victim] || 0) + 1; if (i === 0) fb[e.killer] = (fb[e.killer] || 0) + 1; if (e.hs) hs[e.killer] = (hs[e.killer] || 0) + 1; });
   }
-  const rowsOf = (t: number): BoxRow[] => tl.teams[t].players.map(p => { const person = personOf(p.id); return { handle: p.handle, name: person.name, flag: person.nation.flag, role: p.role, agent: p.agent, igl: p.igl, kills: kills[p.handle] || 0, deaths: deaths[p.handle] || 0, fb: fb[p.handle] || 0, mvp: false }; })
+  const rowsOf = (t: number): BoxRow[] => tl.teams[t].players.map(p => { const person = personOf(p.id); const k = kills[p.handle] || 0; return { handle: p.handle, name: person.name, flag: person.nation.flag, role: p.role, agent: p.agent, igl: p.igl, kills: k, deaths: deaths[p.handle] || 0, fb: fb[p.handle] || 0, hsPct: k ? Math.round((hs[p.handle] || 0) / k * 100) : 0, mvp: false }; })
     .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths));
   const all = [...rowsOf(0), ...rowsOf(1)];
   const mvp = all.slice().sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
@@ -1291,12 +1291,13 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               <b>{{ ti === 0 ? watching.home.name : watching.away.name }}</b>
               <span class="lv-boxsc">{{ watching.final?.[ti] }}</span>
             </div>
-            <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span></div>
+            <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span><span title="headshot kill rate">HS%</span></div>
             <div v-for="p in team" :key="p.handle" class="lv-boxrow" :class="{ mvp: p.mvp }">
               <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><span v-if="p.flag" class="lv-boxflag" :title="p.name">{{ p.flag }}</span><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
               <span>{{ p.kills }}</span><span>{{ p.deaths }}</span>
               <span :class="p.kills - p.deaths >= 0 ? 'pos' : 'neg'">{{ p.kills - p.deaths >= 0 ? '+' : '' }}{{ p.kills - p.deaths }}</span>
               <span>{{ p.fb }}</span>
+              <span :class="{ 'lv-hshot': p.hsPct >= 40 }">{{ p.kills ? p.hsPct + '%' : '—' }}</span>
             </div>
           </div>
         </div>
@@ -1393,14 +1394,14 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
         </div>
         <template v-if="statsOpen">
           <div class="lv-ldboard">
-            <div class="lv-strow lv-sthead"><span class="lv-ldrank">#</span><span></span><span>Player</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span>MVP</span><span>GP</span></div>
+            <div class="lv-strow lv-sthead"><span class="lv-ldrank">#</span><span></span><span>Player</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span title="headshot kill rate">HS%</span><span>MVP</span><span>GP</span></div>
             <div v-for="s in statRows" :key="s.handle" class="lv-strow">
               <span class="lv-ldrank" :class="{ top: s.rank <= 3 }">{{ s.rank }}</span>
               <span class="rs-role" :class="s.role">{{ s.role.slice(0,3).toUpperCase() }}</span>
               <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i></b>
               <span class="lv-stk">{{ s.kills }}</span><span>{{ s.deaths }}</span>
               <span :class="s.kd >= 1 ? 'pos' : 'neg'">{{ s.kd.toFixed(2) }}</span>
-              <span>{{ s.fb }}</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
+              <span>{{ s.fb }}</span><span :class="{ 'lv-hshot': (s.hsPct || 0) >= 40 }">{{ s.hsPct ?? 0 }}%</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
             </div>
             <div v-if="!statRows.length" class="lv-empty">no matches resolved yet — advance a match-day</div>
           </div>

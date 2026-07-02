@@ -1467,7 +1467,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-aistyle{display:inline-block;margin-top:5px;font-family:var(--label);font-size:10px;letter-spacing:.02em;padding:2px 8px;border-radius:5px;border:1px solid currentColor;opacity:.92;width:fit-content}
 .ai-aggressive{color:#e2768a}.ai-balanced{color:#7fc8e6}.ai-tactical{color:#9a7ce0}.ai-stifling{color:#5fa9b0}
 /* season stat leaders */
-.lv-strow{display:grid;grid-template-columns:34px 40px 1fr 44px 44px 56px 44px 52px 44px;align-items:center;gap:8px;padding:6px 6px;border-bottom:1px solid var(--line)}
+.lv-strow{display:grid;grid-template-columns:34px 40px 1fr 44px 44px 56px 44px 48px 52px 44px;align-items:center;gap:8px;padding:6px 6px;border-bottom:1px solid var(--line)}
+.lv-strow .lv-hshot{color:var(--def);font-weight:700}
 .lv-strow:hover{background:rgba(255,255,255,.02)}
 .lv-strow>span:not(.lv-ldrank):not(.rs-role){text-align:center;color:var(--muted-2);font-variant-numeric:tabular-nums;font-size:13px}
 .lv-sthead{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--line)}
@@ -1774,7 +1775,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-boxhead{display:flex;align-items:center;gap:8px;padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
 .lv-boxhead b{font-size:14px}
 .lv-boxsc{margin-left:auto;font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
-.lv-boxrow{display:grid;grid-template-columns:1fr 28px 28px 36px 28px;align-items:center;gap:6px;padding:4px 4px;font-variant-numeric:tabular-nums;font-size:13px}
+.lv-boxrow{display:grid;grid-template-columns:1fr 28px 28px 36px 28px 40px;align-items:center;gap:6px;padding:4px 4px;font-variant-numeric:tabular-nums;font-size:13px}
+.lv-boxrow .lv-hshot{color:var(--def);font-weight:700}
 .lv-boxrow>span:not(.lv-boxp){text-align:center;color:var(--muted-2)}
 .lv-boxthead{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2);border-bottom:1px solid var(--line)}
 .lv-boxthead>span{color:var(--muted-2)!important}
