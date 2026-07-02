@@ -518,6 +518,10 @@ export class Viewer {
     if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
     if (flash) factors.push({ icon: '✲', text: `${e.victim} was caught by a ${flash.ability}` });
     if (trap) factors.push({ icon: '◇', text: `${e.victim} tripped ${e.killer}'s side's trap` });
+    // weapon range identity (mirrors the engine's W_RANGE bands: close ≤70, long ≥125)
+    const sniper = (w: string) => w === 'Operator' || w === 'Marshal';
+    if (sniper(e.weapon) && dist >= 125) factors.push({ icon: '⌖', text: `A set ${e.weapon} on a long angle — snipers own this distance` });
+    if (dist <= 70 && sniper(e.weapon)) factors.push({ icon: '⌖', text: `${e.weapon} up close — a risky win, snipers crumble when rushed` });
     factors.push({ icon: '↔', text: `${dist < 130 ? 'Close' : dist > 360 ? 'Long' : 'Mid'} range · ${Math.round(dist)}u` });
     return { pK, pV, fK, fV, kSeesV, vSeesK, smoke, verdict, factors, kSide: K?.side ?? 0, vSide: V?.side ?? 1 };
   }
