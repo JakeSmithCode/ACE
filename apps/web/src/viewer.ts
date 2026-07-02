@@ -116,12 +116,15 @@ export interface NavGrid { cell: number; cols: number; rows: number; walk: numbe
 const VISION = 150;        // cone reach in image units (engine ENGAGE)
 const FOV_HALF = 1.05;     // cone half-angle in radians (~60°, engine FOV)
 const CONE_RAYS = 16;      // rays cast across the cone to trace its wall-clipped edge
+const HP_C = 2 * Math.PI * 15;   // hp arc circumference (r=15 ring segment)
 
 interface VAg {
   handle: string; side: 'att' | 'def'; path: Vec2[]; arrive: number; departT: number; deathT: number | null;
   hold: Vec2; node: SVGGElement; trail: SVGPolylineElement; tp: string[]; cone: SVGPathElement; hitch?: Hitch; spawnFan?: Vec2;
   pauses: Pause[];             // engine fight-halts (winner stationary at the kill spot) — extend the journey
   ff: FightFace[];             // fight-face windows (winner looks down the kill line for a beat)
+  hpEv: { t: number; hp: number }[];   // hp checkpoints from dmg/kill events — the live health arc
+  hpEl: SVGCircleElement;      // the depleting hp ring segment
   // presentation-only render state (never feeds the x-ray/heatmap reconstructions):
   rox: number; roy: number;    // smoothed separation offset (kills pile-up jitter)
   rang: number | null;         // smoothed facing angle — cones SWEEP between headings, never snap
@@ -674,15 +677,26 @@ export class Viewer {
       const cone = svg('path') as SVGPathElement; cone.setAttribute('class', 'ace-cone ' + side); this.coneLayer.appendChild(cone);
       const g = svg('g') as SVGGElement; g.setAttribute('class', 'ace-ag ' + side);
       const npw = mv.agent.length * 6.2 + 11;   // nameplate pill width estimate (Chakra Petch ~6px/char)
-      g.innerHTML = `<circle class="clutch-ring" r="17"></circle><circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text>`
+      g.innerHTML = `<circle class="clutch-ring" r="17"></circle><circle class="hp" r="15" transform="rotate(-90)"></circle><circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text>`
         + `<g class="np"><rect class="np-bg" x="${(-npw / 2).toFixed(1)}" y="-27" width="${npw.toFixed(1)}" height="14" rx="2.5"></rect><text class="hl ${side}" y="-16.5">${mv.agent}</text></g>`;
       g.setAttribute('transform', `translate(${mv.path[0][0]},${mv.path[0][1]})`);
       this.agLayer.appendChild(g);
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], rox: 0, roy: 0, rang: null };
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], hpEv: [], hpEl: g.querySelector('.hp') as SVGCircleElement, rox: 0, roy: 0, rang: null };
     });
+
+    // live HP, reconstructed from the round's dmg/kill events (the engine's own
+    // attrition data): each hit stamps the TARGET's remaining hp, each kill the
+    // WINNER's — so the map shows who's hurt, scrub-correct at any T.
+    {
+      const byH = new Map(this.agents.map(a => [a.handle, a] as const));
+      for (const e of r.events) {
+        if (e.kind === 'dmg') byH.get(e.to)?.hpEv.push({ t: e.t, hp: e.hp });
+        else if (e.kind === 'kill' && e.hp != null) byH.get(e.killer)?.hpEv.push({ t: e.t, hp: e.hp });
+      }
+    }
 
     // fight-face windows (mirrors the engine): after each kill the winner looks down the
     // kill line for a beat, and BOTH sides of a non-lethal exchange watch each other —
@@ -1134,6 +1148,19 @@ export class Viewer {
       a.node.classList.toggle('clutch', a === clutcher);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
+      // live HP arc — the last hp checkpoint at or before T (scrub-correct); hidden
+      // at full health (a clean agent), green fading to amber once hurt, then a
+      // wounded (<35) red pulse: who's hurt, at a glance
+      if (!dead) {
+        let hp = 100;
+        for (let hi = a.hpEv.length - 1; hi >= 0; hi--) if (a.hpEv[hi].t <= prog) { hp = a.hpEv[hi].hp; break; }
+        a.hpEl.style.display = hp >= 100 ? 'none' : '';
+        if (hp < 100) {
+          a.hpEl.setAttribute('stroke-dasharray', `${(HP_C * hp / 100).toFixed(1)} ${HP_C.toFixed(1)}`);
+          a.hpEl.classList.toggle('h2', hp <= 60 && hp > 35);
+          a.hpEl.classList.toggle('h1', hp <= 35);
+        }
+      }
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
       if (cones && !dead) {
         const f = facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch, a.pauses, a.ff);

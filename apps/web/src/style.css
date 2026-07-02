@@ -89,6 +89,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ab-trap.att .abeye{fill:rgba(34,211,238,.85)}.ab-trap.def .abeye{fill:rgba(255,92,110,.85)}
 .ace-ag{transition:opacity .3s ease}   /* a death eases out instead of hard-cutting */
 .ace-ag .ring{stroke-width:2.5;fill:rgba(8,14,20,.85)}
+.ace-ag .hp{fill:none;stroke:#5ad18a;stroke-width:2;opacity:.85;stroke-linecap:round;transition:stroke .25s ease}
+.ace-ag .hp.h2{stroke:var(--gold)}
+.ace-ag .hp.h1{stroke:var(--live);animation:ace-hp-pulse .9s ease-in-out infinite}
+.ace-ag.dead .hp{display:none}
+@keyframes ace-hp-pulse{0%,100%{opacity:.95}50%{opacity:.4}}
 .ace-ag .ring.att{stroke:var(--att)}.ace-ag .ring.def{stroke:var(--def)}
 .ace-ag .core.att{fill:var(--att)}.ace-ag .core.def{fill:var(--def)}
 /* observer-style nameplate: light text on a dark pill, so labels stay readable
