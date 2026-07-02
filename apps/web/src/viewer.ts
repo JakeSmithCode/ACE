@@ -102,6 +102,29 @@ function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, pro
   return hold;
 }
 
+/** One movement leg of a MULTI-LEG journey — the move event's base fields are
+ *  leg 0, `legs` are the re-paths after it (kill-point rotations, the post-plant
+ *  re-setup), in departure order. */
+type Leg = { path: Vec2[]; departT: number; arrive: number; pauses?: Pause[]; hold?: Vec2 };
+
+/** The leg active at `prog`: the LAST one already departed, else the base leg
+ *  (which also covers the pre-depart hold at its own path[0]). */
+function legAt(base: Leg, legs: Leg[] | undefined, prog: number): Leg {
+  let cur = base;
+  if (legs) for (const l of legs) { if (prog >= l.departT) cur = l; else break; }
+  return cur;
+}
+/** posWithDepart across a multi-leg journey (the trap hitch only ever rides leg 0). */
+function posLegs(base: Leg, legs: Leg[] | undefined, prog: number, hitch?: Hitch): Vec2 {
+  const l = legAt(base, legs, prog);
+  return posWithDepart(l.path, l.departT, l.arrive, prog, l === base ? hitch : undefined, l.pauses);
+}
+/** facingOf across a multi-leg journey — each leg carries its own hold angle. */
+function faceLegs(base: Leg, legs: Leg[] | undefined, hold: Vec2, prog: number, hitch?: Hitch, ff?: FightFace[]): Vec2 {
+  const l = legAt(base, legs, prog);
+  return facingOf(l.path, l.departT, l.arrive, l.hold ?? hold, prog, l === base ? hitch : undefined, l.pauses, ff);
+}
+
 // the IGL's economic call, labelled for the broadcast (eco reads as a disciplined "SAVE")
 const BUY_LABEL: Record<string, string> = { full: 'FULL BUY', force: 'FORCE', eco: 'SAVE', pistol: 'PISTOL' };
 const SVG = 'http://www.w3.org/2000/svg';
@@ -127,6 +150,7 @@ interface VAg {
   pauses: Pause[];             // engine fight-halts (winner stationary at the kill spot) — extend the journey
   ff: FightFace[];             // fight-face windows (winner looks down the kill line for a beat)
   hpEv: { t: number; hp: number }[];   // hp checkpoints from dmg/kill events — the live health arc
+  legs?: Leg[];                // re-paths after the base journey (multi-leg move)
   hpEl: SVGCircleElement;      // the depleting hp ring segment
   // presentation-only render state (never feeds the x-ray/heatmap reconstructions):
   rox: number; roy: number;    // smoothed separation offset (kills pile-up jitter)
@@ -454,13 +478,13 @@ export class Viewer {
     const HEAT_R = 46;
     let n0 = 0, n1 = 0;
     for (const r of this.tl.rounds) {
-      const moves = new Map<string, { path: Vec2[]; departT: number; arrive: number; pauses?: Pause[] }>();
+      const moves = new Map<string, { path: Vec2[]; departT: number; arrive: number; pauses?: Pause[]; legs?: Leg[] }>();
       for (const e of r.events) if (e.kind === 'move') moves.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, pauses: e.pauses });
       for (const e of r.events) {
         if (e.kind !== 'kill') continue;
         const v = moves.get(e.victim);
         if (!v) continue;
-        const p = posWithDepart(v.path, v.departT, v.arrive, e.t, undefined, v.pauses);
+        const p = posLegs(v, v.legs, e.t);
         const side = this.teamOf.get(e.victim) ?? 0;
         side === 0 ? n0++ : n1++;
         const c = svg('circle');
@@ -493,9 +517,9 @@ export class Viewer {
   // the engine duels on (vision cones + LOS, active utility, the trade window). The
   // product's core bet ("a tactical instrument you can x-ray") made literal. ────────
   /** Reconstruct a round's agents (path/facing/side) for the x-ray — playback's data. */
-  private roundRecs(r: Round): Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[] }> {
-    const m = new Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[] }>();
-    for (const e of r.events) if (e.kind === 'move') m.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, hold: e.hold ?? headingAtEnd(e.path), side: this.teamOf.get(e.agent) ?? 0, pauses: e.pauses });
+  private roundRecs(r: Round): Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[]; legs?: Leg[] }> {
+    const m = new Map<string, { path: Vec2[]; departT: number; arrive: number; hold: Vec2; side: 0 | 1; pauses?: Pause[]; legs?: Leg[] }>();
+    for (const e of r.events) if (e.kind === 'move') m.set(e.agent, { path: e.path, departT: e.departT ?? 0, arrive: e.arrive, hold: e.hold ?? headingAtEnd(e.path), side: this.teamOf.get(e.agent) ?? 0, pauses: e.pauses, legs: e.legs });
     return m;
   }
   /** Is the segment a→b wall-clear (the engine's LOS, sampled on the navmesh)? */
@@ -539,17 +563,18 @@ export class Viewer {
   private xrayReport(r: Round, e: Extract<Round['events'][number], { kind: 'kill' }>) {
     const recs = this.roundRecs(r);
     const K = recs.get(e.killer), V = recs.get(e.victim);
-    const at = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[] }): Vec2 => rec ? posWithDepart(rec.path, rec.departT, rec.arrive, e.t, undefined, rec.pauses) : [500, 500];
-    const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[] }): Vec2 => rec ? facingOf(rec.path, rec.departT, rec.arrive, rec.hold, e.t, undefined, rec.pauses) : [1, 0];
+    const at = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[]; legs?: Leg[] }): Vec2 => rec ? posLegs(rec, rec.legs, e.t) : [500, 500];
+    const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[]; legs?: Leg[] }): Vec2 => rec ? faceLegs(rec, rec.legs, rec.hold, e.t) : [1, 0];
     const pK = at(K), pV = at(V), fK = face(K), fV = face(V);
     const kSeesV = this.seesTarget(pK, fK, pV), vSeesK = this.seesTarget(pV, fV, pK);
     // cover counts only for a SET fighter (the engine's isSet: holding, arrived,
     // or paused at a spot) — mirrored so the factor never claims cover for a runner
-    const setAt = (rec?: { departT: number; arrive: number; pauses?: Pause[] }): boolean => {
+    const setAt = (rec?: { path: Vec2[]; departT: number; arrive: number; pauses?: Pause[]; legs?: Leg[] }): boolean => {
       if (!rec) return false;
-      if (e.t <= rec.departT) return true;
-      if (e.t - rec.departT - (rec.pauses ? pausedTime(rec.pauses, e.t) : 0) >= rec.arrive) return true;
-      return (rec.pauses ?? []).some(p => e.t >= p.t && e.t <= p.t + p.dur);
+      const l = legAt(rec, rec.legs, e.t);   // set-ness is a property of the ACTIVE leg
+      if (e.t <= l.departT) return true;
+      if (e.t - l.departT - (l.pauses ? pausedTime(l.pauses, e.t) : 0) >= l.arrive) return true;
+      return (l.pauses ?? []).some(p => e.t >= p.t && e.t <= p.t + p.dur);
     };
     const covK = setAt(K) ? this.coverFrac(pV, pK) : 0;
     const covV = setAt(V) ? this.coverFrac(pK, pV) : 0;
@@ -707,7 +732,7 @@ export class Viewer {
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
-      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], hpEv: [], hpEl: g.querySelector('.hp') as SVGCircleElement, rox: 0, roy: 0, rang: null };
+      return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], hpEv: [], hpEl: g.querySelector('.hp') as SVGCircleElement, legs: mv.legs, rox: 0, roy: 0, rang: null };
     });
 
     // live HP, reconstructed from the round's dmg/kill events (the engine's own
@@ -729,8 +754,8 @@ export class Viewer {
     const faceAt = (fromH: string, toH: string, t: number, dur: number) => {
       const k = byHandle.get(fromH), v = byHandle.get(toH);
       if (!k || !v) return;
-      const kp = posWithDepart(k.path, k.departT, k.arrive, t, k.hitch, k.pauses);
-      const vp = posWithDepart(v.path, v.departT, v.arrive, t, v.hitch, v.pauses);
+      const kp = posLegs(k, k.legs, t, k.hitch);
+      const vp = posLegs(v, v.legs, t, v.hitch);
       const d = Math.hypot(vp[0] - kp[0], vp[1] - kp[1]);
       if (d > 1e-6) k.ff.push({ from: t, until: t + dur, dir: [(vp[0] - kp[0]) / d, (vp[1] - kp[1]) / d] });
     };
@@ -778,7 +803,7 @@ export class Viewer {
     const plant = r.events.find(e => e.kind === 'plant') as Extract<Round['events'][number], { kind: 'plant' }> | undefined;
     if (plant) {
       const planter = this.agents.find(a => a.handle === plant.agent);
-      if (planter) { this.spikePlantT = plant.t; this.spikePos = posWithDepart(planter.path, planter.departT, planter.arrive, plant.t, planter.hitch, planter.pauses); }
+      if (planter) { this.spikePlantT = plant.t; this.spikePos = posLegs(planter, planter.legs, plant.t, planter.hitch); }
     }
 
     this.roundLabel.innerHTML = `<b>ROUND ${r.n}</b> · <span class="${r.attacker === 0 ? 'att' : 'def'}">${this.tl.teams[r.attacker].tag}</span> attacking site ${r.site}`;
@@ -914,14 +939,14 @@ export class Viewer {
         // an expanding ring at the death spot + a TRACER from the killer, so the eye is
         // drawn to where the fight happened and who took it.
         if (live) {
-          const dp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch, v.pauses);
+          const dp = posLegs(v, v.legs, e.t, v.hitch);
           const pop = svg('g') as SVGGElement; pop.setAttribute('class', 'ace-killpop ' + vc);
           pop.setAttribute('transform', `translate(${dp[0].toFixed(1)},${dp[1].toFixed(1)})`);
           pop.innerHTML = `<circle class="kp-ring" r="5"></circle>`;
           this.agLayer.appendChild(pop);
           setTimeout(() => pop.remove(), 680);
           if (k) {
-            const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch, k.pauses);
+            const kp = posLegs(k, k.legs, e.t, k.hitch);
             const tr = svg('line');
             tr.setAttribute('class', 'ace-tracer ' + kc);
             tr.setAttribute('x1', kp[0].toFixed(1)); tr.setAttribute('y1', kp[1].toFixed(1));
@@ -946,8 +971,8 @@ export class Viewer {
       const from = this.agents.find(a => a.handle === e.from);
       const to = this.agents.find(a => a.handle === e.to);
       if (from && to) {
-        const fp = posWithDepart(from.path, from.departT, from.arrive, e.t, from.hitch, from.pauses);
-        const tp = posWithDepart(to.path, to.departT, to.arrive, e.t, to.hitch, to.pauses);
+        const fp = posLegs(from, from.legs, e.t, from.hitch);
+        const tp = posLegs(to, to.legs, e.t, to.hitch);
         const fc = this.teamOf.get(e.from) === this.tl.rounds[this.roundIdx].attacker ? 'att' : 'def';
         const tr = svg('line');
         tr.setAttribute('class', 'ace-tracer graze ' + fc);
@@ -1114,7 +1139,7 @@ export class Viewer {
     const frame = this.agents.map(a => {
       const dead = a.deathT != null && this.T >= a.deathT;
       const prog = dead ? a.deathT! : this.T;
-      const base = posWithDepart(a.path, a.departT, a.arrive, prog, a.hitch, a.pauses);
+      const base = posLegs(a, a.legs, prog, a.hitch);
       const p: Vec2 = [base[0], base[1]];   // copy — posWithDepart can return the path[0] ref
       if (a.spawnFan && !dead && prog < SPAWN_CONVERGE) {
         const k = 1 - prog / SPAWN_CONVERGE; p[0] += a.spawnFan[0] * k; p[1] += a.spawnFan[1] * k;
@@ -1189,7 +1214,7 @@ export class Viewer {
       }
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
       if (cones && !dead) {
-        const f = facingOf(a.path, a.departT, a.arrive, a.hold, prog, a.hitch, a.pauses, a.ff);
+        const f = faceLegs(a, a.legs, a.hold, prog, a.hitch, a.ff);
         const ta = Math.atan2(f[1], f[0]);
         if (a.rang == null || snap) a.rang = ta;
         else {

@@ -18,11 +18,25 @@ export type RoundMethod = 'elimination' | 'detonation' | 'defuse' | 'time';
  *  `hold` is the unit heading the agent looks down while holding or once arrived;
  *  mid-path its facing is the path's own direction. path + departT + arrive +
  *  hold reconstruct position and facing at any t. Additive since v1. */
+/** One journey segment for a MULTI-LEG move (additive since v1): an agent whose
+ *  plan changed mid-round (a kill-point rotation, the post-plant re-setup) walks
+ *  several legs. The move event's base fields ARE leg 0 (old consumers replay it
+ *  and simply freeze at its end — graceful); `legs` are the journeys after it, in
+ *  departure order. Each leg starts where the previous ended (`path[0]`), departs
+ *  at its own absolute `departT`, and carries its own `pauses`/`hold`. The leg
+ *  active at time t is the LAST one with departT ≤ t (none departed → leg 0,
+ *  holding at its path[0]). */
+export interface MoveLeg {
+  path: Vec2[]; departT: number; arrive: number;
+  pauses?: { t: number; dur: number }[]; hold?: Vec2;
+}
+
 export type MatchEvent =
   // `pauses` (additive): moments the agent HALTED mid-travel — winning a fight costs a
   // beat stationary at the kill spot. Each pause extends the effective journey: position
   // is path-progress over (t − departT − paused time so far) / arrive.
-  | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2; pauses?: { t: number; dur: number }[] }
+  // `legs` (additive): journeys AFTER the base one — see MoveLeg.
+  | { t: number; arrive: number; departT: number; kind: 'move'; agent: string; path: Vec2[]; hold: Vec2; pauses?: { t: number; dur: number }[]; legs?: MoveLeg[] }
   // `hp` (additive): the winner's remaining health after the fight — duels chip the
   // victor, so a contested kill leaves a wounded player for the next contact to clean up.
   // `hs` (additive): the kill was a headshot — a clean one-tap (high-aim players land

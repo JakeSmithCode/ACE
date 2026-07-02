@@ -37,6 +37,8 @@ const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const COVER_EDGE = 8;      // duel edge for a fully-covered SET fighter (a corner peek = half);
                            // between FIRST_SHOT and HOLD_BONUS — position beats a held angle,
                            // loses to genuine surprise. Balance-sensitive: measure with pnpm balance.
+const RETREAT_HP = 25;     // below this a wounded mid-travel graze survivor BREAKS OFF to cover
+                           // (a new movement leg) instead of just hesitating — balance-sensitive
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 // Fights are neither instant nor free (the "actual players" layer):
@@ -244,6 +246,11 @@ interface Ag {
                                     // pusher still punishes the four walking past)
   // kill point: rotate here when the trigger fires (death's player resolved to a handle)
   rotatePlan: { pos: Vec2; route?: Vec2[]; trigger: { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number } } | null;
+  // journeys COMPLETED before a mid-round re-path (kill-point rotation, post-plant
+  // re-setup). Emission-only: during resolution t only moves forward past each
+  // re-path, so posAt/facingAt always operate on the CURRENT leg's fields — these
+  // exist so the move event can carry the full multi-leg story for the viewer.
+  doneLegs: { path: Vec2[]; departT: number; arrive: number; pauses: { t: number; dur: number }[]; hold: Vec2 }[];
 }
 
 const ease = (p: number) => p * (2 - p);
@@ -435,13 +442,20 @@ function resolveRound(
   let method: RoundMethod = 'time';
   let hadKill = false, contactT = Infinity;
 
+  // begin a NEW movement leg mid-round: the finished journey is archived on
+  // doneLegs (so the move event can carry the multi-leg story), then the agent's
+  // live fields become the new leg. Pauses start clean (the old halts are spent).
+  const beginLeg = (ag: Ag, path: Vec2[], t: number, speed: number, hold?: Vec2) => {
+    ag.doneLegs.push({ path: ag.path, departT: ag.departT, arrive: ag.arrive, pauses: ag.pauses, hold: ag.holdDir });
+    ag.path = path; ag.departT = t; ag.arrive = arriveTime(path, speed); ag.pauses = [];
+    if (hold) ag.holdDir = hold;
+  };
   // release an authored kill-point rotation: walk the authored route verbatim,
   // else A* the way; reuses the departT hold-then-move machinery.
   const fireRotation = (ag: Ag, t: number) => {
     const rp = ag.rotatePlan!, here = posAt(ag, t);
-    ag.path = rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos);
-    ag.departT = t; ag.arrive = arriveTime(ag.path, ROTATE_SPEED * scale); ag.rotatePlan = null;
-    ag.pauses = [];   // the old path's fight halts are spent; the new journey starts clean
+    beginLeg(ag, rp.route?.length ? [here, ...rp.route, rp.pos] : pathfind(nav, here, rp.pos), t, ROTATE_SPEED * scale);
+    ag.rotatePlan = null;
   };
 
   // still mid-journey at t (a pause only makes sense for someone with ground left to cover)
@@ -530,9 +544,21 @@ function resolveRound(
           a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
           a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
           d.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pd, pa) };
-          // a badly wounded survivor HESITATES before moving on (playing hurt, visibly)
-          if (a.hp < WOUNDED_HP && midTravel(a, t)) a.pauses.push({ t, dur: WOUND_PAUSE });
-          if (d.hp < WOUNDED_HP && midTravel(d, t)) d.pauses.push({ t, dur: WOUND_PAUSE });
+          // a badly wounded survivor doesn't push on — he BREAKS OFF to the nearest
+          // cover and posts up WATCHING THE ENEMY HE JUST FOUGHT (a known, near
+          // watch reference — the exchange told him exactly where the threat is).
+          // A new movement LEG (multi-leg contract): the retreat abandons his old
+          // goal, a real behavioural cost. With no wall in reach he just hesitates
+          // (the original hitch). Zero new rng draws — pure geometry.
+          // (the retreat bar sits DEEPER than the hesitation bar — at 35 the
+          // graze-heavy maps bled attackers off the push: split 44.1→41.3)
+          const retreat = (w: Ag, pw: Vec2, threat: Vec2) => {
+            const spot = w.hp < RETREAT_HP ? seekCover(nav, pw, threat, 30) : pw;
+            if (spot !== pw) beginLeg(w, [pw, spot], t, scale, unit(spot, threat));
+            else w.pauses.push({ t, dur: WOUND_PAUSE });
+          };
+          if (a.hp < WOUNDED_HP && midTravel(a, t)) retreat(a, pa, pd);
+          if (d.hp < WOUNDED_HP && midTravel(d, t)) retreat(d, pd, pa);
           resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
           events.push({ t, kind: 'dmg', from: a.handle, to: d.handle, dmg: dmgD, hp: d.hp });
           events.push({ t, kind: 'dmg', from: d.handle, to: a.handle, dmg: dmgA, hp: a.hp });
@@ -601,20 +627,30 @@ function resolveRound(
         // time/reach are pure functions of the plant + the live defenders + the
         // caster's utility (zero new rng draws), and it lives on the per-run smokes
         // copy so every fork plans its own and the shared setup array is untouched.
-        const ctrl = def().find(d2 => d2.agentRole === 'controller');
-        if (ctrl) {
+        const liveDef = def();
+        let mdx = 0, mdy = 0;
+        for (const d2 of liveDef) { const p2 = posAt(d2, t); mdx += p2[0]; mdy += p2[1]; }
+        const meanDef: Vec2 | null = liveDef.length ? [mdx / liveDef.length, mdy / liveDef.length] : null;
+        const ctrl = liveDef.find(d2 => d2.agentRole === 'controller');
+        if (ctrl && meanDef) {
           const cu = (ctrl.p.attr.utility / 100) * ctrl.utilFactor;
           if (cu >= RETAKE_SMOKE_U) {
-            const live = def();
-            let mx = 0, my = 0;
-            for (const d2 of live) { const p2 = posAt(d2, t); mx += p2[0]; my += p2[1]; }
-            const lane: Vec2 = lerp(plantPos, [mx / live.length, my / live.length], 0.45);
+            const lane: Vec2 = lerp(plantPos, meanDef, 0.45);
             const rt0 = t + RETAKE_DELAY, rr = RESMOKE_R + RESMOKE_R_UTIL * cu;
             const rt1 = rt0 + RESMOKE_DUR + RESMOKE_DUR_UTIL * cu;
             smokes.push({ side: defender, c: lane, r: rr, t0: rt0, t1: rt1 });
             events.push({ t: rt0, kind: 'ability', agent: ctrl.handle, ability: 'smoke', side: defender, at: lane, r: rr, until: rt1 });
           }
         }
+        // NOTE: a post-plant RE-FAN was tried here (attackers re-positioning to
+        // cover at plant time) and MEASURED NULL-TO-HARMFUL in every variant
+        // (meanDef facing 39.0 / face-only 37.0 / keep-facing 40.0 / watch-spike
+        // 40.3 on split, vs 44.1 without) — because the model already does the
+        // right thing: the planter RESUMES his journey to his setup-tucked fan
+        // spot after planting, and those spots were cover-seeked with a good
+        // near watch reference at setup. Re-fanning replaced well-chosen
+        // destinations with ones built off a far, probe-degraded reference.
+        // Don't re-add without new evidence.
       }
     }
 
@@ -712,7 +748,7 @@ function simulateRound(
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
-        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
@@ -762,7 +798,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         // the lurker holds toward the fight (catches unaware rotators); others push to site
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
@@ -795,7 +831,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
       });
     });
@@ -843,7 +879,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {},
+        exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
       });
     });
   }
@@ -946,7 +982,7 @@ function simulateRound(
   for (let i = 0; i < forks; i++) {
     // fresh hp/pauses/fightFace per clone — `pauses` MUST be a new array (a shared ref
     // would leak fork fight-halts into the canonical pass and break byte-identity)
-    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {} }));
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {}, doneLegs: [] }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }
@@ -960,9 +996,17 @@ function simulateRound(
   // viewer replays the exact same journey — omitted when empty (additive field).
   const spawns: Record<string, Vec2> = {};
   for (const a of agents) {
-    spawns[a.handle] = a.path[0];
-    // a rotator that never got contact held all round → departT clamps to 1
-    events.push({ t: 0, arrive: a.arrive, departT: Math.min(1, a.departT), kind: 'move', agent: a.handle, path: a.path, hold: a.holdDir, ...(a.pauses.length ? { pauses: a.pauses } : {}) });
+    // the move event's base fields are the FIRST journey; mid-round re-paths
+    // (kill-point rotations, the post-plant re-setup) follow as `legs` in
+    // departure order — the multi-leg contract (additive: an old consumer plays
+    // leg 0 and simply freezes at its end). A rotator that never got contact
+    // held all round → departT clamps to 1.
+    const shape = (l: { path: Vec2[]; departT: number; arrive: number; pauses: { t: number; dur: number }[]; hold: Vec2 }) =>
+      ({ path: l.path, departT: Math.min(1, l.departT), arrive: l.arrive, hold: l.hold, ...(l.pauses.length ? { pauses: l.pauses } : {}) });
+    const all = [...a.doneLegs, { path: a.path, departT: a.departT, arrive: a.arrive, pauses: a.pauses, hold: a.holdDir }].map(shape);
+    const base = all[0], rest = all.slice(1);
+    spawns[a.handle] = base.path[0];
+    events.push({ t: 0, arrive: base.arrive, departT: base.departT, kind: 'move', agent: a.handle, path: base.path, hold: base.hold, ...(base.pauses ? { pauses: base.pauses } : {}), ...(rest.length ? { legs: rest } : {}) });
   }
   events.sort((x, y) => x.t - y.t);
 
