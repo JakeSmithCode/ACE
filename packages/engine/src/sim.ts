@@ -83,6 +83,35 @@ const TIER: Record<string, number> = {
   Operator: 3.2, Vandal: 3, Phantom: 3, Bulldog: 2.2, Spectre: 2.1, Marshal: 2,
   Sheriff: 1.6, Ghost: 1.2, Frenzy: 1.1, Classic: 1,
 };
+// Weapons have a DAMAGE identity, not just a quality tier: graze damage scales with the
+// SHOOTER's gun, and the winner's return-chip scales with the LOSER's gun — so beating an
+// eco Classic is cheap, while trading up into a rifle (or eating an Op body-shot) hurts.
+// Applied post-draw (same rng count) like every fairness-preserving multiplier here.
+const W_DMG: Record<string, number> = {
+  Operator: 1.5, Marshal: 1.2, Vandal: 1.15, Phantom: 1.1, Bulldog: 1.0,
+  Spectre: 0.95, Sheriff: 1.05, Ghost: 0.8, Frenzy: 0.75, Classic: 0.7,
+};
+// ...and a RANGE personality inside the engage envelope (0..ENGAGE): a sniper dominates
+// a held max-distance angle and crumbles when rushed; SMGs/pistols invert. A pure
+// function of the duel distance — no rng, and mirror-symmetric so the pool stays fair.
+const W_RANGE: Record<string, { close: number; long: number }> = {
+  Operator: { close: -7, long: 6 }, Marshal: { close: -4, long: 4 },
+  Vandal: { close: 0, long: 1 }, Phantom: { close: 1, long: 0 }, Bulldog: { close: 0, long: 0 },
+  Spectre: { close: 3, long: -3 }, Sheriff: { close: 1, long: -1 },
+  Ghost: { close: 1, long: -2 }, Frenzy: { close: 3, long: -4 }, Classic: { close: 2, long: -4 },
+};
+const RANGE_CLOSE = 70, RANGE_LONG = 125;   // the bands (image units) within ENGAGE=150
+/** A weapon's duel-edge adjustment at distance d — lerped between its close/long identity.
+ *  The POSITIVE half only applies to a SET shooter (you can't scope on the run) — a moving
+ *  Op keeps its rush penalty but loses its angle dominance, so the identity rewards holds. */
+function rangeEdge(weapon: string, d: number, set: boolean): number {
+  const w = W_RANGE[weapon];
+  if (!w) return 0;
+  const e = d <= RANGE_CLOSE ? w.close
+    : d >= RANGE_LONG ? w.long
+    : w.close + (w.long - w.close) * ((d - RANGE_CLOSE) / (RANGE_LONG - RANGE_CLOSE));
+  return set ? e : Math.min(0, e);
+}
 
 // The fielded agent decides the kit (which utility fires). An agent off a
 // player's pool defaults to the player's natural role.
@@ -244,6 +273,16 @@ function posAt(a: Ag, t: number): Vec2 {
   return posAlong(a.path, ease(Math.min(1, Math.max(0, local) / a.arrive)));
 }
 
+/** Is the agent stationary at t — holding for info, arrived on their spot, or mid-pause?
+ *  A SET shooter gets their weapon's full range identity (the scoped Op on the angle). */
+function isSet(a: Ag, t: number): boolean {
+  if (t <= a.departT) return true;
+  const local = t - a.departT - (a.pauses.length ? pausedTime(a.pauses, t) : 0);
+  if (local >= a.arrive) return true;
+  for (const p of a.pauses) if (t >= p.t && t <= p.t + p.dur) return true;
+  return false;
+}
+
 /** Where an agent is looking at time t: down the kill line for a beat after winning
  *  a fight (tunnel vision — flankable), down their travel vector while moving, and
  *  down their held angle (holdDir) while holding or once arrived. */
@@ -305,11 +344,12 @@ function readIndex(read: number, n: number): number {
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
  *  / pulse / trade), -ve favours the defender. A WOUNDED fighter duels worse
  *  (WOUND_PEN per missing HP) — attrition carries between fights. */
-function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number): { atkWins: boolean; p: number } {
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number, range = 100, atkSet = true, defSet = true): { atkWins: boolean; p: number } {
   const A = atk.p.attr, D = def.p.attr;
-  // .form is match-night; .compEdge is the fielded agent (tier + mastery)
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN;
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN;
+  // .form is match-night; .compEdge is the fielded agent (tier + mastery); rangeEdge is
+  // the weapon's identity at this distance (a SET Op owns the long angle, a Spectre the rush)
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + rangeEdge(atk.weapon, range, atkSet) + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN;
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + rangeEdge(def.weapon, range, defSet) + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN;
   // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
@@ -391,7 +431,8 @@ function resolveRound(
         if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
         if ((a.grazed[d.handle] ?? -1) >= t) continue;   // this matchup traded pokes — briefly reset
         const pd = posAt(d, t);
-        if (dist(pa, pd) > ENGAGE) continue;
+        const range = dist(pa, pd);
+        if (range > ENGAGE) continue;
         const fd = facingAt(d, t);
         const aSeesD = !blindedThrough(attacker, pa, pd, t) && inView(nav, pa, fa, pd, ENGAGE, FOV);
         const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
@@ -410,7 +451,7 @@ function resolveRound(
         else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
         const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
-        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge);
+        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, isSet(a, t), isSet(d, t));
         // a CLOSE duel can break off without a kill: both trade shots, take damage, and
         // disengage for a beat, watching each other. The wounds make the NEXT exchange
         // deadlier (WOUND_PEN), so firefights escalate: poke → poke → kill. URGENCY:
@@ -423,8 +464,10 @@ function resolveRound(
         // graze. This is what keeps plant timings honest (lotus stalled at 14-17% otherwise).
         const nearSite = dist(pa, sitePt) < SITE_R * 1.5 || dist(pd, sitePt) < SITE_R * 1.5;
         if (!nearSite && rng.chance(GRAZE_MAX * closeness * urgency)) {
-          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI));
-          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI));
+          // graze damage carries the SHOOTER's weapon (post-draw scale, same rng count):
+          // an Op body-shot poke hurts; a Classic poke stings
+          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[a.weapon] ?? 1));
+          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI) * (W_DMG[d.weapon] ?? 1));
           d.hp = Math.max(1, d.hp - dmgD); a.hp = Math.max(1, a.hp - dmgA);
           a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
           a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
@@ -446,7 +489,9 @@ function resolveRound(
         // 1) return damage scaled by how contested it was — a dominant duel is near-free,
         //    a coin flip leaves the victor hurting; the wound carries into the next fight
         const q = atkWins ? p : 1 - p;                 // the winner's own win probability
-        winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8)));
+        // ...scaled by the LOSER's weapon: beating an eco Classic is near-free, but
+        // trading up into a rifle (or eating an Op body-shot on the way in) costs real HP
+        winnerAg.hp = Math.max(5, winnerAg.hp - Math.round(Math.min(92, rng.range(CHIP_LO, CHIP_HI) * (1 - q) * 1.8 * (W_DMG[loser.weapon] ?? 1))));
         // 2) a beat stationary at the kill spot (fights take time) — the push arrives
         //    later, and a fresh killer is a known, standing target for the trade window
         const wPos = posAt(winnerAg, t);
