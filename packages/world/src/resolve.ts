@@ -11,10 +11,12 @@ import type { Fixture, Matchday } from './schedule.js';
 /** The curated, side-balanced map pool a fixture is played on (the unbalanced
  *  maps stay out of rotation until tuned — like a real comp pool). Canonical here
  *  so the single-player store and the server tick assign the same map to the same
- *  fixture. Lotus rotated OUT with the combat layer (its three-site rotation
- *  geometry drifted it to 58-60% ATK under `pnpm balance` — it needs the per-map
- *  anchor pass, not global knobs); it returns when it measures `ok` again. */
-export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'split'];
+ *  fixture. Lotus rotated OUT with the combat layer (58-60% ATK) and haven with
+ *  the cover layer (60.9% ATK — the tucked fan overruns its thin one-watcher
+ *  sites): both are the SAME root cause, a three-site defense read that needs the
+ *  per-map anchor/placement pass, not global knobs. Each returns when it measures
+ *  `ok` again under `pnpm balance`. */
+export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'split'];
 /** Deterministic per-fixture map from its seed — a result is reproducible (re-sim
  *  to watch) because the map is a pure function of the same seed. */
 export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];

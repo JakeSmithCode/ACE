@@ -4,7 +4,7 @@ import type {
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { Rng, sigmoid } from './rng.js';
 import { decideBuy, nextCreds, buildEconomy, type Buy } from './economy.js';
-import { ANCHORS, pathfind, inView, posAlong, siteIds, sitePt as siteAnchor, type Navmesh, type MapAnchors } from '@ace/maps';
+import { ANCHORS, pathfind, inView, posAlong, coverOf, seekCover, siteIds, sitePt as siteAnchor, type Navmesh, type MapAnchors } from '@ace/maps';
 
 // ---- tuning ----------------------------------------------------------------
 const STEP = 0.015;        // simulation tick (normalized round time)
@@ -34,6 +34,9 @@ function teamChem(players: { tenure?: number }[]): number {
   return CHEM_EDGE * Math.min(1, Math.max(0, mean) / CHEM_CAP);
 }
 const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
+const COVER_EDGE = 8;      // duel edge for a fully-covered SET fighter (a corner peek = half);
+                           // between FIRST_SHOT and HOLD_BONUS — position beats a held angle,
+                           // loses to genuine surprise. Balance-sensitive: measure with pnpm balance.
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 // Fights are neither instant nor free (the "actual players" layer):
@@ -376,13 +379,14 @@ function readIndex(read: number, n: number): number {
  *  `surprise` is the signed advantage edge: +ve favours the attacker (saw first
  *  / pulse / trade), -ve favours the defender. A WOUNDED fighter duels worse
  *  (WOUND_PEN per missing HP) — attrition carries between fights. */
-function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number, range = 100, atkSet = true, defSet = true, atkReload = false, defReload = false): { atkWins: boolean; p: number } {
+function duel(rng: Rng, atk: Ag, def: Ag, surprise: number, holdEdge: number, range = 100, atkSet = true, defSet = true, atkReload = false, defReload = false, atkCover = 0, defCover = 0): { atkWins: boolean; p: number } {
   const A = atk.p.attr, D = def.p.attr;
   // .form is match-night; .compEdge is the fielded agent (tier + mastery); rangeEdge is
   // the weapon's identity at this distance (a SET Op owns the long angle, a Spectre the
-  // rush); a mid-RECOVERY fighter (reloading after a kill) duels at RELOAD_PEN
-  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + rangeEdge(atk.weapon, range, atkSet) + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN - (atkReload ? RELOAD_PEN : 0);
-  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + rangeEdge(def.weapon, range, defSet) + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN - (defReload ? RELOAD_PEN : 0);
+  // rush); a mid-RECOVERY fighter (reloading after a kill) duels at RELOAD_PEN; cover
+  // (0..1, only ever set for a SET fighter) is how little body they expose
+  const atkEdge = A.aim * 0.45 + A.gameSense * 0.30 + A.entry * 0.25 + TIER[atk.weapon] * 4 + rangeEdge(atk.weapon, range, atkSet) + atkCover * COVER_EDGE + atk.form + atk.compEdge + atk.chem - (100 - atk.hp) * WOUND_PEN - (atkReload ? RELOAD_PEN : 0);
+  const defEdge = D.aim * 0.45 + D.gameSense * 0.35 + D.clutch * 0.20 + TIER[def.weapon] * 4 + rangeEdge(def.weapon, range, defSet) + defCover * COVER_EDGE + def.form + def.compEdge + def.chem - (100 - def.hp) * WOUND_PEN - (defReload ? RELOAD_PEN : 0);
   // holdEdge > 0 favours the defender (pre-plant anchor); < 0 favours the attacker (post-plant crossfire)
   const noise = rng.range(-13, 13);
   const p = sigmoid((atkEdge - defEdge - holdEdge + surprise + noise) / 18);
@@ -490,7 +494,15 @@ function resolveRound(
         // recovery state: a fighter mid-reload after a kill loses their set-weapon bonus
         // (you're not scoped while re-chambering) and duels at a penalty
         const aReload = inPause(a, t), dReload = inPause(d, t);
-        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, isSet(a, t) && !aReload, isSet(d, t) && !dReload, aReload, dReload);
+        // COVER: a SET fighter tucked at a corner exposes only a sliver of body — the
+        // POSITION, not just the angle, wins fights. Gated to SET (you use cover when
+        // holding a spot, never sprinting past a wall), so it rewards CHOSEN positions:
+        // procedural holds near geometry and authored plays hugging a corner. Pure
+        // geometry, no rng draws — the stream shifts only where a duel probability flips.
+        const aSet = isSet(a, t), dSet = isSet(d, t);
+        const aCov = aSet ? coverOf(nav, pd, pa) : 0;
+        const dCov = dSet ? coverOf(nav, pa, pd) : 0;
+        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, aSet && !aReload, dSet && !dReload, aReload, dReload, aCov, dCov);
         // a CLOSE duel can break off without a kill: both trade shots, take damage, and
         // disengage for a beat, watching each other. The wounds make the NEXT exchange
         // deadlier (WOUND_PEN), so firefights escalate: poke → poke → kill. URGENCY:
@@ -701,6 +713,14 @@ function simulateRound(
         const depth = support ? -16 : 0;                      // support eases back a touch to lob util from range
         goal = jitter(rng, [sitePt[0] + perp[0] * lat + approach[0] * depth, sitePt[1] + perp[1] * lat + approach[1] * depth], 12);
       }
+      // a real player never stops mid-open-ground: each spot tucks to the nearest
+      // wall that keeps its lane toward the site (post-jitter, no rng — deterministic
+      // geometry), so the fan hits from covered angles and EARNS the set cover edge.
+      // Attackers only — defender tucks were tried three ways (spawn/mid/room watch
+      // references) and each broke the pool (split DEF-SIDED 37-38, breeze swinging):
+      // the procedural defense's balance LIVES in its tuned positions (the DEF_SPREAD
+      // lesson). Defenders still earn cover where their spots already touch geometry.
+      goal = seekCover(nav, goal, sitePt);
       const path = pathfind(nav, spawn, goal);
       // the entry leads (15% faster), as before — the fan is positional, not a tempo change
       const speedMul = isEntry ? 1.15 : 1.0;
@@ -760,6 +780,16 @@ function simulateRound(
     const rotSpeed = ROTATE_SPEED * iglRotateMul(defTeam) * scale;   // sharp IGL + map-scale normalized
     const fwd = lerp(A.mid, A.atkSpawn, dAgg * 0.3);   // aggressive mids hold forward toward contact
     const slots: { from: Vec2; site: SiteId | 'M' }[] = [];
+    // every hold tucks to the nearest wall that keeps its lane toward the entry
+    // (post-jitter, no rng): defenders post at corners/edges like real players
+    // instead of floating mid-room — and earn the SET cover edge for it
+    // NOTE: defenders deliberately do NOT cover-seek. It was tried three ways (spawn /
+    // mid / own-room watch references) and every variant broke the pool — split sank
+    // DEF-SIDED (37-38), breeze swung ATK or STALLY — because the procedural defense's
+    // BALANCE lives in its tuned positions (the DEF_SPREAD lesson again: defenders
+    // fight FROM their hold, so any engine reposition re-tunes every map at once).
+    // Defenders still EARN the cover edge wherever their tuned spots already touch
+    // geometry; only attackers (below) actively tuck.
     for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, siteAnchor(A, readSite), 30), site: readSite });
     for (const os of otherSites) slots.push({ from: jitter(rng, siteAnchor(A, os), 30), site: os });
     for (let i = 0; i < 5 - onRead - otherSites.length; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });

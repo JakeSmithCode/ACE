@@ -241,6 +241,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .xd-line{stroke-width:3;stroke-dasharray:7 5}.xd-line.back{stroke:var(--win)}.xd-line.even{stroke:var(--gold)}.xd-line.off{stroke:var(--brand)}.xd-line.blind{stroke:var(--muted-2)}
 .xd-smoke{fill:rgba(190,200,210,.4);stroke:rgba(220,228,235,.55);stroke-width:2}
 .xd-face{stroke:#fff;stroke-width:2.5;opacity:.85}
+.xd-cover{fill:none;stroke:#7fe3a8;stroke-width:3.5;stroke-linecap:round;opacity:.9}
 .xd-dot{stroke:#0a0f15;stroke-width:2.5}.xd-dot.att{fill:var(--att)}.xd-dot.def{fill:var(--def)}
 .xd-unaware{fill:none;stroke:var(--win);stroke-width:2.5;stroke-dasharray:4 4}
 .xr-legend{position:absolute;left:8px;bottom:7px;display:flex;gap:10px;font-family:var(--label);font-size:9px;letter-spacing:.02em;background:rgba(6,11,16,.74);padding:3px 7px;clip-path:var(--bevel)}

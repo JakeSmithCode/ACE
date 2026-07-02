@@ -488,6 +488,22 @@ export class Viewer {
     if (Math.acos(Math.max(-1, Math.min(1, dot))) > FOV_HALF) return false;
     return this.segClear(from, to);
   }
+  /** The engine's `coverOf`, mirrored on the same walkAt sampling: how much of a
+   *  body at `to` is protected from a shooter at `from` — the target's shoulder
+   *  points (±w perpendicular to the sightline) are covered when inside a wall or
+   *  wall-blocked from the shooter (0 open · 0.5 corner peek · 1 sliver). */
+  private coverFrac(from: Vec2, to: Vec2, w = 12): number {
+    if (!this.nav) return 0;
+    const dx = to[0] - from[0], dy = to[1] - from[1], d = Math.hypot(dx, dy);
+    if (d < 1e-6) return 0;
+    const px = -dy / d, py = dx / d;
+    let cov = 0;
+    for (const o of [-w, w]) {
+      const s: Vec2 = [to[0] + px * o, to[1] + py * o];
+      if (!this.walkAt(s[0], s[1]) || !this.segClear(from, s)) cov++;
+    }
+    return cov / 2;
+  }
   private pointSegDist(p: Vec2, a: Vec2, b: Vec2): number {
     const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
     const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
@@ -501,6 +517,16 @@ export class Viewer {
     const face = (rec?: { path: Vec2[]; departT: number; arrive: number; hold: Vec2; pauses?: Pause[] }): Vec2 => rec ? facingOf(rec.path, rec.departT, rec.arrive, rec.hold, e.t, undefined, rec.pauses) : [1, 0];
     const pK = at(K), pV = at(V), fK = face(K), fV = face(V);
     const kSeesV = this.seesTarget(pK, fK, pV), vSeesK = this.seesTarget(pV, fV, pK);
+    // cover counts only for a SET fighter (the engine's isSet: holding, arrived,
+    // or paused at a spot) — mirrored so the factor never claims cover for a runner
+    const setAt = (rec?: { departT: number; arrive: number; pauses?: Pause[] }): boolean => {
+      if (!rec) return false;
+      if (e.t <= rec.departT) return true;
+      if (e.t - rec.departT - (rec.pauses ? pausedTime(rec.pauses, e.t) : 0) >= rec.arrive) return true;
+      return (rec.pauses ?? []).some(p => e.t >= p.t && e.t <= p.t + p.dur);
+    };
+    const covK = setAt(K) ? this.coverFrac(pV, pK) : 0;
+    const covV = setAt(V) ? this.coverFrac(pK, pV) : 0;
     const dist = Math.hypot(pK[0] - pV[0], pK[1] - pV[1]);
     const abils = r.events.filter((a): a is Extract<Round['events'][number], { kind: 'ability' }> => a.kind === 'ability' && !!a.at && a.until != null && a.t <= e.t && (a.until as number) >= e.t);
     const smoke = abils.find(a => a.ability === 'smoke' && this.pointSegDist(a.at as Vec2, pK, pV) <= (a.r as number));
@@ -516,6 +542,8 @@ export class Viewer {
     if (traded) factors.push({ icon: '⇄', text: `Trade — ${e.victim} had just fragged and was punished` });
     if (e.hs) factors.push({ icon: '⊙', text: `Headshot — a clean one-tap, ${e.victim} never got to shoot back` });
     if (e.hp != null && e.hp <= 50) factors.push({ icon: '♥', text: `${e.killer} walked away at ${e.hp}hp — wounded into the next fight` });
+    if (covK >= 0.5) factors.push({ icon: '⛨', text: `${e.killer} was set in cover — ${covK >= 1 ? 'only a sliver of body exposed' : 'a shoulder tucked behind the corner'}` });
+    if (covV >= 0.5) factors.push({ icon: '⛨', text: `${e.victim} had cover and still lost the exchange` });
     if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
     if (flash) factors.push({ icon: '✲', text: `${e.victim} was caught by a ${flash.ability}` });
     if (trap) factors.push({ icon: '◇', text: `${e.victim} tripped ${e.killer}'s side's trap` });
@@ -524,7 +552,7 @@ export class Viewer {
     if (sniper(e.weapon) && dist >= 125) factors.push({ icon: '⌖', text: `A set ${e.weapon} on a long angle — snipers own this distance` });
     if (dist <= 70 && sniper(e.weapon)) factors.push({ icon: '⌖', text: `${e.weapon} up close — a risky win, snipers crumble when rushed` });
     factors.push({ icon: '↔', text: `${dist < 130 ? 'Close' : dist > 360 ? 'Long' : 'Mid'} range · ${Math.round(dist)}u` });
-    return { pK, pV, fK, fV, kSeesV, vSeesK, smoke, verdict, factors, kSide: K?.side ?? 0, vSide: V?.side ?? 1 };
+    return { pK, pV, fK, fV, kSeesV, vSeesK, smoke, verdict, factors, covK, covV, kSide: K?.side ?? 0, vSide: V?.side ?? 1 };
   }
   /** Open the x-ray card for one kill: the verdict, the factors, and a cropped map
    *  diagram of the duel (the killer's cone, the sightline, both agents). */
@@ -539,6 +567,21 @@ export class Viewer {
     const w = Math.max(maxX - minX, maxY - minY);   // square viewBox so the diagram isn't skewed
     const cone = this.nav ? this.conePath(x.pK, x.fK) : '';
     const dot = (p: Vec2, s: 0 | 1, unaware: boolean) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(w * 0.022).toFixed(1)}" class="xd-dot ${sc(s)}"/>${unaware ? `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(w * 0.04).toFixed(1)}" class="xd-unaware"/>` : ''}`;
+    // shield bracket on a covered fighter — drawn on the shoulder(s) the wall protects
+    // (recomputed from the same walkAt/segClear sampling the cover factor used)
+    const shield = (p: Vec2, from: Vec2) => {
+      const dx = p[0] - from[0], dy = p[1] - from[1], d = Math.hypot(dx, dy) || 1;
+      const px = -dy / d, py = dx / d, R = w * 0.036;
+      let out = '';
+      for (const s of [-1, 1]) {
+        const sp: Vec2 = [p[0] + px * 12 * s, p[1] + py * 12 * s];
+        if (!this.walkAt(sp[0], sp[1]) || !this.segClear(from, sp)) {
+          const m = Math.atan2(py * s, px * s), a0 = m - 0.75, a1 = m + 0.75;
+          out += `<path d="M ${(p[0] + Math.cos(a0) * R).toFixed(1)} ${(p[1] + Math.sin(a0) * R).toFixed(1)} A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(p[0] + Math.cos(a1) * R).toFixed(1)} ${(p[1] + Math.sin(a1) * R).toFixed(1)}" class="xd-cover"/>`;
+        }
+      }
+      return out;
+    };
     const arrow = (p: Vec2, f: Vec2) => { const fl = Math.hypot(f[0], f[1]) || 1, L = w * 0.07; return `<line x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${(p[0] + f[0] / fl * L).toFixed(1)}" y2="${(p[1] + f[1] / fl * L).toFixed(1)}" class="xd-face"/>`; };
     const diagram = `<svg viewBox="${minX.toFixed(1)} ${minY.toFixed(1)} ${w.toFixed(1)} ${w.toFixed(1)}" class="xd-svg" preserveAspectRatio="xMidYMid slice">
         <image href="${this.mapUrl}" x="0" y="0" width="1000" height="1000" preserveAspectRatio="none"/>
@@ -548,6 +591,7 @@ export class Viewer {
         ${x.smoke ? `<circle cx="${(x.smoke.at as Vec2)[0]}" cy="${(x.smoke.at as Vec2)[1]}" r="${x.smoke.r}" class="xd-smoke"/>` : ''}
         ${arrow(x.pV, x.fV)}${arrow(x.pK, x.fK)}
         ${dot(x.pV, x.vSide, x.kSeesV && !x.vSeesK)}${dot(x.pK, x.kSide, false)}
+        ${x.covK >= 0.5 ? shield(x.pK, x.pV) : ''}${x.covV >= 0.5 ? shield(x.pV, x.pK) : ''}
       </svg>`;
     this.xray.innerHTML = `
       <div class="xr-card">

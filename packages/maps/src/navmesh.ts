@@ -106,6 +106,66 @@ export function losClear(nav: Navmesh, a: Vec2, b: Vec2): boolean {
   return true;
 }
 
+/** PARTIAL COVER: how much of a body at `to` is protected from a shooter at `from`.
+ *  Samples the target's shoulder points (±w perpendicular to the sightline): a
+ *  shoulder is covered when it sits inside a wall (tucked at the corner) or the
+ *  shooter's line to it is wall-blocked. 0 = fully open · 0.5 = one shoulder in
+ *  cover (a corner peek) · 1 = only a sliver exposed (a murder-hole slit). Pure
+ *  geometry on the same alpha-mask sampling as vision — no second raycaster. */
+export function coverOf(nav: Navmesh, from: Vec2, to: Vec2, w = 12): number {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-6) return 0;
+  const px = -dy / d, py = dx / d;              // unit perpendicular to the sightline
+  let covered = 0;
+  for (const o of [-w, w]) {
+    const sx = to[0] + px * o, sy = to[1] + py * o;
+    const [c, r] = cellOf(nav, sx, sy);
+    if (!walkAt(nav, c, r) || !losClear(nav, from, [sx, sy])) covered++;
+  }
+  return covered / 2;
+}
+
+// candidate ring for seekCover — a fixed integer table (no trig: the engine keeps
+// float ops platform-stable), scanned in a fixed order so the pick is deterministic
+const SEEK_DIRS: Vec2[] = [[1, 0], [0.707, 0.707], [0, 1], [-0.707, 0.707], [-1, 0], [-0.707, -0.707], [0, -1], [0.707, -0.707]];
+
+/** COVER-SEEK: the wall-hugging spot a real player would actually stand at, near
+ *  `pos` — nobody holds mid-open-ground. Scans a fixed candidate ring (deterministic,
+ *  no rng): each walkable candidate within `r` scores by how many of its 8 neighbour
+ *  cells are wall; the best-tucked candidate that still sees the lane toward `watch`
+ *  (a short LOS probe — cover, not hiding) wins. Returns `pos` when nothing nearby
+ *  offers better cover, so open-ground holds are unchanged. */
+export function seekCover(nav: Navmesh, pos: Vec2, watch: Vec2, r = 40): Vec2 {
+  const wallsAround = (x: number, y: number): number => {
+    const [c, row] = cellOf(nav, x, y);
+    let n = 0;
+    for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+      if ((dc || dr) && !walkAt(nav, c + dc, row + dr)) n++;
+    }
+    return n;
+  };
+  let best = pos, bestScore = wallsAround(pos[0], pos[1]);
+  if (bestScore >= 3) return pos;                       // already tucked — don't wander
+  // the lane check: a candidate must keep a clear line toward what it watches. A
+  // near probe (~80u toward `watch`) stands in for the far point — if even the
+  // probe is inside a wall, degrade to "can still see the original spot".
+  const dw = Math.hypot(watch[0] - pos[0], watch[1] - pos[1]);
+  const f = dw > 1e-6 ? Math.min(1, 80 / dw) : 0;
+  let probe: Vec2 = [pos[0] + (watch[0] - pos[0]) * f, pos[1] + (watch[1] - pos[1]) * f];
+  { const [c, row] = cellOf(nav, probe[0], probe[1]); if (!walkAt(nav, c, row)) probe = pos; }
+  for (const rad of [r * 0.35, r * 0.7, r]) {
+    for (const [ux, uy] of SEEK_DIRS) {
+      const x = pos[0] + ux * rad, y = pos[1] + uy * rad;
+      const [c, row] = cellOf(nav, x, y);
+      if (!walkAt(nav, c, row)) continue;
+      const s = wallsAround(x, y);
+      if (s > bestScore && losClear(nav, [x, y], probe)) { best = [x, y]; bestScore = s; }
+    }
+  }
+  return best;
+}
+
 /** Can a viewer at `from`, facing unit vector `dir`, see `to`?
  *  True when `to` is within `range`, inside the half-angle `halfFov` cone,
  *  and not occluded by a wall. This is the fog-of-war primitive: it composes
