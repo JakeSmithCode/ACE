@@ -26,6 +26,10 @@ export type MatchEvent =
   // `hp` (additive): the winner's remaining health after the fight — duels chip the
   // victor, so a contested kill leaves a wounded player for the next contact to clean up.
   | { t: number; kind: 'kill'; killer: string; victim: string; weapon: string; hp?: number }
+  // a non-lethal EXCHANGE (additive kind): a close duel that broke off without a kill —
+  // `from` hit `to` for `dmg`, leaving them at `hp`. Emitted per direction (a graze wounds
+  // both). Consumers that only know kills simply skip it.
+  | { t: number; kind: 'dmg'; from: string; to: string; dmg: number; hp: number }
   | { t: number; kind: 'plant'; agent: string; site: SiteId }
   | { t: number; kind: 'defuse'; agent: string }
   // `at`/`r`/`until` give the ability its geometry on the map (a circle at `at` of

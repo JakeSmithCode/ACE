@@ -37,7 +37,7 @@ const HOLD_BONUS = 6;      // a held angle's duel edge (an anchor on their spot)
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 // Fights are neither instant nor free (the "actual players" layer):
-const FIGHT_PAUSE = 0.012; // round-t a duel WINNER halts at the kill spot (~1.2s) — fights take time,
+const FIGHT_PAUSE = 0.014; // round-t a duel WINNER halts at the kill spot (~1.4s) — fights take time,
                            // so a contested push arrives late, and a fresh killer is a stationary,
                            // known-position target for the trade window. Balance-sensitive: 0.018
                            // tipped split DEF-SIDED (41.8) — pauses tax the pushing side hardest.
@@ -45,6 +45,15 @@ const FIGHT_FACE = 0.03;   // round-t the winner stays focused down the kill lin
                            // realistically flankable from their travel direction)
 const WOUND_PEN = 0.08;    // duel-edge lost per missing HP — a 50hp fighter duels at −4
 const CHIP_LO = 8, CHIP_HI = 70;  // return-damage band; scaled by how contested the duel was
+// Non-lethal EXCHANGES: a near-coin-flip duel can break off without a kill — both trade
+// shots, take damage, and disengage for a beat. The wounds escalate the next exchange
+// (WOUND_PEN), so firefights BUILD: poke → poke → kill, instead of every contact being
+// instantly lethal. Graze chance scales with closeness (0 when the duel is lopsided).
+const GRAZE_MAX = 0.38;    // graze chance at a perfect 50/50; ~0 for a dominant duel
+const GRAZE_LO = 6, GRAZE_HI = 26;   // per-side graze damage band — LIGHT pokes (deep wounds let the
+                           // grouped side clean up wounded defenders and tipped lotus ATK-SIDED)
+const GRAZE_COOL = 0.015;  // round-t a poked matchup disengages (~1.5s) — then it concludes
+const GRAZE_FACE = 0.02;   // both watch each other through the exchange (affects vision)
 const ROTATE_SPEED = 0.85; // a rotator's travel speed once it has info and moves with purpose
 const ATK_SPREAD = 18;     // lateral fan across the site entry — pushers hit distinct angles, not one stacked point
 
@@ -169,6 +178,9 @@ interface Ag {
   hp: number;            // 100 at round start; a duel chips the WINNER too (attrition carries)
   pauses: { t: number; dur: number }[];   // halts mid-travel (won a fight); extend the journey
   fightFace: { from: number; until: number; dir: Vec2 } | null;   // focused down the kill line
+  grazed: Record<string, number>;   // per-OPPONENT round-t until which this matchup is disengaged
+                                    // (per-pair, not per-agent — an anchor who traded pokes with one
+                                    // pusher still punishes the four walking past)
   // kill point: rotate here when the trigger fires (death's player resolved to a handle)
   rotatePlan: { pos: Vec2; route?: Vec2[]; trigger: { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number } } | null;
 }
@@ -377,6 +389,7 @@ function resolveRound(
       const pa = posAt(a, t), fa = facingAt(a, t);
       for (const d of liveD) {
         if (!d.alive || resolvedThisStep.has(d.handle) || resolvedThisStep.has(a.handle)) continue;
+        if ((a.grazed[d.handle] ?? -1) >= t) continue;   // this matchup traded pokes — briefly reset
         const pd = posAt(d, t);
         if (dist(pa, pd) > ENGAGE) continue;
         const fd = facingAt(d, t);
@@ -398,6 +411,29 @@ function resolveRound(
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
         const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
         const { atkWins, p } = duel(rng, a, d, surprise, holdEdge);
+        // a CLOSE duel can break off without a kill: both trade shots, take damage, and
+        // disengage for a beat, watching each other. The wounds make the NEXT exchange
+        // deadlier (WOUND_PEN), so firefights escalate: poke → poke → kill. URGENCY:
+        // the graze chance fades as the clock runs down — late-round fights are committed
+        // (players can't afford to reset), which is realistic AND keeps rounds from
+        // stalling out (grazes at t>0.7 pushed lotus to 17% time-expiry).
+        const closeness = Math.pow(1 - 2 * Math.abs(p - 0.5), 0.4);   // soft curve — mid-edge duels poke too
+        const urgency = Math.max(0, 1 - t * 1.6);   // pokes fade as the clock runs — late fights commit
+        // fights AT the site are all-in (an execute can't reset) — only map-control pokes
+        // graze. This is what keeps plant timings honest (lotus stalled at 14-17% otherwise).
+        const nearSite = dist(pa, sitePt) < SITE_R * 1.5 || dist(pd, sitePt) < SITE_R * 1.5;
+        if (!nearSite && rng.chance(GRAZE_MAX * closeness * urgency)) {
+          const dmgD = Math.round(rng.range(GRAZE_LO, GRAZE_HI));
+          const dmgA = Math.round(rng.range(GRAZE_LO, GRAZE_HI));
+          d.hp = Math.max(1, d.hp - dmgD); a.hp = Math.max(1, a.hp - dmgA);
+          a.grazed[d.handle] = t + GRAZE_COOL; d.grazed[a.handle] = t + GRAZE_COOL;
+          a.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pa, pd) };
+          d.fightFace = { from: t, until: t + GRAZE_FACE, dir: unit(pd, pa) };
+          resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
+          events.push({ t, kind: 'dmg', from: a.handle, to: d.handle, dmg: dmgD, hp: d.hp });
+          events.push({ t, kind: 'dmg', from: d.handle, to: a.handle, dmg: dmgA, hp: a.hp });
+          break;
+        }
         const loser = atkWins ? d : a;
         const winnerAg = atkWins ? a : d;
         // capture the death spot BEFORE marking dead — posAt short-circuits to deathPos
@@ -537,7 +573,7 @@ function simulateRound(
         alive: true, deathT: null, deathPos: null,
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         holdDir: plan?.face ? unit(pos, plan.face) : unit(spawn, pos),  // authored angle, else face the push
-        exposedUntil: -1, hp: 100, pauses: [], fightFace: null,
+        exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {},
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
@@ -579,7 +615,7 @@ function simulateRound(
         weapon: pickWeapon(rng, buy[String(attacker) as '0' | '1'], p.role), anchor: false,
         // the lurker holds toward the fight (catches unaware rotators); others push to site
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
-        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null,
+        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null, grazed: {},
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
@@ -612,7 +648,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, hp: 100, pauses: [], fightFace: null,
+        exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {},
         rotatePlan: rt && trig ? { pos: rt.pos, route: rt.route, trigger: trig } : null,
       });
     });
@@ -649,7 +685,7 @@ function simulateRound(
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
         agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
-        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null,
+        exposedUntil: -1, rotatePlan: null, hp: 100, pauses: [], fightFace: null, grazed: {},
       });
     });
   }
@@ -752,7 +788,7 @@ function simulateRound(
   for (let i = 0; i < forks; i++) {
     // fresh hp/pauses/fightFace per clone — `pauses` MUST be a new array (a shared ref
     // would leak fork fight-halts into the canonical pass and break byte-identity)
-    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null }));
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {} }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }

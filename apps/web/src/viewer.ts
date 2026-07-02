@@ -85,6 +85,7 @@ function headingAtEnd(path: Vec2[]): Vec2 {
  *  kill events (killer → victim positions at the kill t). */
 type FightFace = { from: number; until: number; dir: Vec2 };
 const FIGHT_FACE = 0.03;   // mirrors the engine constant
+const GRAZE_FACE = 0.02;   // mirrors the engine — both sides of an exchange watch each other
 
 /** Reconstruct where an agent looks at progress `prog`: down the kill line for a
  *  beat after winning a fight, down its travel vector while moving, down its held
@@ -634,18 +635,22 @@ export class Viewer {
       return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], rox: 0, roy: 0, rang: null };
     });
 
-    // fight-face windows (mirrors the engine): after each kill the winner looks down
-    // the kill line for a beat — reconstructed from the kill events' positions, so the
-    // cone snaps onto the fight exactly where the engine's did.
+    // fight-face windows (mirrors the engine): after each kill the winner looks down the
+    // kill line for a beat, and BOTH sides of a non-lethal exchange watch each other —
+    // reconstructed from the kill/dmg events' positions, so the cones snap onto the
+    // fight exactly where the engine's did.
     const byHandle = new Map(this.agents.map(a => [a.handle, a] as const));
-    for (const e of r.events) {
-      if (e.kind !== 'kill') continue;
-      const k = byHandle.get(e.killer), v = byHandle.get(e.victim);
-      if (!k || !v) continue;
-      const kp = posWithDepart(k.path, k.departT, k.arrive, e.t, k.hitch, k.pauses);
-      const vp = posWithDepart(v.path, v.departT, v.arrive, e.t, v.hitch, v.pauses);
+    const faceAt = (fromH: string, toH: string, t: number, dur: number) => {
+      const k = byHandle.get(fromH), v = byHandle.get(toH);
+      if (!k || !v) return;
+      const kp = posWithDepart(k.path, k.departT, k.arrive, t, k.hitch, k.pauses);
+      const vp = posWithDepart(v.path, v.departT, v.arrive, t, v.hitch, v.pauses);
       const d = Math.hypot(vp[0] - kp[0], vp[1] - kp[1]);
-      if (d > 1e-6) k.ff.push({ from: e.t, until: e.t + FIGHT_FACE, dir: [(vp[0] - kp[0]) / d, (vp[1] - kp[1]) / d] });
+      if (d > 1e-6) k.ff.push({ from: t, until: t + dur, dir: [(vp[0] - kp[0]) / d, (vp[1] - kp[1]) / d] });
+    };
+    for (const e of r.events) {
+      if (e.kind === 'kill') faceAt(e.killer, e.victim, e.t, FIGHT_FACE);
+      else if (e.kind === 'dmg') faceAt(e.from, e.to, e.t, GRAZE_FACE);
     }
 
     // trap STUTTER: an agent whose path crosses an ENEMY trap was slowed by the
@@ -848,6 +853,25 @@ export class Viewer {
         else if (fb) this.announce('fb', `<i>FIRST BLOOD</i><b class="${kc}">${e.killer}</b>`, 1500);
       }
       this.boardDirty = true;
+    } else if (e.kind === 'dmg') {
+      // a non-lethal exchange: shots fired, nobody drops — a THIN tracer + a hit flash
+      // on the target (live only; the feed stays kills-only so it doesn't spam)
+      if (!live) return;
+      const from = this.agents.find(a => a.handle === e.from);
+      const to = this.agents.find(a => a.handle === e.to);
+      if (from && to) {
+        const fp = posWithDepart(from.path, from.departT, from.arrive, e.t, from.hitch, from.pauses);
+        const tp = posWithDepart(to.path, to.departT, to.arrive, e.t, to.hitch, to.pauses);
+        const fc = this.teamOf.get(e.from) === this.tl.rounds[this.roundIdx].attacker ? 'att' : 'def';
+        const tr = svg('line');
+        tr.setAttribute('class', 'ace-tracer graze ' + fc);
+        tr.setAttribute('x1', fp[0].toFixed(1)); tr.setAttribute('y1', fp[1].toFixed(1));
+        tr.setAttribute('x2', tp[0].toFixed(1)); tr.setAttribute('y2', tp[1].toFixed(1));
+        this.trLayer.appendChild(tr);
+        setTimeout(() => tr.remove(), 500);
+        to.node.classList.add('hit');
+        setTimeout(() => to.node.classList.remove('hit'), 360);
+      }
     } else if (e.kind === 'plant') {
       this.spike.classList.add('on');
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
@@ -1096,7 +1120,7 @@ export class Viewer {
     if (this.playing && !this.ended) {
       this.T += (dt / this.DUR) * this.speed;
       const r = this.tl.rounds[this.roundIdx];
-      r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse') && e.t > this.fired && this.T >= e.t) this.fire(e); });
+      r.events.forEach(e => { if ((e.kind === 'kill' || e.kind === 'plant' || e.kind === 'defuse' || e.kind === 'dmg') && e.t > this.fired && this.T >= e.t) this.fire(e); });
       this.fired = this.T;
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
       if (this.T >= 1) {
