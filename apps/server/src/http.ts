@@ -104,6 +104,17 @@ const scoutDossier = (t: { attack: { siteBias: number; tempo: number; lurk?: str
   return { attack: `${site}, ${tempo}`, defense: `${hold}, ${aggro}`, lurk: !!t.attack.lurk, counter };
 };
 
+/** The controller's smoke SHAPE, read off the fielded agent — the utility scouting
+ *  line (walls cut a lane, recasts leave a swing gap, Brimstone holds one big
+ *  window). Mirrors the engine's WALL_AGENTS/RECAST_AGENTS identity. */
+const smokeShape = (ctrlAgent: string | undefined): string | null => {
+  if (!ctrlAgent) return null;
+  if (ctrlAgent === 'Viper' || ctrlAgent === 'Harbor') return `${ctrlAgent} WALLS the lane — expect a cut; trade around its ends`;
+  if (ctrlAgent === 'Brimstone') return 'Brimstone: one big smoke window — hit as it expires';
+  if (ctrlAgent === 'Omen' || ctrlAgent === 'Astra' || ctrlAgent === 'Clove') return `${ctrlAgent} RECASTS — an open gap between blooms; time the swing`;
+  return null;
+};
+
 /** The public club page (§9) — identity, division, lifecycle, the fielded five (with each
  *  player's fielded AGENT, so you scout the real comp), and whether a human owns it. For an
  *  AI club this is exactly what it'll field next: `aiBestFive` (the patch-aware five) + the
@@ -119,8 +130,13 @@ const publicClub = (w: WorldState, c: WorldClub) => {
     // an AI club's tactical IDENTITY (Phase 5) — scout it to know how a rival plays; a
     // human-owned club authors its own tactics, so it has no fixed AI style.
     style: ai ? (({ archetype, label }) => ({ archetype, label }))(aiStyle(team)) : null,
-    // the pre-match scouting read — tendencies + a counter tip, from the AI's real dials.
-    dossier: ai ? scoutDossier(aiTactics(team)) : null,
+    // the pre-match scouting read — tendencies + a counter tip, from the AI's real dials
+    // (+ the controller's smoke SHAPE from the fielded comp — walls / recast / big window).
+    dossier: ai ? {
+      ...scoutDossier(aiTactics(team)),
+      smoke: smokeShape(fivePlayers.map(p => comp[p.id] ?? topAgentOf(p)).find(a2 =>
+        ['Viper', 'Harbor', 'Brimstone', 'Omen', 'Astra', 'Clove'].includes(a2))),
+    } : null,
     five: fivePlayers.map(p => {
       const ovr = Math.round(overall(p)), sr = soloRank(ovr);
       // the person behind the handle — real name + nationality (hash-derived, pure)

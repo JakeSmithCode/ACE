@@ -1499,6 +1499,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <div class="lv-doshead">⌖ SCOUTING REPORT</div>
           <div class="lv-dosrow"><i>ATTACK</i><span>{{ clubModal.dossier.attack }}<em v-if="clubModal.dossier.lurk"> · runs a lurk</em></span></div>
           <div class="lv-dosrow"><i>DEFENSE</i><span>{{ clubModal.dossier.defense }}</span></div>
+          <div v-if="clubModal.dossier.smoke" class="lv-dosrow"><i>UTILITY</i><span>{{ clubModal.dossier.smoke }}</span></div>
           <div class="lv-doscounter"><i>⮞ COUNTER</i><span>{{ clubModal.dossier.counter }}</span></div>
         </div>
         <div class="lv-clubfive">
