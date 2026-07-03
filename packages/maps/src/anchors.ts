@@ -9,6 +9,13 @@ export interface MapAnchors {
   atkSpawn: Vec2;
   sites: { A: Vec2; B: Vec2; C?: Vec2 };
   mid: Vec2;
+  /** PER-MAP DEFENSE DRESSING (optional): authored hold spots per site for the
+   *  procedural defense — for rooms whose geometry defeats the generic
+   *  jitter-around-the-anchor placement (sunset's B is a DONUT: the anchor
+   *  centres an unwalkable island, so generically-placed bodies see nothing).
+   *  When present, the read-stack / watchers / site convergence place onto
+   *  these spots (same rng draw count — byte-identical when absent). */
+  defSpots?: Partial<Record<'A' | 'B' | 'C', Vec2[]>>;
 }
 
 // Haven and Lotus are genuinely three-site — they now field all three (A/B/C).
@@ -43,6 +50,13 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   // collapses the defense (83.8% ATK — the island IS their cover), and A-mouth
   // moves deepen the stall instead (47.7%). The stall and the balance are the
   // same coin; sunset needs per-map defense shapes, not an anchor nudge.
+  // UPDATE: the defense-DRESSING machinery was built (defSpots — authored hold
+  // spots the procedural defense places onto) and sunset was swept with ring/
+  // mouth spot sets: every vision-restoring variant lands 80-85% ATK (ring3
+  // 82.2, mouths 80.6) — the same signature as fracture/abyss/bind. Once a
+  // sunset site is contestable it loses to the tucked fan; the remaining fix
+  // is defense STRENGTH/shape on open-entry maps, not placement. defSpots stays
+  // (dormant, byte-identical when absent) as the substrate for that pass.
   sunset:   { atkSpawn: [520, 860], sites: { A: [816, 368], B: [136, 432] }, mid: [498, 630] },
 };
 

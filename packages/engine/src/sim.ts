@@ -926,13 +926,24 @@ function simulateRound(
     // fight FROM their hold, so any engine reposition re-tunes every map at once).
     // Defenders still EARN the cover edge wherever their tuned spots already touch
     // geometry; only attackers (below) actively tuck.
-    for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, siteAnchor(A, readSite), 30), site: readSite });
-    for (const os of otherSites) slots.push({ from: jitter(rng, siteAnchor(A, os), 30), site: os });
+    // PER-MAP DEFENSE DRESSING: a map may author hold spots per site (defSpots)
+    // for rooms the generic jitter-around-the-anchor placement can't play —
+    // sunset's donut B, where the anchor centres an unwalkable island. Same
+    // jitter draw count either way, so maps without spots are byte-identical.
+    const spotFor = (st2: SiteId, i2: number): Vec2 => {
+      const sp = A.defSpots?.[st2];
+      return sp?.length ? sp[i2 % sp.length] : siteAnchor(A, st2);
+    };
+    for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, spotFor(readSite, i), 30), site: readSite });
+    for (const os of otherSites) slots.push({ from: jitter(rng, spotFor(os, 0), 30), site: os });
     for (let i = 0; i < 5 - onRead - otherSites.length; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
     defTeam.players.forEach((p, i) => {
       const st = slots[i];
       const anchor = st.site === site;            // already on the contested site = holding an angle
-      const goal = anchor ? jitter(rng, sitePt, 26) : jitter(rng, sitePt, 44);
+      // convergence also lands on the dressed spots (spread by player index), so a
+      // retake doesn't pile onto an island the room was authored around
+      const cGoal = A.defSpots?.[site]?.length ? spotFor(site, i) : sitePt;
+      const goal = anchor ? jitter(rng, cGoal, 26) : jitter(rng, cGoal, 44);
       const path = pathfind(nav, st.from, goal);
       const lo = loadouts.get(p.handle)!;
       agents.push({
