@@ -102,6 +102,46 @@ function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, pro
   return hold;
 }
 
+/** BROADCAST AUDIO — synthesized Web Audio cues, zero assets: short enveloped
+ *  tones for the moments the broadcast already calls (kills, first blood, the
+ *  multikill ladder, plant/defuse, the spike countdown, round start, clutch).
+ *  Everything rides the SAME live-only guards the visual beats use, so scrubbing
+ *  and paused states stay silent; the context is created lazily on the first cue
+ *  (satisfying autoplay policy — the user has interacted by the time we play). */
+class Sfx {
+  enabled = true;
+  private ctx: AudioContext | null = null;
+  private ensure(): AudioContext | null {
+    if (typeof window === 'undefined' || !('AudioContext' in window)) return null;
+    if (!this.ctx) { try { this.ctx = new AudioContext(); } catch { return null; } }
+    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    return this.ctx;
+  }
+  private tone(f0: number, f1: number, dur: number, vol: number, type: OscillatorType = 'sine', when = 0) {
+    if (!this.enabled) return;
+    const ctx = this.ensure(); if (!ctx) return;
+    const t0 = ctx.currentTime + when;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  kill(hs?: boolean) { this.tone(hs ? 420 : 340, 180, 0.09, 0.055, 'triangle'); }
+  fb() { this.tone(520, 300, 0.13, 0.06, 'triangle'); this.tone(780, 520, 0.12, 0.035, 'sine', 0.05); }
+  multi(n: number) { for (let i = 0; i < Math.min(n, 5); i++) this.tone(560 + i * 140, 560 + i * 140, 0.08, 0.05, 'sine', i * 0.065); }
+  graze() { this.tone(250, 210, 0.045, 0.018, 'square'); }
+  plant() { this.tone(880, 870, 0.09, 0.05); this.tone(880, 870, 0.09, 0.05, 'sine', 0.15); }
+  spikeTick(urgent: boolean) { this.tone(urgent ? 1250 : 1100, urgent ? 1200 : 1060, 0.04, urgent ? 0.026 : 0.016); }
+  defuse() { this.tone(660, 990, 0.2, 0.05); }
+  roundStart() { this.tone(392, 392, 0.07, 0.03); this.tone(523, 523, 0.09, 0.04, 'sine', 0.08); }
+  clutch() { this.tone(330, 660, 0.28, 0.04, 'sawtooth'); }
+}
+
 /** One movement leg of a MULTI-LEG journey — the move event's base fields are
  *  leg 0, `legs` are the re-paths after it (kill-point rotations, the post-plant
  *  re-setup), in departure order. */
@@ -195,6 +235,9 @@ export class Viewer {
   private cam: { x: number; y: number; w: number } | null = null;
   private fullBox = { x: 0, y: 0, w: 1000 };
   private camBtn!: HTMLElement;
+  private sfx = new Sfx();
+  private sndBtn!: HTMLElement;
+  private lastSpikeTick = -1;   // spike-countdown beeps, indexed by round-time bucket
   // live scoreboard (kills/deaths through the current moment) — form made visible
   private scores = new Map<string, { k: number; d: number }>();
   private deadNow = new Set<string>();   // handles down in the CURRENT round at the current moment
@@ -233,8 +276,9 @@ export class Viewer {
   private aliveEls: [HTMLElement, HTMLElement] = [null as any, null as any];   // 5 alive-pips per team
   private mpt!: HTMLElement;                          // MATCH POINT tag in the scorebar
 
-  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean } = {}) {
+  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean; sfx?: boolean } = {}) {
     this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav; this.live = !!opts.live;
+    this.sfx.enabled = opts.sfx !== false;
     tl.teams.forEach((tm, i) => tm.players.forEach(p => this.teamOf.set(p.handle, i as 0 | 1)));
     this.build();
     this.loadRound(0);
@@ -332,6 +376,7 @@ export class Viewer {
         <button class="speed vis on" id="ace-util" title="Toggle utility (smokes / flashes / traps)">✦ Utility</button>
         <button class="speed heat" id="ace-heat" title="Match heatmap — where each side dies across the whole match">▦ Heatmap</button>
         <button class="speed cam on" id="ace-cam" title="Director camera — auto-frames the action like a broadcast observer; off = full map">🎥 Director</button>
+        <button class="speed snd on" id="ace-snd" title="Broadcast audio — kills, plants, the spike countdown">🔊 Sound</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -399,6 +444,9 @@ export class Viewer {
     this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.abLayer.style.display = this.showUtil ? '' : 'none'; this.render(); };
     this.heatBtn = ctl.querySelector('#ace-heat') as HTMLElement;
     this.heatBtn.onclick = () => this.toggleHeat();
+    this.sndBtn = ctl.querySelector('#ace-snd') as HTMLElement;
+    this.sndBtn.classList.toggle('on', this.sfx.enabled);
+    this.sndBtn.onclick = () => { this.sfx.enabled = !this.sfx.enabled; this.sndBtn.classList.toggle('on', this.sfx.enabled); };
     this.camBtn = ctl.querySelector('#ace-cam') as HTMLElement;
     this.camBtn.onclick = () => {
       this.camAuto = !this.camAuto;
@@ -714,6 +762,8 @@ export class Viewer {
     this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
     const atkCls = r.attacker === 0 ? 'att' : 'def';
     this.announce('roundstart', `<i>ROUND ${r.n}</i><b class="${atkCls}">${this.tl.teams[r.attacker].tag}</b><s>attack ${r.site}</s>`, 1500);
+    this.lastSpikeTick = -1;
+    if (this.playing) this.sfx.roundStart();
 
     // deaths
     const death = new Map<string, number>();
@@ -958,10 +1008,11 @@ export class Viewer {
       }
       // the crowd beats, called live: the opening kill, then the multikill ladder
       if (live) {
-        if (streak === 5) this.announce('acek', `<i>ACE</i><b class="${kc}">${e.killer}</b><s>all five</s>`, 2600);
-        else if (streak === 4) this.announce('mkb', `<i>QUAD KILL</i><b class="${kc}">${e.killer}</b>`, 1900);
-        else if (streak === 3) this.announce('mkb', `<i>TRIPLE KILL</i><b class="${kc}">${e.killer}</b>`, 1700);
-        else if (fb) this.announce('fb', `<i>FIRST BLOOD</i><b class="${kc}">${e.killer}</b>`, 1500);
+        if (streak === 5) { this.announce('acek', `<i>ACE</i><b class="${kc}">${e.killer}</b><s>all five</s>`, 2600); this.sfx.multi(5); }
+        else if (streak === 4) { this.announce('mkb', `<i>QUAD KILL</i><b class="${kc}">${e.killer}</b>`, 1900); this.sfx.multi(4); }
+        else if (streak === 3) { this.announce('mkb', `<i>TRIPLE KILL</i><b class="${kc}">${e.killer}</b>`, 1700); this.sfx.multi(3); }
+        else if (fb) { this.announce('fb', `<i>FIRST BLOOD</i><b class="${kc}">${e.killer}</b>`, 1500); this.sfx.fb(); }
+        else this.sfx.kill(e.hs);
       }
       this.boardDirty = true;
     } else if (e.kind === 'dmg') {
@@ -982,14 +1033,16 @@ export class Viewer {
         setTimeout(() => tr.remove(), 500);
         to.node.classList.add('hit');
         setTimeout(() => to.node.classList.remove('hit'), 360);
+        this.sfx.graze();
       }
     } else if (e.kind === 'plant') {
       this.spike.classList.add('on');
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
       const d = el('div', 'kill event'); d.textContent = `◆ Spike planted · ${e.site} site`;
       this.feed.appendChild(d); this.feedItems.push(d);
-      if (live) this.announce('plant', `<i>SPIKE PLANTED</i><s>${e.site} site — retake or lose it</s>`, 1800);
+      if (live) { this.announce('plant', `<i>SPIKE PLANTED</i><s>${e.site} site — retake or lose it</s>`, 1800); this.sfx.plant(); }
     } else if (e.kind === 'defuse') {
+      if (live) this.sfx.defuse();
       this.spike.classList.remove('on');
       if (this.feedItems.length === 0) this.feed.innerHTML = '';
       const d = el('div', 'kill event defuse'); d.textContent = `◇ Spike defused · ${e.agent}`;
@@ -1178,6 +1231,7 @@ export class Viewer {
       this.lastClutch = clutcher.handle;
       const foes = (clutcher.side === 'att' ? liveDef : liveAtt).length;
       this.announce('clutch', `<i>CLUTCH TIME</i><b class="${clutcher.side}">${clutcher.handle}</b><s>1 v ${foes}</s>`, 2100);
+      this.sfx.clutch();
     }
     // PASS 3 — apply, with TEMPORAL SMOOTHING of the separation offset (the relaxation
     // can resolve differently frame to frame in a pile; an exponential lerp of the
@@ -1262,6 +1316,13 @@ export class Viewer {
     // round clock + phase — driven into both the control-bar timer and the broadcast
     // HUD clock (the centerpiece). Switches to the spike timer and goes red on plant.
     const planted = this.T >= this.spikePlantT;
+    // the spike COUNTDOWN — a soft tick every ~2s of round time while the spike is
+    // down, urgent past the halfway mark. Bucketed by round-time (not wall-clock)
+    // and gated on live playback, so pause/scrub never beeps.
+    if (planted && this.playing && !this.ended && !this.showHeat) {
+      const bucket = Math.floor((this.T - this.spikePlantT) / 0.02);
+      if (bucket !== this.lastSpikeTick) { this.lastSpikeTick = bucket; this.sfx.spikeTick(this.T - this.spikePlantT > 0.15); }
+    }
     let clk: string;
     if (!planted) { const s = Math.max(0, Math.round(100 - (this.T / 0.6) * 60)); clk = Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
     else { const s = Math.max(0, Math.round(45 - ((this.T - this.spikePlantT) / 0.34) * 45)); clk = '0:' + ('0' + s).slice(-2); }

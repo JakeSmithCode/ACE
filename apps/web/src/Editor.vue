@@ -95,7 +95,9 @@ function resim() {
     }
     odds.value = { atk: aN ? aSum / aN : null, def: dN ? dSum / dN : null };
     viewer?.destroy();
-    viewer = new Viewer(host.value!, tl, `/${MAP}.png`, nav as any);
+    // the preview mutes broadcast audio by default (a re-sim per edit would chirp
+    // constantly); the 🔊 toggle still turns it on for a proper watch-through
+    viewer = new Viewer(host.value!, tl, `/${MAP}.png`, nav as any, { sfx: false });
     busy.value = false;
   });
 }
