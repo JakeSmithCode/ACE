@@ -812,6 +812,17 @@ export class Viewer {
     else this.roundChrome(this.roundIdx);
   }
 
+  /** Jump playback to round `i` (0-based) — the broadcast-storytelling hooks
+   *  outside the viewer (the turning-point card, box-score links) drive this. */
+  goToRound(i: number) { if (i >= 0 && i < this.tl.rounds.length) this.loadRound(i); }
+
+  /** Lock the director onto a player by handle (null releases) — the box-score
+   *  row → follow-cam link. Same state the on-map click toggles. */
+  follow(handle: string | null) {
+    this.followHandle = handle;
+    if (handle && !this.camAuto) { this.camAuto = true; this.camBtn.classList.add('on'); }
+  }
+
   private loadRound(i: number) {
     if (this.showHeat) this.toggleHeat();   // leaving the aggregate view back into round playback
     this.roundIdx = i;

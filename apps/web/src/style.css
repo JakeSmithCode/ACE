@@ -1815,6 +1815,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-pwtitles{font-size:11px;text-align:center}
 .lv-pwpower{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
 .lv-pwpower i{font-size:9px;color:var(--muted-2);font-style:normal;font-weight:400}
+/* the TURNING POINT card — the round the winner stole against the worst True Odds */
+.lv-turn{display:flex;align-items:center;gap:12px;margin-top:12px;padding:9px 14px;background:linear-gradient(90deg,rgba(230,198,106,.09),rgba(230,198,106,.02));border:1px solid rgba(230,198,106,.35);border-radius:8px}
+.lv-turnlab{font-family:var(--label);font-size:10px;letter-spacing:.08em;color:#e6c66a;font-weight:700;white-space:nowrap;flex-shrink:0}
+.lv-turnbody{font-size:12.5px;color:var(--text);min-width:0}
+.lv-turnbody b{color:#e6c66a}
+.lv-turnodds{font-variant-numeric:tabular-nums}
+.lv-turnbody .lv-hshot{font-style:normal;color:var(--def);font-weight:700;margin-left:3px}
+.lv-turnbtn{margin-left:auto;flex-shrink:0;background:rgba(230,198,106,.12);border:1px solid rgba(230,198,106,.5);color:#e6c66a;border-radius:6px;padding:4px 12px;font-family:var(--label);font-size:10.5px;letter-spacing:.05em;cursor:pointer;transition:background .15s}
+.lv-turnbtn:hover{background:rgba(230,198,106,.25)}
 /* post-match box score + MVP */
 .lv-box{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:14px 4px 4px}
 .lv-boxteam{background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
@@ -1827,6 +1836,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-boxthead{font-family:var(--label);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2);border-bottom:1px solid var(--line)}
 .lv-boxthead>span{color:var(--muted-2)!important}
 .lv-boxrow.mvp{background:linear-gradient(90deg,rgba(230,200,106,.1),transparent);border-radius:5px}
+/* box-score row → follow-cam link */
+.lv-boxrow.clickable{cursor:pointer;transition:background .12s}
+.lv-boxrow.clickable:hover{background:rgba(255,255,255,.04);border-radius:5px}
+.lv-boxrow.followed{background:linear-gradient(90deg,rgba(240,200,90,.16),rgba(240,200,90,.03));border-radius:5px;box-shadow:inset 2px 0 0 #f0c85a}
+.lv-boxrow.followed .lv-boxp b::after{content:' ◉';color:#f0c85a;font-size:10px}
 .lv-boxp{display:flex;align-items:center;gap:7px;min-width:0}
 .lv-boxp b{font-size:13px;white-space:nowrap}
 .lv-boxflag{font-size:12px}

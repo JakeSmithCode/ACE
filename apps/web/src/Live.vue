@@ -605,6 +605,7 @@ async function watchCupTie(t: CupTieView) {
     const nav = await ensureNav(map);
     const out = simulateMatch(rep.snapshot, nav, 50);
     watching.value = { home: { tag: t.home.tag, name: t.home.name }, away: { tag: t.away.tag, name: t.away.name }, final: t.score, map, season: cupView.value?.season ?? 0, day: -1, slot: -1, cup: true };
+    followed.value = null;
     computeBox(out);
     const pov = mine(t.home.tag) ? 0 as const : mine(t.away.tag) ? 1 as const : undefined;
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
@@ -628,7 +629,42 @@ const loadingWatch = ref(false);
 // and a Player of the Match (most kills, K−D tiebreak). The watch view is the product.
 interface BoxRow { handle: string; name?: string; flag?: string; role: string; agent?: string; igl?: boolean; kills: number; deaths: number; fb: number; hsPct: number; mvp: boolean }
 const boxScore = ref<{ teams: [BoxRow[], BoxRow[]]; mvp: string } | null>(null);
+// the match's TURNING POINT — the round the eventual winner stole against the worst
+// pre-round True Odds (the engine's own 50× counterfactual measure, already on every
+// round). Only a genuine steal (< 47%) earns the card; the replay button jumps the
+// viewer straight to that round.
+interface Turning { idx: number; round: number; odds: number; site: string; before: [number, number]; after: [number, number]; team: string; closer?: { killer: string; hs?: boolean } }
+const turning = ref<Turning | null>(null);
+// box-score row → follow-cam: the handle the director is locked onto (click again to release)
+const followed = ref<string | null>(null);
+function followRow(h: string) {
+  followed.value = followed.value === h ? null : h;
+  viewer?.follow(followed.value);
+  if (followed.value) host.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function replayTurning() {
+  if (!turning.value || !viewer) return;
+  viewer.goToRound(turning.value.idx);
+  host.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function computeTurning(tl: import('@ace/shared').MatchTimeline) {
+  const mw: 0 | 1 = tl.finalScore[0] >= tl.finalScore[1] ? 0 : 1;
+  const run: [number, number] = [0, 0];
+  let best: Turning | null = null;
+  tl.rounds.forEach((r, i) => {
+    const before: [number, number] = [run[0], run[1]];
+    run[r.winner]++;
+    if (r.winner !== mw || r.winPct == null) return;
+    const odds = r.attacker === r.winner ? r.winPct : 1 - r.winPct;
+    if (best && odds >= best.odds) return;
+    const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
+    const last = ks[ks.length - 1];
+    best = { idx: i, round: r.n, odds, site: r.site, before, after: [run[0], run[1]], team: tl.teams[mw].tag, closer: last ? { killer: last.killer, hs: last.hs } : undefined };
+  });
+  turning.value = best && (best as Turning).odds < 0.47 ? best : null;
+}
 function computeBox(tl: import('@ace/shared').MatchTimeline) {
+  computeTurning(tl);
   const kills: Record<string, number> = {}, deaths: Record<string, number> = {}, fb: Record<string, number> = {}, hs: Record<string, number> = {};
   for (const r of tl.rounds) {
     const ks = r.events.filter((e): e is Extract<typeof e, { kind: 'kill' }> => e.kind === 'kill').sort((a, b) => a.t - b.t);
@@ -658,6 +694,7 @@ async function watchAt(s: number, d: number, slot: number) {
     const nav = await ensureNav(map);
     const out = simulateMatch(rep.snapshot, nav, 50);
     watching.value = { home: fx.home, away: fx.away, final: fx.score ?? null, map, season: s, day: d, slot };
+    followed.value = null;
     computeBox(out);
     const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
@@ -679,7 +716,7 @@ async function watchLive(fx: LiveFixture) {
     const nav = await ensureNav(map);
     const tl = lt.timeline;
     watching.value = { home: fx.home, away: fx.away, final: lt.resolved ? tl.finalScore : null, map, season: season.value, day: DAY.value, slot: fx.slot, live: !lt.resolved };
-    boxScore.value = null;
+    boxScore.value = null; turning.value = null; followed.value = null;
     const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, tl, `/${map}.png`, nav, { live: !lt.resolved, pov }); });
     if (lt.resolved) computeBox(tl);
@@ -702,7 +739,7 @@ function startLivePoll(slot: number) {
     } catch { /* transient — keep polling */ }
   }, 2500);
 }
-function closeWatch() { stopLivePoll(); watching.value = null; boxScore.value = null; viewer?.destroy(); viewer = null; }
+function closeWatch() { stopLivePoll(); watching.value = null; boxScore.value = null; turning.value = null; followed.value = null; viewer?.destroy(); viewer = null; }
 /** A shareable deep-link to the watched replay — opening it auto-connects + plays. */
 function shareWatch() {
   if (!watching.value) return;
@@ -1286,6 +1323,16 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
           <button class="ed-close" @click="closeWatch">close</button>
         </div>
         <div ref="host" class="ace-host"></div>
+        <!-- the TURNING POINT — the round the winner stole against the worst True Odds -->
+        <div v-if="turning && boxScore" class="lv-turn">
+          <span class="lv-turnlab">⚡ TURNING POINT</span>
+          <span class="lv-turnbody">
+            <b>{{ turning.team }}</b> stole round {{ turning.round }} on {{ turning.site }} from
+            <b class="lv-turnodds">{{ Math.round(turning.odds * 100) }}%</b> True Odds —
+            {{ turning.before[0] }}–{{ turning.before[1] }} became {{ turning.after[0] }}–{{ turning.after[1] }}<template v-if="turning.closer"> · {{ turning.closer.killer }} closed it<i v-if="turning.closer.hs" class="lv-hshot" title="headshot">⊙</i></template>
+          </span>
+          <button class="lv-turnbtn" @click="replayTurning" title="jump the viewer to this round">▶ replay it</button>
+        </div>
         <!-- post-match box score + Player of the Match (derived from the timeline) -->
         <div v-if="boxScore" class="lv-box">
           <div v-for="(team, ti) in boxScore.teams" :key="ti" class="lv-boxteam">
@@ -1295,7 +1342,8 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               <span class="lv-boxsc">{{ watching.final?.[ti] }}</span>
             </div>
             <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span><span title="headshot kill rate">HS%</span></div>
-            <div v-for="p in team" :key="p.handle" class="lv-boxrow" :class="{ mvp: p.mvp }">
+            <div v-for="p in team" :key="p.handle" class="lv-boxrow clickable" :class="{ mvp: p.mvp, followed: p.handle === followed }"
+                 :title="p.handle === followed ? 'release the follow cam' : `follow ${p.handle} with the director camera`" @click="followRow(p.handle)">
               <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><span v-if="p.flag" class="lv-boxflag" :title="p.name">{{ p.flag }}</span><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
               <span>{{ p.kills }}</span><span>{{ p.deaths }}</span>
               <span :class="p.kills - p.deaths >= 0 ? 'pos' : 'neg'">{{ p.kills - p.deaths >= 0 ? '+' : '' }}{{ p.kills - p.deaths }}</span>
