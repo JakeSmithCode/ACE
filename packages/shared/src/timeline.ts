@@ -46,6 +46,13 @@ export type MatchEvent =
   // `from` hit `to` for `dmg`, leaving them at `hp`. Emitted per direction (a graze wounds
   // both). Consumers that only know kills simply skip it.
   | { t: number; kind: 'dmg'; from: string; to: string; dmg: number; hp: number }
+  // `face` (additive kind): the agent TURNED — an explicit facing override the
+  // viewer can't derive from the path (a head-turn window `t..until`). The viewer
+  // replays it into its fight-face windows; consumers that don't know it simply
+  // skip it (facing falls back to the path/hold reconstruction). Currently
+  // DORMANT: the footsteps/hearing producer measured out (see sim.ts) — the
+  // contract + viewer support stay for the next facing producer.
+  | { t: number; kind: 'face'; agent: string; dir: Vec2; until: number }
   | { t: number; kind: 'plant'; agent: string; site: SiteId }
   | { t: number; kind: 'defuse'; agent: string }
   // `at`/`r`/`until` give the ability its geometry on the map (a circle at `at` of

@@ -91,7 +91,13 @@ const GRAZE_FACE = 0.02;   // mirrors the engine — both sides of an exchange w
  *  beat after winning a fight, down its travel vector while moving, down its held
  *  angle while holding or once arrived. Mirrors engine facingAt(). */
 function facingOf(path: Vec2[], departT: number, arrive: number, hold: Vec2, prog: number, hitch?: Hitch, pauses?: Pause[], ff?: FightFace[]): Vec2 {
-  if (ff) for (const f of ff) if (prog >= f.from && prog <= f.until) return f.dir;
+  if (ff) {
+    // the LATEST-starting active window wins — mirrors the engine's single
+    // fightFace slot, which newer fights overwrite (hear-turns never interrupt)
+    let best: FightFace | null = null;
+    for (const f of ff) if (prog >= f.from && prog <= f.until && (!best || f.from > best.from)) best = f;
+    if (best) return best.dir;
+  }
   const moveEnd = departT + arrive + pausedTime(pauses, prog);
   if (prog > departT && prog < moveEnd - 1e-6) {
     const here = posWithDepart(path, departT, arrive, prog, hitch, pauses);
@@ -812,6 +818,9 @@ export class Viewer {
     for (const e of r.events) {
       if (e.kind === 'kill') faceAt(e.killer, e.victim, e.t, FIGHT_FACE);
       else if (e.kind === 'dmg') faceAt(e.from, e.to, e.t, GRAZE_FACE);
+      // footsteps: the engine emits an explicit facing override when an agent
+      // TURNS toward a heard sound — replay it so the head-turn shows on the map
+      else if (e.kind === 'face') byHandle.get(e.agent)?.ff.push({ from: e.t, until: e.until, dir: e.dir });
     }
 
     // trap STUTTER: an agent whose path crosses an ENEMY trap was slowed by the

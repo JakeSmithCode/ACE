@@ -39,6 +39,15 @@ const COVER_EDGE = 8;      // duel edge for a fully-covered SET fighter (a corne
                            // loses to genuine surprise. Balance-sensitive: measure with pnpm balance.
 const RETREAT_HP = 25;     // below this a wounded mid-travel graze survivor BREAKS OFF to cover
                            // (a new movement leg) instead of just hesitating — balance-sensitive
+// NOTE — a FOOTSTEPS/hearing layer was built here and MEASURED OUT (don't re-add
+// this shape without a new model): a moving enemy inside earshot turned a SET
+// listener's head (fightFace + the additive `face` event, which the viewer still
+// supports). Every tuning landed split DEF-SIDED — 70u/0.03: split 38.9, breeze
+// 41.9; set-only 48u: 39.7; +through-wall muffling: 39.5; 40u/0.02: 40.6 (vs 42.9
+// without) — because a head-turn feeds inView and grants the FULL first-shot edge,
+// so hearing acted as free aimed acquisition for corridor holders, and split IS
+// earshot-dense corridors. A revisit needs an info-not-aim model (awareness that
+// narrows the surprise edge without granting the shot), not smaller radii.
 const TRADE_WINDOW = 0.03; // round-time a killer stays exposed to a trade after a kill (~3s)
 const TRADE_EDGE = 7;      // a trade's duel edge — strong, but less than a clean first shot
 // Fights are neither instant nor free (the "actual players" layer):
