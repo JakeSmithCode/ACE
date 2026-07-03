@@ -36,6 +36,13 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   // site probes) — its lean is not site placement; it stays out of the pool.
   pearl:    { atkSpawn: [533, 860], sites: { A: [803, 328], B: [221, 412] }, mid: [522, 608] },
   split:    { atkSpawn: [130, 520], sites: { A: [320, 88],  B: [320, 816] }, mid: [225, 486] },
+  // sunset DIAGNOSED but not fixable by anchors: its 38% stalls are B's DONUT
+  // room — the anchor centres on an unwalkable island, so both sides arrange
+  // around it with no mutual LOS (timeout rounds average 1.6 kills vs 7.3 on
+  // ascent, arrivals normal). Moving B onto the open ring KILLS the stalls but
+  // collapses the defense (83.8% ATK — the island IS their cover), and A-mouth
+  // moves deepen the stall instead (47.7%). The stall and the balance are the
+  // same coin; sunset needs per-map defense shapes, not an anchor nudge.
   sunset:   { atkSpawn: [520, 860], sites: { A: [816, 368], B: [136, 432] }, mid: [498, 630] },
 };
 
