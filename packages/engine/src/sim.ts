@@ -86,6 +86,10 @@ const SMOKE_DUR = 0.20, SMOKE_DUR_UTIL = 0.18;
 const CTRL_RESMOKE_U = 0.5;                   // utility a controller needs to throw a SECOND smoke on the execute
 const RESMOKE_T0 = 0.30;                      // the second smoke blooms just after the first — sustained coverage through the hit
 const WALL_AGENTS = new Set(['Viper', 'Harbor']);   // wall-controllers: their smoke is a CAPSULE, not a sphere
+const RECAST_AGENTS = new Set(['Omen', 'Astra', 'Clove']);  // recast-controllers: two windows with a GAP
+const RECAST_SPLIT = 0.64;                    // each recast window's share of the base duration
+const RECAST_GAP = 0.035;                     // the OPEN beat between windows — the defender's swing window
+const BRIM_R = 1.12, BRIM_DUR = 1.2;          // Brimstone: one BIGGER, longer window (post-draw scales)
 const WALL_LEN = 170;                         // wall total length (image units)
 const WALL_R = 24, WALL_R_UTIL = 12;          // wall half-thickness (24..36 with utility)
 const RESMOKE_R = 50, RESMOKE_R_UTIL = 38;    // a focused second wall on the connector (50..88)
@@ -993,9 +997,30 @@ function simulateRound(
         smokes.push({ side: ag.side, c: e1, c2: e2, r: wr, t0, t1: t1w });
         events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, at2: e2, r: wr, until: t1w });
       } else {
-      const r = SMOKE_R + SMOKE_R_UTIL * u, t1 = t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u;
+      // SPHERE controllers get a TIMING identity (all post-draw / planned — zero
+      // new rng): Brimstone throws one BIGGER, longer window; Omen/Astra/Clove
+      // RECAST — the same cloud re-blooms once after expiring, with an open beat
+      // (RECAST_GAP) between windows that a patient defender can swing through.
+      // Sustained-but-interrupted control vs one big uninterrupted window vs
+      // Viper's wall: the comp now picks a smoke SHAPE, not just a number.
+      const agentName = loadouts.get(ag.handle)?.agent ?? '';
+      const brim = agentName === 'Brimstone';
+      const recast = RECAST_AGENTS.has(agentName);
+      // the identity lives INSIDE the base window (a naive "recast after expiry"
+      // was measured provably inert — 99% of kills land before t=0.3, so a
+      // second window at ~0.5+ sat in dead air; identical kill hash over 20
+      // seeds). A recast SPLITS the window instead: burn, DROP (the gap the
+      // defense can swing through), re-bloom — vs Brimstone's one big window.
+      const dur = (SMOKE_DUR + SMOKE_DUR_UTIL * u) * (brim ? BRIM_DUR : recast ? RECAST_SPLIT : 1);
+      const r = (SMOKE_R + SMOKE_R_UTIL * u) * (brim ? BRIM_R : 1);
+      const t1 = t0 + dur;
       smokes.push({ side: ag.side, c, r, t0, t1 });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, r, until: t1 });
+      if (recast) {
+        const t0b = t1 + RECAST_GAP, t1b = t0b + dur;
+        smokes.push({ side: ag.side, c, r: r * 0.9, t0: t0b, t1: t1b });
+        events.push({ t: t0b, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, r: r * 0.9, until: t1b });
+      }
       }
       // SECOND smoke: a controller with kit to spare double-smokes the execute, walling
       // the CONNECTOR between mid and site — so the hit reads like real coordinated
