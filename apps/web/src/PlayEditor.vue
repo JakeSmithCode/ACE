@@ -163,7 +163,7 @@ function toImg(clientX: number, clientY: number): Vec2 {
 }
 
 // --- dragging markers (hold / rotate target / route waypoint / facing / util) ----
-type Which = 'pos' | 'rotate' | 'wp' | 'face' | 'util';
+type Which = 'pos' | 'rotate' | 'wp' | 'face' | 'util' | 'util2';
 let drag: { player: string; which: Which; tgt: Target; idx: number; from: Vec2; moved: boolean } | null = null;
 
 function startDrag(player: string, which: Which, tgt: Target, idx: number, ev: PointerEvent) {
@@ -178,6 +178,7 @@ function onMove(ev: PointerEvent) {
   const d = drag;
   if (Math.hypot(pt[0] - d.from[0], pt[1] - d.from[1]) > 12) d.moved = true;
   if (d.which === 'util') { commit(p => { const ln = p.lineups?.[d.idx]; if (ln) ln.at = pt; }); return; }
+  if (d.which === 'util2') { commit(p => { const ln = p.lineups?.[d.idx]; if (ln) ln.at2 = pt; }); return; }
   commit(p => {
     const pl = p.plans.find(q => q.player === d.player);
     if (!pl) return;
@@ -188,9 +189,9 @@ function onMove(ev: PointerEvent) {
   });
 }
 // util-lineup markers drag independently of a player plan (they key off index)
-function startDragUtil(idx: number, ev: PointerEvent) {
+function startDragUtil(idx: number, ev: PointerEvent, which: 'util' | 'util2' = 'util') {
   ev.stopPropagation();
-  drag = { player: '', which: 'util', tgt: 'hold', idx, from: toImg(ev.clientX, ev.clientY), moved: false };
+  drag = { player: '', which, tgt: 'hold', idx, from: toImg(ev.clientX, ev.clientY), moved: false };
   (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
   ev.preventDefault();
 }
@@ -314,6 +315,16 @@ const warnCount = computed(() => {
 function addLineup(kind: UtilKind) {
   commit(p => { (p.lineups ??= []).push({ player: props.team.players[0].id, kind, at: [460, 380], t: 0.25 }); });
 }
+// an authored WALL: a smoke lineup with two endpoints — the manager draws the
+// capsule the engine will field (the Viper/Harbor setup, drag both ends)
+function addWall() {
+  commit(p => { (p.lineups ??= []).push({ player: props.team.players[0].id, kind: 'smoke', at: [410, 370], at2: [530, 370], t: 0.25 }); });
+}
+// wall thickness mirrors the engine (WALL_R + WALL_R_UTIL·u)
+function wallThick(ln: { player: string }): number {
+  const u = ((props.team.players.find(q => q.id === ln.player)?.attr.utility ?? 50) / 100) * 0.9;
+  return 24 + 12 * u;
+}
 function removeLineup(i: number) {
   commit(p => { p.lineups?.splice(i, 1); if (p.lineups && p.lineups.length === 0) delete p.lineups; });
 }
@@ -348,9 +359,12 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         <path v-for="pl in play.plans" :key="'cone' + pl.player" :d="coneD(pl)" class="pe-cone" :class="side" />
       </g>
 
-      <!-- utility lineups: translucent reach circles (drawn low, click-through) -->
-      <circle v-for="(ln, i) in (play.lineups || [])" :key="'uc' + i"
-              :cx="ln.at[0]" :cy="ln.at[1]" :r="utilRadius(ln)" class="pe-util-r" :class="ln.kind" />
+      <!-- utility lineups: translucent reach circles; a WALL draws its capsule -->
+      <template v-for="(ln, i) in (play.lineups || [])" :key="'uc' + i">
+        <line v-if="ln.at2" :x1="ln.at[0]" :y1="ln.at[1]" :x2="ln.at2[0]" :y2="ln.at2[1]"
+              class="pe-wall-r" :stroke-width="wallThick(ln) * 2" />
+        <circle v-else :cx="ln.at[0]" :cy="ln.at[1]" :r="utilRadius(ln)" class="pe-util-r" :class="ln.kind" />
+      </template>
 
       <!-- rotation paths: hold → (waypoints) → rotate target -->
       <g v-for="pl in play.plans" :key="'rp' + pl.player">
@@ -404,11 +418,18 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
                 @pointerdown="startDrag(pl.player, 'face', 'hold', 0, $event)" />
       </g>
 
-      <!-- utility lineup centers (draggable) -->
+      <!-- utility lineup centers (draggable; a wall's SECOND endpoint too) -->
       <g v-for="(ln, i) in (play.lineups || [])" :key="'um' + i" class="pe-mark pe-util" :class="ln.kind"
          :transform="`translate(${ln.at[0]},${ln.at[1]})`" @pointerdown="startDragUtil(i, $event)">
         <circle r="9" class="pe-util-c" />
-        <text class="pe-util-ic" y="3.5">{{ ln.kind === 'smoke' ? '◍' : ln.kind === 'flash' ? '✸' : '◉' }}</text>
+        <text class="pe-util-ic" y="3.5">{{ ln.at2 ? '▮' : ln.kind === 'smoke' ? '◍' : ln.kind === 'flash' ? '✸' : '◉' }}</text>
+      </g>
+      <g v-for="(ln, i) in (play.lineups || [])" :key="'um2' + i">
+        <g v-if="ln.at2" class="pe-mark pe-util smoke" :transform="`translate(${ln.at2[0]},${ln.at2[1]})`"
+           @pointerdown="startDragUtil(i, $event, 'util2')">
+          <circle r="9" class="pe-util-c" />
+          <text class="pe-util-ic" y="3.5">▮</text>
+        </g>
       </g>
     </svg>
 
@@ -484,11 +505,12 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
       <div class="pe-util-head">
         <span>Utility lineups</span>
         <button class="pe-add smoke" @click="addLineup('smoke')">+ smoke</button>
+        <button class="pe-add smoke" @click="addWall()" title="a smoke WALL — drag both endpoints to lay the capsule across a lane">+ wall</button>
         <button class="pe-add flash" @click="addLineup('flash')">+ flash</button>
         <button class="pe-add recon" @click="addLineup('recon')">+ recon</button>
       </div>
       <div v-for="(ln, i) in (play.lineups || [])" :key="'ur' + i" class="pe-row util" :class="ln.kind">
-        <span class="pe-util-tag" :class="ln.kind">{{ ln.kind }}</span>
+        <span class="pe-util-tag" :class="ln.kind">{{ ln.at2 ? 'wall' : ln.kind }}</span>
         <select :value="ln.player" @change="setUtilCaster(i, ($event.target as HTMLSelectElement).value)">
           <option v-for="o in team.players" :key="o.id" :value="o.id">{{ o.handle }}</option>
         </select>

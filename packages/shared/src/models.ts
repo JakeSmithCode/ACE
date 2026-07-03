@@ -137,7 +137,9 @@ export type UtilKind = 'smoke' | 'flash' | 'recon';
 export interface Lineup {
   player: string;     // caster (player id)
   kind: UtilKind;
-  at: Vec2;           // where it lands
+  at: Vec2;           // where it lands (a WALL's first endpoint when `at2` is set)
+  at2?: Vec2;         // smoke only: the far endpoint — the cloud becomes a WALL
+                      // (a capsule from at to at2), the authored Viper/Harbor setup
   t: number;          // when it deploys (0..1)
 }
 

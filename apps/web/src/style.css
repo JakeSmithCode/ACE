@@ -409,6 +409,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-cone.def{fill:rgba(255,92,110,.13);stroke:rgba(255,92,110,.28);stroke-width:1}
 .pe-lane{fill:none;stroke:rgba(235,200,90,.4);stroke-width:3;stroke-dasharray:4 9;stroke-linecap:round;pointer-events:none}
 .pe-covchip{color:#7fe3a8;font-size:13px;font-style:normal;cursor:help}
+.pe-wall-r{stroke:rgba(156,158,170,.3);stroke-linecap:round;pointer-events:none}
 .pe-step-ix{font-family:var(--label);font-size:10px;color:var(--gold);font-style:normal;letter-spacing:.03em}
 .pe-trig.chained{border-left:2px solid rgba(235,200,90,.35);padding-left:6px;margin-left:2px}
 /* utility lineups */

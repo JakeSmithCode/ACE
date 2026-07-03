@@ -1038,9 +1038,19 @@ function simulateRound(
     const u = caster ? (caster.p.attr.utility / 100) * caster.utilFactor : 0.5;
     const r = ln.kind === 'smoke' ? SMOKE_R + SMOKE_R_UTIL * u : PULSE_R + PULSE_R_UTIL * u;
     const t1 = ln.t + (ln.kind === 'smoke' ? SMOKE_DUR + SMOKE_DUR_UTIL * u : PULSE_DUR + PULSE_DUR_UTIL * u);
+    if (ln.kind === 'smoke' && ln.at2) {
+      // an authored WALL: the manager drew the capsule's two endpoints. Reach
+      // (thickness) still expresses the caster's utility; the event carries the
+      // centre + far endpoint so the viewer draws the same rotated capsule.
+      const wr = WALL_R + WALL_R_UTIL * u;
+      smokes.push({ side: ln.side, c: ln.at, c2: ln.at2, r: wr, t0: ln.t, t1 });
+      const mid: Vec2 = [(ln.at[0] + ln.at2[0]) / 2, (ln.at[1] + ln.at2[1]) / 2];
+      if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: 'smoke', side: ln.side, at: mid, at2: ln.at2, r: wr, until: t1 });
+    } else {
     if (ln.kind === 'smoke') smokes.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
     else pulses.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
     if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind, side: ln.side, at: ln.at, r, until: t1 });
+    }
   }
   // A sentinel trap doesn't just reveal — it SLOWS an enemy who crosses it (denial,
   // not just info): any agent whose path passes through an enemy trap zone has their
