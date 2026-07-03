@@ -417,6 +417,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .pe-layers{float:right;display:inline-flex;gap:6px}
 .pe-layers button{font-family:var(--label);font-size:10px;letter-spacing:.05em;padding:2px 8px;background:rgba(120,140,160,.08);color:var(--muted);border:1px solid rgba(120,140,160,.25);cursor:pointer}
 .pe-layers button.on{background:rgba(34,211,238,.12);color:var(--att);border-color:rgba(34,211,238,.4)}
+/* opponent ghosts — where the enemy actually set up across the re-simmed rounds */
+.pe-ghost{pointer-events:all;cursor:help}
+.pe-ghost-c{fill:rgba(255,92,110,.10);stroke:rgba(255,92,110,.55);stroke-width:1.4;stroke-dasharray:3 3}
+.pe-ghost-q{fill:#ff5c6e;font:700 12px 'Chakra Petch',monospace;text-anchor:middle}
+.pe-ghost.att .pe-ghost-c{fill:rgba(34,211,238,.10);stroke:rgba(34,211,238,.55)}
+.pe-ghost.att .pe-ghost-q{fill:#22d3ee}
 .pe-cone{opacity:.85;mix-blend-mode:screen;pointer-events:none}
 .pe-cone.att{fill:rgba(34,211,238,.13);stroke:rgba(34,211,238,.28);stroke-width:1}
 .pe-cone.def{fill:rgba(255,92,110,.13);stroke:rgba(255,92,110,.28);stroke-width:1}

@@ -11,7 +11,7 @@ import { MAX_ROUTE_WAYPOINTS as CAP, MAX_ROTATE_STEPS } from '@ace/shared';
 import type { Play, PlayerPlan, RotateStep, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
 import { coverOf, pathfind, type Navmesh } from '@ace/maps';
 
-const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh }>();
+const props = defineProps<{ team: Team; mapUrl: string; play: Play; side: 'att' | 'def'; mode: 'attack' | 'defense'; atkSpawn: Vec2; sites: { A: Vec2; B: Vec2; C?: Vec2 }; nav: Navmesh; ghosts?: { pos: Vec2; n: number }[] }>();
 const emit = defineEmits<{ (e: 'update', play: Play): void }>();
 
 // --- walkability feedback: flag holds/waypoints in a wall and route segments
@@ -66,6 +66,11 @@ function faceNub(pl: PlayerPlan): Vec2 {
 const FOV_HALF = 1.05, CONE_RANGE = 150, CONE_RAYS = 14;
 const showCones = ref(true);
 const showLanes = ref(true);
+// --- opponent ghosts: where the enemy ACTUALLY set up across the re-simmed
+// rounds (passed in by the parent — the engine's real placements). Opacity and
+// size scale with how often a spot recurred, so their read stack reads at a glance.
+const showGhosts = ref(true);
+const ghostMax = computed(() => Math.max(1, ...(props.ghosts ?? []).map(g => g.n)));
 function coneD(pl: PlayerPlan): string {
   if (inWall(pl.pos)) return '';
   const nb = faceNub(pl);
@@ -390,6 +395,17 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
       <image :href="mapUrl" x="0" y="0" width="1000" height="1000" preserveAspectRatio="none" />
       <rect x="0" y="0" width="1000" height="1000" class="pe-scrim" @pointerdown="onBg" />
 
+      <!-- opponent ghosts: where the enemy actually set up in the re-simmed rounds -->
+      <g v-if="showGhosts && ghosts?.length" class="pe-ghosts">
+        <g v-for="(gh, i) in ghosts" :key="'gh' + i" class="pe-ghost" :class="side === 'att' ? 'def' : 'att'"
+           :transform="`translate(${gh.pos[0].toFixed(0)},${gh.pos[1].toFixed(0)})`"
+           :style="{ opacity: (0.3 + 0.6 * Math.min(1, gh.n / ghostMax)).toFixed(2) }">
+          <title>the enemy {{ mode === 'attack' ? 'set up' : 'hit' }} here in {{ gh.n }} of the re-simmed rounds</title>
+          <circle :r="(9 + Math.min(7, gh.n * 1.2)).toFixed(1)" class="pe-ghost-c" />
+          <text class="pe-ghost-q" y="3.4">?</text>
+        </g>
+      </g>
+
       <!-- attacker approach lanes (the engine's A*): what the defense must cover -->
       <g v-if="showLanes">
         <polyline v-for="(ln, i) in lanes" :key="'lane' + i" :points="lanePts(ln)" class="pe-lane" />
@@ -502,6 +518,8 @@ function utilRadius(ln: { player: string; kind: UtilKind }): number {
         <span class="pe-layers">
           <button :class="{ on: showCones }" @click="showCones = !showCones" title="each hold's wall-clipped vision cone — what they actually watch">◔ cones</button>
           <button :class="{ on: showLanes }" @click="showLanes = !showLanes" title="the A* approach lanes the attack travels — what your setup must cover">≈ lanes</button>
+          <button :class="{ on: showGhosts }" @click="showGhosts = !showGhosts"
+                  :title="mode === 'attack' ? 'where the enemy defense actually set up across the re-simmed rounds — their real read stack, from the engine' : 'where the enemy attack actually hit across the re-simmed rounds — their real execute spots, from the engine'">⍰ enemy</button>
         </span>
       </div>
       <div v-for="pl in play.plans" :key="pl.player" class="pe-row"

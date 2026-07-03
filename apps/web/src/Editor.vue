@@ -4,8 +4,8 @@
 // you tune here is what your club runs in its real fixtures. Team 1 is your next
 // opponent, editable locally for testing (those edits don't persist). Re-sims
 // live in the browser, your comp included.
-import { onMounted, onUnmounted, reactive, ref } from 'vue';
-import type { MatchInput, Tactics, Team, Play } from '@ace/shared';
+import { onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
+import type { MatchInput, MatchTimeline, Tactics, Team, Play } from '@ace/shared';
 import { simulateMatch, PATCH } from '@ace/engine';
 import { ANCHORS } from '@ace/maps';
 import { Viewer } from './viewer';
@@ -65,10 +65,41 @@ const bump = reactive({ n: 0 });
 const authoring = ref<{ team: number; side: Side } | null>(null);
 const isOpen = (i: number, side: Side) => authoring.value?.team === i && authoring.value?.side === side;
 
+// --- the OPPONENT-GHOST overlay: where the enemy ACTUALLY set up, aggregated
+// from the re-simmed rounds you're authoring against — the engine's real
+// placements (their read stack, their execute fan), never a hand-mirrored guess.
+// Attack authoring shows the enemy DEFENSE's setup spots (round `spawns` — the
+// holds they take before contact); defense authoring shows the enemy ATTACK's
+// arrival points (each move's leg-0 path end — the execute fan spot). Nearby
+// occurrences cluster into one stronger ghost, so a stack reads as a stack.
+const lastTl = shallowRef<MatchTimeline | null>(null);
+const ghosts = ref<{ pos: [number, number]; n: number }[]>([]);
+function refreshGhosts() {
+  const tl = lastTl.value, a = authoring.value;
+  if (!tl || !a) { ghosts.value = []; return; }
+  const enemy = new Set(tl.teams[1 - a.team].players.map(p => p.handle));
+  const pts: [number, number][] = [];
+  for (const r of tl.rounds) {
+    if ((r.attacker === a.team) !== (a.side === 'attack')) continue;
+    if (a.side === 'attack') { for (const h of enemy) { const s = r.spawns[h]; if (s) pts.push([s[0], s[1]]); } }
+    else for (const e of r.events) if (e.kind === 'move' && enemy.has(e.agent)) { const p = e.path[e.path.length - 1]; pts.push([p[0], p[1]]); }
+  }
+  const G = 34;   // cluster grid (image units) — repeated setups merge into one ghost
+  const cells = new Map<string, { x: number; y: number; n: number }>();
+  for (const p of pts) {
+    const k = `${Math.round(p[0] / G)}:${Math.round(p[1] / G)}`;
+    const c = cells.get(k);
+    if (c) { c.x += p[0]; c.y += p[1]; c.n++; } else cells.set(k, { x: p[0], y: p[1], n: 1 });
+  }
+  ghosts.value = [...cells.values()].map(c => ({ pos: [c.x / c.n, c.y / c.n] as [number, number], n: c.n }))
+    .sort((q, z) => z.n - q.n).slice(0, 30);
+}
+
 function toggleAuthor(i: number, side: Side) {
   if (isOpen(i, side)) { authoring.value = null; return; }
   if (!playRef(i, side).play) playRef(i, side).play = starterFor(teams[i], side);
   authoring.value = { team: i, side };
+  refreshGhosts();
 }
 function clearPlay(i: number, side: Side) {
   playRef(i, side).play = undefined;
@@ -91,6 +122,8 @@ function resim() {
     };
     const tl = simulateMatch(input, nav, FORKS);
     score.value = tl.finalScore;
+    lastTl.value = tl;
+    refreshGhosts();
     let aSum = 0, aN = 0, dSum = 0, dN = 0;
     const per: Record<string, { a: number; an: number; d: number; dn: number }> = {};
     for (const r of tl.rounds) {
@@ -196,6 +229,7 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
         :atk-spawn="ATK_SPAWN"
         :sites="SITES"
         :nav="w.getNav()!"
+        :ghosts="ghosts"
         @update="(p) => onPlay(authoring!.team, authoring!.side, p)"
       />
     </div>
