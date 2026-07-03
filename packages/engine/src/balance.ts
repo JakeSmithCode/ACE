@@ -26,9 +26,16 @@ function mirror(t: Team): Team {
 }
 
 const arg = (n: string, d: string): string => { const i = process.argv.indexOf('--' + n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
+const has = (n: string): boolean => process.argv.includes('--' + n);
 const seeds = parseInt(arg('seeds', '80'), 10);
 const only = arg('map', '');
-const maps = only ? [only as MapId] : ALL;
+// --pool: measure only the curated rotation; --check: exit non-zero if any
+// measured map flags — the CI gate that stops a tuning change from silently
+// breaking the pool (import is script-level only; the engine lib stays pure).
+const { MAP_POOL } = await import('../../world/src/resolve.js');
+const maps = only ? [only as MapId] : has('pool') ? MAP_POOL : ALL;
+const check = has('check');
+let flagged = 0;
 
 const home = NOCTURNE, away = mirror(NOCTURNE);
 
@@ -55,6 +62,11 @@ for (const map of maps) {
   const mixStr = `${f(pct(mix.detonation || 0))}/${f(pct(mix.defuse || 0))}/${f(pct(mix.elimination || 0))}/${f(pct(mix.time || 0))}`;
   // flag maps whose attacker share strays from a healthy band, or that stall a lot
   const flag = atk >= 58 ? 'ATK-SIDED' : atk <= 42 ? 'DEF-SIDED' : pct(mix.time || 0) >= 12 ? 'STALLY' : 'ok';
+  if (flag !== 'ok') flagged++;
   console.log(`  ${map.padEnd(8)} ${atk.toFixed(1).padStart(6)} ${pct(plants).toFixed(1).padStart(7)}   ${mixStr.padEnd(18)} ${flag}`);
 }
 console.log('');
+if (check) {
+  if (flagged) { console.error(`  ✗ ${flagged} measured map(s) flagged — the pool is not clean.`); process.exit(1); }
+  console.log('  ✓ every measured map is in band.');
+}
