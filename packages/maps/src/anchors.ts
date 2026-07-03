@@ -30,7 +30,11 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   haven:    { atkSpawn: [850, 520], sites: { A: [368, 216], B: [344, 470], C: [360, 772] }, mid: [607, 502] },
   icebox:   { atkSpawn: [850, 540], sites: { A: [608, 208], B: [720, 800] }, mid: [757, 522] },
   lotus:    { atkSpawn: [500, 850], sites: { A: [804, 320], B: [488, 372], C: [182, 464] }, mid: [494, 621] },
-  pearl:    { atkSpawn: [533, 860], sites: { A: [848, 312], B: [176, 400] }, mid: [522, 608] },
+  // pearl's sites likewise pulled inward (±45 toward mid — 67.5%→51.6% ATK, the
+  // same measured rotation-tax fix; ±90 overshoots STALLY). Icebox RESISTED the
+  // site lever in three directions (35-40.5% DEF across toward-spawn/away/single-
+  // site probes) — its lean is not site placement; it stays out of the pool.
+  pearl:    { atkSpawn: [533, 860], sites: { A: [803, 328], B: [221, 412] }, mid: [522, 608] },
   split:    { atkSpawn: [130, 520], sites: { A: [320, 88],  B: [320, 816] }, mid: [225, 486] },
   sunset:   { atkSpawn: [520, 860], sites: { A: [816, 368], B: [136, 432] }, mid: [498, 630] },
 };

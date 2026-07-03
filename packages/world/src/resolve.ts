@@ -11,11 +11,12 @@ import type { Fixture, Matchday } from './schedule.js';
 /** The curated, side-balanced map pool a fixture is played on (the unbalanced
  *  maps stay out of rotation until tuned — like a real comp pool). Canonical here
  *  so the single-player store and the server tick assign the same map to the same
- *  fixture. Haven and lotus RETURNED with the site-anchor pass: their outer site
- *  anchors moved to the plaza mouths (shorter A↔C rotations — the measured fix
- *  for their 60-62% ATK lean; see anchors.ts), landing both `ok` under
- *  `pnpm balance` (54.2 / 54.3). */
-export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'split'];
+ *  fixture. Haven, lotus, and pearl RETURNED with the site-anchor pass: outer
+ *  site anchors moved toward the middle (shorter cross-map rotations — the
+ *  measured fix for their 60-67% ATK lean; see anchors.ts), landing all three
+ *  `ok` under `pnpm balance` (54.2 / 54.3 / 51.6). Icebox resisted the site
+ *  lever in three directions and stays out; sunset still stalls. */
+export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'pearl', 'split'];
 /** Deterministic per-fixture map from its seed — a result is reproducible (re-sim
  *  to watch) because the map is a pure function of the same seed. */
 export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];
