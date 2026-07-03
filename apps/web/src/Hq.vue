@@ -178,7 +178,9 @@ function watch(r: NonNullable<typeof watching.value>, mapOverride?: string) {
   // re-sim from the fixture seed at higher fork count for True Odds; buildInput
   // overlays YOUR comp + tactics + map affinity, so watching shows your plan.
   const out = simulateMatch(w.buildInput(r, r.seed, map), nav, 50);
-  requestAnimationFrame(() => { viewer?.destroy(); if (watchHost.value) viewer = new Viewer(watchHost.value, out, `/${map}.png`, nav as any); });
+  // watching YOUR fixture defaults to the team's-eye fog view (toggleable to observer)
+  const pov = r.home === w.myClub.value ? 0 as const : r.away === w.myClub.value ? 1 as const : undefined;
+  requestAnimationFrame(() => { viewer?.destroy(); if (watchHost.value) viewer = new Viewer(watchHost.value, out, `/${map}.png`, nav as any, { pov }); });
 }
 
 function kickoff() { for (let i = 0; i < 3 && !done.value; i++) w.resolveDay(); }

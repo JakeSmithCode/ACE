@@ -121,6 +121,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .np{display:none}
 .ace-ag.dead .xm{display:block;fill:var(--muted)}
 .ace-ag.dead.att .xm{fill:rgba(34,211,238,.7)}.ace-ag.dead.def .xm{fill:rgba(255,92,110,.7)}
+/* fog of war: last-known-position ghosts + the POV toggle */
+.ace-ghost circle{fill:rgba(120,130,145,.18);stroke:rgba(170,180,195,.55);stroke-width:1.5;stroke-dasharray:3 3}
+.ace-ghost text{fill:rgba(200,208,220,.8);font-family:var(--label);font-size:13px;font-weight:700;text-anchor:middle}
 /* follow cam: the locked player wears a gold dashed halo */
 .ace-ag.followed .ring{stroke:var(--gold)!important;stroke-dasharray:5 3}
 /* seek-bar event ticks: the round's rhythm at a glance */

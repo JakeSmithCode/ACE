@@ -242,6 +242,18 @@ export class Viewer {
   private fullBox = { x: 0, y: 0, w: 1000 };
   private camBtn!: HTMLElement;
   private followHandle: string | null = null;   // click an agent → the director locks onto them
+  // FOG OF WAR (team POV): when watching YOUR club, see only what your five see —
+  // an enemy renders only while a living teammate has actual vision of them
+  // (cone + walls + enemy smoke, mirrored from the engine), while a friendly
+  // recon/trap sweep reveals its circle, gunfire reveals both fight participants
+  // for a beat, and deaths are always known (every kill involves your team).
+  private pov: 0 | 1 | null = null;      // which team is "yours" (null = observer only)
+  private povOn = false;                 // fog active (toggleable back to observer)
+  private povBtn: HTMLElement | null = null;
+  private fireReveals: { h: string; t: number }[] = [];   // shots fired → brief position reveal
+  private ghosts = new Map<string, { p: Vec2; t: number }>();   // last-known-position markers
+  private ghostEls = new Map<string, SVGGElement>();
+  private lastSeenNow = new Set<string>();      // last frame's visible-enemy set (ghosts spawn on the edge)
   private sfx = new Sfx();
   private sndBtn!: HTMLElement;
   private lastSpikeTick = -1;   // spike-countdown beeps, indexed by round-time bucket
@@ -283,9 +295,11 @@ export class Viewer {
   private aliveEls: [HTMLElement, HTMLElement] = [null as any, null as any];   // 5 alive-pips per team
   private mpt!: HTMLElement;                          // MATCH POINT tag in the scorebar
 
-  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean; sfx?: boolean } = {}) {
+  constructor(root: HTMLElement, tl: MatchTimeline, mapUrl: string, nav: NavGrid | null = null, opts: { live?: boolean; sfx?: boolean; pov?: 0 | 1 } = {}) {
     this.root = root; this.tl = tl; this.mapUrl = mapUrl; this.nav = nav; this.live = !!opts.live;
     this.sfx.enabled = opts.sfx !== false;
+    this.pov = opts.pov ?? null;
+    this.povOn = this.pov != null;   // watching your club defaults to the team's-eye view
     tl.teams.forEach((tm, i) => tm.players.forEach(p => this.teamOf.set(p.handle, i as 0 | 1)));
     this.build();
     this.loadRound(0);
@@ -387,6 +401,7 @@ export class Viewer {
         <button class="speed heat" id="ace-heat" title="Match heatmap — where each side dies across the whole match">▦ Heatmap</button>
         <button class="speed cam on" id="ace-cam" title="Director camera — auto-frames the action like a broadcast observer; off = full map">🎥 Director</button>
         <button class="speed snd on" id="ace-snd" title="Broadcast audio — kills, plants, the spike countdown">🔊 Sound</button>
+        <button class="speed pov" id="ace-pov" title="Team POV — fog of war: see only what YOUR five see (off = observer view)">⬢ Team POV</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -454,6 +469,12 @@ export class Viewer {
     this.utilBtn.onclick = () => { this.showUtil = !this.showUtil; this.utilBtn.classList.toggle('on', this.showUtil); this.abLayer.style.display = this.showUtil ? '' : 'none'; this.render(); };
     this.heatBtn = ctl.querySelector('#ace-heat') as HTMLElement;
     this.heatBtn.onclick = () => this.toggleHeat();
+    this.povBtn = ctl.querySelector('#ace-pov') as HTMLElement;
+    if (this.pov == null) this.povBtn.style.display = 'none';
+    else {
+      this.povBtn.classList.toggle('on', this.povOn);
+      this.povBtn.onclick = () => { this.povOn = !this.povOn; this.povBtn!.classList.toggle('on', this.povOn); this.ghosts.clear(); this.render(); };
+    }
     this.sndBtn = ctl.querySelector('#ace-snd') as HTMLElement;
     this.sndBtn.classList.toggle('on', this.sfx.enabled);
     this.sndBtn.onclick = () => { this.sfx.enabled = !this.sfx.enabled; this.sndBtn.classList.toggle('on', this.sfx.enabled); };
@@ -611,6 +632,28 @@ export class Viewer {
       if (!this.walkAt(s[0], s[1]) || !this.segClear(from, s)) cov++;
     }
     return cov / 2;
+  }
+  /** Does an ENEMY smoke sit on the sightline p1→p2? Mirrors the engine's one-way
+   *  blindedThrough for the fog: your own clouds never blind you. Wall smokes are
+   *  checked as their capsule (segment-to-segment distance). */
+  private smokeBlocked(viewerTeam: 0 | 1, p1: Vec2, p2: Vec2): boolean {
+    for (const ab of this.abilities) {
+      if (ab.ability !== 'smoke' || ab.side === viewerTeam || ab.at == null || ab.r == null) continue;
+      if (this.T < ab.t || this.T > (ab.until ?? ab.t)) continue;
+      const at = ab.at as Vec2, at2 = (ab as { at2?: Vec2 }).at2;
+      if (at2) {
+        const mir: Vec2 = [2 * at[0] - at2[0], 2 * at[1] - at2[1]];   // the capsule spans at2 ↔ its mirror through the centre
+        if (this.segSegDist(p1, p2, at2, mir) <= (ab.r as number)) return true;
+      } else if (this.pointSegDist(at, p1, p2) <= (ab.r as number)) return true;
+    }
+    return false;
+  }
+  /** Min distance between segments a→b and c→d (mirrors the engine's segSegDist). */
+  private segSegDist(a: Vec2, b: Vec2, c: Vec2, d: Vec2): number {
+    const o = (p: Vec2, q: Vec2, r2: Vec2) => (q[0] - p[0]) * (r2[1] - p[1]) - (q[1] - p[1]) * (r2[0] - p[0]);
+    const o1 = o(a, b, c), o2 = o(a, b, d), o3 = o(c, d, a), o4 = o(c, d, b);
+    if (((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0))) return 0;
+    return Math.min(this.pointSegDist(c, a, b), this.pointSegDist(d, a, b), this.pointSegDist(a, c, d), this.pointSegDist(b, c, d));
   }
   private pointSegDist(p: Vec2, a: Vec2, b: Vec2): number {
     const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
@@ -824,6 +867,18 @@ export class Viewer {
       const hold: Vec2 = mv.hold ?? headingAtEnd(mv.path);
       return { handle: mv.agent, side, path: mv.path, arrive: mv.arrive, departT: mv.departT ?? 0, deathT: death.get(mv.agent) ?? null, hold, node: g, trail: tr, tp: [], cone, pauses: mv.pauses ?? [], ff: [], hpEv: [], hpEl: g.querySelector('.hp') as SVGCircleElement, legs: mv.legs, rox: 0, roy: 0, rang: null };
     });
+
+    // FOG reveals from GUNFIRE: every kill/exchange involves one of each team, so
+    // both participants' positions are known to both teams for a beat. Ghost markers
+    // (last-known position) reset with the round.
+    this.fireReveals = [];
+    for (const e of r.events) {
+      if (e.kind === 'kill') { this.fireReveals.push({ h: e.killer, t: e.t }, { h: e.victim, t: e.t }); }
+      else if (e.kind === 'dmg') this.fireReveals.push({ h: e.from, t: e.t });
+    }
+    this.ghosts.clear();
+    for (const el2 of this.ghostEls.values()) el2.remove();
+    this.ghostEls.clear();
 
     // live HP, reconstructed from the round's dmg/kill events (the engine's own
     // attrition data): each hit stamps the TARGET's remaining hp, each kill the
@@ -1204,6 +1259,7 @@ export class Viewer {
 
   private render(dt = 16.7) {
     const snap = this.snapNext; this.snapNext = false;
+    if (snap) { this.ghosts.clear(); this.lastSeenNow = new Set(); }
     // utility on the map: persistent keyed nodes, ANIMATED as a pure function of
     // round-time T (scrub/pause-correct — never wall-clock): a smoke BLOOMS to its
     // gameplay dome, holds, then DISSIPATES as it expires; a flash/recon BURSTS and
@@ -1275,6 +1331,45 @@ export class Viewer {
         }
       }
     }
+    // FOG OF WAR: which enemies do YOUR five actually see right now? A teammate's
+    // real vision (cone + walls + enemy smoke — the engine's own test), a friendly
+    // recon/trap sweep, or recent gunfire. Everything else is hidden, leaving a
+    // fading last-known-position ghost. Deaths are always known (the feed is
+    // broadcast, and every kill involved your team).
+    const fogOn = this.povOn && this.pov != null && !this.showHeat;
+    const povSide: 'att' | 'def' = this.tl.rounds[this.roundIdx].attacker === this.pov ? 'att' : 'def';
+    const seen = new Set<string>();
+    if (fogOn) {
+      const friendlies = frame.filter(f => !f.dead && f.a.side === povSide);
+      for (const f of frame) {
+        if (f.a.side === povSide || f.dead) continue;
+        const h = f.a.handle, ep: Vec2 = [f.p[0], f.p[1]];
+        if (this.fireReveals.some(rv => rv.h === h && this.T >= rv.t && this.T <= rv.t + 0.035)) { seen.add(h); continue; }
+        let vis = false;
+        for (const ab of this.abilities) {
+          if ((ab.ability === 'recon' || ab.ability === 'trap') && ab.side === this.pov && ab.at && ab.r != null
+              && this.T >= ab.t && this.T <= (ab.until ?? ab.t)
+              && Math.hypot(ep[0] - (ab.at as Vec2)[0], ep[1] - (ab.at as Vec2)[1]) <= (ab.r as number)) { vis = true; break; }
+        }
+        if (!vis) for (const fr of friendlies) {
+          const fp: Vec2 = [fr.p[0], fr.p[1]];
+          if (Math.hypot(ep[0] - fp[0], ep[1] - fp[1]) > VISION) continue;
+          const face = faceLegs(fr.a, fr.a.legs, fr.a.hold, fr.prog, fr.a.hitch, fr.a.ff);
+          if (!this.seesTarget(fp, face, ep)) continue;
+          if (this.smokeBlocked(this.pov!, fp, ep)) continue;
+          vis = true; break;
+        }
+        if (vis) { seen.add(h); this.ghosts.delete(h); }
+        else {
+          // just slipped out of vision → drop a last-known marker at the spot
+          const g0 = this.ghosts.get(h);
+          if (!g0 && this.lastSeenNow.has(h)) this.ghosts.set(h, { p: ep, t: this.T });
+        }
+      }
+      // remember who was visible THIS frame (ghosts spawn on the visible→hidden edge)
+      this.lastSeenNow = seen;
+    }
+
     // CLUTCH: a side down to its last player vs 2+ enemies — flag the lone clutcher,
     // the moment a broadcast lives for. (Pre-plant only — post-plant is its own beat.)
     const liveAtt = frame.filter(f => !f.dead && f.a.side === 'att');
@@ -1306,6 +1401,11 @@ export class Viewer {
       const px = bx + a.rox, py = by + a.roy;    // dead: offset frozen at the death frame (no corpse slide)
       const q: Vec2 = this.nav && !dead && !this.walkAt(px, py) ? (this.nearestWalkable([px, py]) ?? [px, py]) : [px, py];
       a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})${agK !== 1 ? ` scale(${agK.toFixed(3)})` : ''}`);
+      // fog: a living unseen enemy doesn't render at all (their trail resets so a
+      // reappearance never draws a tell-tale line from where they've been)
+      const fogHidden = fogOn && !dead && a.side !== povSide && !seen.has(a.handle);
+      a.node.style.display = fogHidden ? 'none' : '';
+      if (fogHidden && a.tp.length) { a.tp = []; a.trail.setAttribute('points', ''); }
       a.node.classList.toggle('clutch', a === clutcher);
       a.node.classList.toggle('followed', a.handle === this.followHandle);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
@@ -1324,7 +1424,7 @@ export class Viewer {
         }
       }
       if (!dead) { a.tp.push(`${q[0].toFixed(0)},${q[1].toFixed(0)}`); if (a.tp.length > 16) a.tp.shift(); a.trail.setAttribute('points', a.tp.join(' ')); }
-      if (cones && !dead) {
+      if (cones && !dead && !(fogOn && a.side !== povSide)) {   // fog: enemy view cones are never yours to read
         const f = faceLegs(a, a.legs, a.hold, prog, a.hitch, a.ff);
         const ta = Math.atan2(f[1], f[0]);
         if (a.rang == null || snap) a.rang = ta;
@@ -1338,6 +1438,31 @@ export class Viewer {
         a.cone.style.display = '';
       } else a.cone.style.display = 'none';
     }
+    // last-known-position GHOSTS: a '?' marker where an enemy slipped out of vision,
+    // fading over a few seconds of round time (fog mode only)
+    if (fogOn) {
+      for (const [h, g0] of this.ghosts) {
+        const age = this.T - g0.t;
+        const enemy = this.agents.find(a2 => a2.handle === h);
+        if (age < 0 || age > 0.07 || (enemy?.deathT != null && this.T >= enemy.deathT)) {
+          this.ghosts.delete(h); this.ghostEls.get(h)?.remove(); this.ghostEls.delete(h);
+          continue;
+        }
+        let ge = this.ghostEls.get(h);
+        if (!ge) {
+          ge = svg('g') as SVGGElement;
+          ge.setAttribute('class', 'ace-ghost');
+          ge.innerHTML = '<circle r="11"></circle><text y="4.5">?</text>';
+          this.agLayer.appendChild(ge);
+          this.ghostEls.set(h, ge);
+        }
+        ge.setAttribute('transform', `translate(${g0.p[0].toFixed(1)},${g0.p[1].toFixed(1)})`);
+        ge.style.opacity = (0.75 * (1 - age / 0.07)).toFixed(2);
+      }
+    } else if (this.ghostEls.size) {
+      for (const ge of this.ghostEls.values()) ge.remove();
+      this.ghostEls.clear(); this.ghosts.clear();
+    }
     if (this.spikePos) this.spike.setAttribute('transform', `translate(${this.spikePos[0]},${this.spikePos[1]})`);
     // DIRECTOR CAMERA — frame the story like a broadcast observer. The interest
     // set: agents IN CONTACT (an enemy within ~260u — a fight brewing or live);
@@ -1349,9 +1474,14 @@ export class Viewer {
       const live = frame.filter(f => !f.dead);
       const pts: Vec2[] = [];
       // a FOLLOWED player owns the frame (falling back to the action if they're down)
-      const fa = this.followHandle ? live.find(f => f.a.handle === this.followHandle) : null;
+      const fa = this.followHandle ? live.find(f => f.a.handle === this.followHandle
+        && !(fogOn && f.a.side !== povSide && !seen.has(f.a.handle))) : null;   // can't follow what you can't see
       if (fa) pts.push([fa.p[0], fa.p[1]]);
-      else {
+      else if (fogOn) {
+        // the fog camera must not leak hidden positions: frame YOUR five + what they see
+        for (const f of live) if (f.a.side === povSide || seen.has(f.a.handle)) pts.push([f.p[0], f.p[1]]);
+        if (this.spikePos && this.T >= this.spikePlantT) pts.push(this.spikePos);
+      } else {
         for (const f of live) {
           if (live.some(g => g.a.side !== f.a.side && Math.hypot(g.p[0] - f.p[0], g.p[1] - f.p[1]) < 260)) pts.push([f.p[0], f.p[1]]);
         }

@@ -606,7 +606,8 @@ async function watchCupTie(t: CupTieView) {
     const out = simulateMatch(rep.snapshot, nav, 50);
     watching.value = { home: { tag: t.home.tag, name: t.home.name }, away: { tag: t.away.tag, name: t.away.name }, final: t.score, map, season: cupView.value?.season ?? 0, day: -1, slot: -1, cup: true };
     computeBox(out);
-    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
+    const pov = mine(t.home.tag) ? 0 as const : mine(t.away.tag) ? 1 as const : undefined;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
 
@@ -658,7 +659,8 @@ async function watchAt(s: number, d: number, slot: number) {
     const out = simulateMatch(rep.snapshot, nav, 50);
     watching.value = { home: fx.home, away: fx.away, final: fx.score ?? null, map, season: s, day: d, slot };
     computeBox(out);
-    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav); });
+    const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
 // --- watch a match LIVE, in the viewer, synced to the broadcast (no spoilers) ---
@@ -678,7 +680,8 @@ async function watchLive(fx: LiveFixture) {
     const tl = lt.timeline;
     watching.value = { home: fx.home, away: fx.away, final: lt.resolved ? tl.finalScore : null, map, season: season.value, day: DAY.value, slot: fx.slot, live: !lt.resolved };
     boxScore.value = null;
-    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, tl, `/${map}.png`, nav, { live: !lt.resolved }); });
+    const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, tl, `/${map}.png`, nav, { live: !lt.resolved, pov }); });
     if (lt.resolved) computeBox(tl);
     else startLivePoll(fx.slot);
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
