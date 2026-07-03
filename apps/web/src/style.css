@@ -78,8 +78,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* utility lifecycle nodes: one persistent <g> per ability, animated per frame as a pure
    function of round-time (bloom → hold → dissipate) — scrub/pause-correct by construction */
 .ace-abg{pointer-events:none}
-.ab-smoke .abf{fill:rgba(156,158,170,.5)}
-.ab-smoke .abe{fill:none;stroke:rgba(200,202,214,.65);stroke-width:2}
+.ab-smoke .abf{fill:url(#ace-smk)}
+.ab-smoke .abe{fill:none;stroke:rgba(200,202,214,.6);stroke-width:2}
+/* whose wall is it — a faint team-tinted rim on every cloud */
+.ab-smoke.att .abe,.ab-smoke.att .abe-cap{stroke:rgba(34,211,238,.5)}
+.ab-smoke.def .abe,.ab-smoke.def .abe-cap{stroke:rgba(255,92,110,.5)}
+/* the inner swirl — a dashed ring drifting with round time */
+.ab-smoke .absw{fill:none;stroke:rgba(220,224,232,.28);stroke-width:6;stroke-dasharray:10 26;stroke-linecap:round}
+/* WALL smokes (Viper/Harbor): a capsule across the lane */
+.ab-smoke .abf-cap{fill:rgba(156,158,170,.42)}
+.ab-smoke .abe-cap{fill:none;stroke-width:2;stroke-dasharray:12 9}
 .ab-flash .abb{fill:rgba(255,241,150,.26);stroke:rgba(255,241,150,.65);stroke-width:1.5}
 .ab-flash .abcore{fill:rgba(255,248,214,.9)}
 .ab-recon .abb{fill:rgba(120,210,255,.14);stroke:rgba(120,210,255,.6);stroke-width:1.5;stroke-dasharray:5 4}

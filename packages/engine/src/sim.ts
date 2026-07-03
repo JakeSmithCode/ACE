@@ -85,6 +85,9 @@ const SMOKE_T0 = 0.15, SMOKE_JITTER = 0.10;  // when a smoke blooms (normalized 
 const SMOKE_DUR = 0.20, SMOKE_DUR_UTIL = 0.18;
 const CTRL_RESMOKE_U = 0.5;                   // utility a controller needs to throw a SECOND smoke on the execute
 const RESMOKE_T0 = 0.30;                      // the second smoke blooms just after the first — sustained coverage through the hit
+const WALL_AGENTS = new Set(['Viper', 'Harbor']);   // wall-controllers: their smoke is a CAPSULE, not a sphere
+const WALL_LEN = 170;                         // wall total length (image units)
+const WALL_R = 24, WALL_R_UTIL = 12;          // wall half-thickness (24..36 with utility)
 const RESMOKE_R = 50, RESMOKE_R_UTIL = 38;    // a focused second wall on the connector (50..88)
 const RESMOKE_DUR = 0.16, RESMOKE_DUR_UTIL = 0.12;
 const RETAKE_SMOKE_U = 0.35;                  // utility a defense controller needs to have SAVED a retake smoke
@@ -296,7 +299,9 @@ const mapScale = (a: MapAnchors): number => charDist(a) / ASCENT_CHAR;
 
 /** A vision-blocking smoke and a first-shot-granting recon/flash pulse — the
  *  two ways utility reaches into a round. Both are pure geometry over time. */
-interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
+/** A smoke cloud. `c2` (optional) makes it a WALL — a capsule from c to c2 of
+ *  radius r (the Viper/Harbor kit identity) instead of a sphere at c. */
+interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; c2?: Vec2; }
 interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
 
 function unit(from: Vec2, to: Vec2): Vec2 {
@@ -311,6 +316,14 @@ function segDist(a: Vec2, b: Vec2, c: Vec2): number {
   const ab2 = abx * abx + aby * aby || 1;
   const t = Math.max(0, Math.min(1, ((c[0] - a[0]) * abx + (c[1] - a[1]) * aby) / ab2));
   return Math.hypot(c[0] - (a[0] + abx * t), c[1] - (a[1] + aby * t));
+}
+/** Min distance between segments a→b and c→d (a sightline vs a smoke WALL's
+ *  axis): 0 when they cross, else the closest endpoint-to-segment distance. */
+function segSegDist(a: Vec2, b: Vec2, c: Vec2, d: Vec2): number {
+  const o = (p: Vec2, q: Vec2, r2: Vec2) => (q[0] - p[0]) * (r2[1] - p[1]) - (q[1] - p[1]) * (r2[0] - p[0]);
+  const o1 = o(a, b, c), o2 = o(a, b, d), o3 = o(c, d, a), o4 = o(c, d, b);
+  if (((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0))) return 0;   // proper crossing
+  return Math.min(segDist(a, b, c), segDist(a, b, d), segDist(c, d, a), segDist(c, d, b));
 }
 /** Does a polyline `path` pass within `r` of point `c`? (a mover crossing a zone) */
 function pathHitsZone(path: Vec2[], c: Vec2, r: number): boolean {
@@ -446,10 +459,20 @@ function resolveRound(
   // plant time, and pushing it into the shared setup array would leak one run's
   // smoke into every other fork + the canonical pass (the fork-hygiene rule).
   smokes = smokes.slice();
-  // a smoke is directional: it blinds the ENEMY's vision through it, not the
-  // side that threw it (you play around your own smoke).
+  // a smoke is directional: an enemy cloud on the sightline blinds the viewer,
+  // never the side that threw it (you play around your own smoke). This one-way
+  // model is LOAD-BEARING twice over: it's what makes utility a net positive for
+  // its owner, and — measured — it's what makes site fights resolve at all. A
+  // symmetric-interior rule ("nobody sees into or out of a cloud, even its
+  // owner") was tried and was DEGENERATE: defenders converge INTO the attack's
+  // site cloud, nobody can acquire anybody, attackers plant free behind the
+  // curtain and rounds run to detonation (ascent 51.6→60.1 ATK, plant 55→69%,
+  // defuse 20→11%). Don't relitigate without a spray-the-smoke fight model.
+  // `c2` makes the cloud a WALL — a capsule, same directional rule.
+  const sightHits = (s: Smoke, p1: Vec2, p2: Vec2) =>
+    (s.c2 ? segSegDist(p1, p2, s.c, s.c2) : segDist(p1, p2, s.c)) <= s.r;
   const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
-    smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && segDist(p1, p2, s.c) <= s.r);
+    smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && sightHits(s, p1, p2));
   const pulseFor = (s: 0 | 1, p: Vec2, t: number): boolean =>
     pulses.some(u => u.side === s && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
   const atk = () => agents.filter(a => a.side === attacker && a.alive);
@@ -956,9 +979,24 @@ function simulateRound(
       // EXECUTE smoke: attackers smoke the defenders' hold (the site); defenders smoke the entry (the choke)
       const c = jitter(rng, isAtk ? sitePt : choke, 18);
       const t0 = SMOKE_T0 + rng.range(0, SMOKE_JITTER);
+      const isWall = WALL_AGENTS.has(loadouts.get(ag.handle)?.agent ?? '');
+      if (isWall) {
+        // a WALL-controller (Viper/Harbor) fields a capsule ACROSS the lane —
+        // perpendicular to the push axis at the same anchor (identical rng draws
+        // as the sphere, so the stream shape is untouched; only geometry differs).
+        // The kit identity is real: one long thin wall cuts a whole approach.
+        const axis = unit(A.atkSpawn, sitePt);
+        const perp: Vec2 = [-axis[1], axis[0]];
+        const e1: Vec2 = [c[0] - perp[0] * WALL_LEN / 2, c[1] - perp[1] * WALL_LEN / 2];
+        const e2: Vec2 = [c[0] + perp[0] * WALL_LEN / 2, c[1] + perp[1] * WALL_LEN / 2];
+        const wr = WALL_R + WALL_R_UTIL * u, t1w = t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u;
+        smokes.push({ side: ag.side, c: e1, c2: e2, r: wr, t0, t1: t1w });
+        events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, at2: e2, r: wr, until: t1w });
+      } else {
       const r = SMOKE_R + SMOKE_R_UTIL * u, t1 = t0 + SMOKE_DUR + SMOKE_DUR_UTIL * u;
       smokes.push({ side: ag.side, c, r, t0, t1 });
       events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: c, r, until: t1 });
+      }
       // SECOND smoke: a controller with kit to spare double-smokes the execute, walling
       // the CONNECTOR between mid and site — so the hit reads like real coordinated
       // utility (two walls up through the fight, not one), and a high-util controller

@@ -205,7 +205,7 @@ interface VAg {
 
 /** A persistent, keyed ability node — built once per round, animated per frame as a pure
  *  function of round-time T (scrub/pause-correct), instead of rebuilding DOM at 60Hz. */
-interface AbNode { e: Extract<Round['events'][number], { kind: 'ability' }>; g: SVGGElement; c1: SVGCircleElement; c2: SVGCircleElement; R: number; }
+interface AbNode { e: Extract<Round['events'][number], { kind: 'ability' }>; g: SVGGElement; c1: SVGCircleElement; c2: SVGCircleElement; R: number; sw?: SVGCircleElement; wall?: SVGGElement; wallEdge?: SVGRectElement; }
 
 const HITCH_DUR = 0.05;     // round-t the viewer pauses a trap-tripped agent (the visible stutter)
 const SPAWN_FAN = 34;       // lateral spacing of attackers across the spawn barrier (px, viewer-only)
@@ -358,6 +358,9 @@ export class Viewer {
       </radialGradient>
       <radialGradient id="heat1" cx="50%" cy="50%" r="50%">
         <stop offset="0%" stop-color="#ff5c6e" stop-opacity="0.55"/><stop offset="55%" stop-color="#ff5c6e" stop-opacity="0.16"/><stop offset="100%" stop-color="#ff5c6e" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="ace-smk" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#a0a3af" stop-opacity="0.6"/><stop offset="62%" stop-color="#9c9eaa" stop-opacity="0.46"/><stop offset="100%" stop-color="#9c9eaa" stop-opacity="0.1"/>
       </radialGradient>`;
     this.heatLayer = svg('g') as SVGGElement; this.heatLayer.setAttribute('class', 'ace-heat');
     // utility (smokes/flashes/traps) sits on the map surface, cones above it, then trails/agents
@@ -756,11 +759,26 @@ export class Viewer {
       g.setAttribute('class', `ace-abg ab-${e.ability} ${side}`);
       g.setAttribute('transform', `translate(${(e.at as Vec2)[0].toFixed(1)},${(e.at as Vec2)[1].toFixed(1)})`);
       g.style.display = 'none';
-      g.innerHTML = e.ability === 'smoke' ? '<circle class="abf"/><circle class="abe"/>'
+      const at2 = (e as { at2?: Vec2 }).at2;
+      if (e.ability === 'smoke' && at2) {
+        // a WALL smoke — a capsule from the centre through at2 (mirrored): drawn as
+        // a rounded rect rotated onto the axis, blooming out from the middle
+        const at = e.at as Vec2;
+        const hl = Math.hypot(at2[0] - at[0], at2[1] - at[1]);
+        const ang = Math.atan2(at2[1] - at[1], at2[0] - at[0]) * 180 / Math.PI;
+        const rr = (e.r as number) * 1.25;
+        const rect = (cls: string) => `<rect class="${cls}" x="${(-hl).toFixed(1)}" y="${(-rr).toFixed(1)}" width="${(2 * hl).toFixed(1)}" height="${(2 * rr).toFixed(1)}" rx="${rr.toFixed(1)}"/>`;
+        g.innerHTML = `<g transform="rotate(${ang.toFixed(1)})"><g class="abscale">${rect('abf-cap')}${rect('abe-cap')}</g></g>`;
+        this.abLayer.appendChild(g);
+        return { e, g, c1: null as unknown as SVGCircleElement, c2: null as unknown as SVGCircleElement, R,
+                 wall: g.querySelector('.abscale') as SVGGElement, wallEdge: g.querySelector('.abe-cap') as SVGRectElement };
+      }
+      g.innerHTML = e.ability === 'smoke' ? '<circle class="abf"/><circle class="abe"/><circle class="absw"/>'
         : e.ability === 'trap' ? '<circle class="abt"/><circle class="abeye" r="3.2"/>'
         : '<circle class="abb"/><circle class="abcore"/>';
       this.abLayer.appendChild(g);
-      return { e, g, c1: g.children[0] as SVGCircleElement, c2: g.children[1] as SVGCircleElement, R };
+      return { e, g, c1: g.children[0] as SVGCircleElement, c2: g.children[1] as SVGCircleElement, R,
+               sw: e.ability === 'smoke' ? g.children[2] as SVGCircleElement : undefined };
     });
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
@@ -1182,9 +1200,22 @@ export class Viewer {
       if (n.e.ability === 'smoke') {
         const bloom = easeOut(clamp01((this.T - t0) / AB_BLOOM));
         const fade = clamp01((t1 - this.T) / AB_FADE);
-        const r = n.R * (0.25 + 0.75 * bloom);
-        n.c1.setAttribute('r', r.toFixed(1)); n.c2.setAttribute('r', r.toFixed(1));
-        n.g.style.opacity = (0.3 + 0.7 * Math.min(bloom, fade)).toFixed(2);
+        if (n.wall) {
+          // the wall blooms out from its midpoint; its rim dashes DRIFT with round
+          // time (pure function of T — scrub-correct), so the cloud reads alive
+          n.wall.setAttribute('transform', `scale(${(0.2 + 0.8 * bloom).toFixed(3)})`);
+          n.wallEdge!.setAttribute('stroke-dashoffset', ((this.T - t0) * 700).toFixed(1));
+          n.g.style.opacity = (0.3 + 0.7 * Math.min(bloom, fade)).toFixed(2);
+        } else {
+          const r = n.R * (0.25 + 0.75 * bloom);
+          n.c1.setAttribute('r', r.toFixed(1)); n.c2.setAttribute('r', r.toFixed(1));
+          if (n.sw) {
+            // the inner SWIRL: a dashed ring slowly rotating with round time
+            n.sw.setAttribute('r', (r * 0.58).toFixed(1));
+            n.sw.setAttribute('transform', `rotate(${(((this.T - t0) * 560) % 360).toFixed(1)})`);
+          }
+          n.g.style.opacity = (0.3 + 0.7 * Math.min(bloom, fade)).toFixed(2);
+        }
       } else if (n.e.ability === 'trap') {
         const arm = easeOut(clamp01((this.T - t0) / AB_ARM));
         n.c1.setAttribute('r', Math.max(1, n.R * arm).toFixed(1));

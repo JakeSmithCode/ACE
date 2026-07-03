@@ -59,7 +59,10 @@ export type MatchEvent =
   // radius `r`, active from `t` to `until` in round-normalized time) so the viewer
   // can draw the smoke/flash/trap. Optional + additive: a consumer that ignores
   // them sees the old behaviour, so `version` stays 1. `side` (0|1) tints it.
-  | { t: number; kind: 'ability'; agent: string; ability: string; side?: 0 | 1; at?: Vec2; r?: number; until?: number };
+  // `at2` (additive): the far endpoint of a WALL smoke — the cloud is a capsule
+  // from `at` (the centre) mirrored through to `at2`'s opposite, radius `r`
+  // (consumers without it draw the sphere at `at` as before).
+  | { t: number; kind: 'ability'; agent: string; ability: string; side?: 0 | 1; at?: Vec2; at2?: Vec2; r?: number; until?: number };
 
 export interface RoundEconomy {
   buy: Record<'0' | '1', 'full' | 'force' | 'eco' | 'pistol'>;
