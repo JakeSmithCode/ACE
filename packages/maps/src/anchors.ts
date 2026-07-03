@@ -24,6 +24,14 @@ export interface MapAnchors {
 // contests the push. (Ascent's is hand-tuned; the rest are spawn↔sites midpoints.)
 export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   ascent:   { atkSpawn: [485, 60],  sites: { A: [310, 150], B: [270, 793] }, mid: [500, 470] },
+  // THE ANCHOR LEVER IS EXHAUSTED for the maps still out of rotation — all
+  // measured (toward-mid sweeps, 80-seed mirrors): abyss crosses over on a CLIFF
+  // (in90 70.5%ATK/11.3%time -> in105 52.1/26.6 STALLY — no joint solution);
+  // bind (in90 71.9/17.2) and fracture (in160 64.3/30.9) trade ATK for stalls
+  // monotonically, the sunset signature. These interiors are LOS-scarce mazes:
+  // sites far out = free plants, sites pulled in = mutual blindness. The fix
+  // class is LOS-aware placement / defense shape (defSpots is the substrate),
+  // not anchors. Icebox is separately DEF-lean (site probes 35-40.5%).
   abyss:    { atkSpawn: [840, 480], sites: { A: [408, 104], B: [392, 864] }, mid: [620, 482] },
   bind:     { atkSpawn: [595, 870], sites: { A: [288, 264], B: [720, 320] }, mid: [549, 581] },
   breeze:   { atkSpawn: [470, 870], sites: { A: [144, 288], B: [864, 456] }, mid: [487, 621] },
