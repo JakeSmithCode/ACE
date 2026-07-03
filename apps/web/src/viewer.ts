@@ -473,7 +473,7 @@ export class Viewer {
     if (this.pov == null) this.povBtn.style.display = 'none';
     else {
       this.povBtn.classList.toggle('on', this.povOn);
-      this.povBtn.onclick = () => { this.povOn = !this.povOn; this.povBtn!.classList.toggle('on', this.povOn); this.ghosts.clear(); this.render(); };
+      this.povBtn.onclick = () => { this.povOn = !this.povOn; this.povBtn!.classList.toggle('on', this.povOn); this.ghosts.clear(); this.renderOddsNow(this.roundIdx); this.render(); };
     }
     this.sndBtn = ctl.querySelector('#ace-snd') as HTMLElement;
     this.sndBtn.classList.toggle('on', this.sfx.enabled);
@@ -636,15 +636,43 @@ export class Viewer {
   /** Does an ENEMY smoke sit on the sightline p1→p2? Mirrors the engine's one-way
    *  blindedThrough for the fog: your own clouds never blind you. Wall smokes are
    *  checked as their capsule (segment-to-segment distance). */
-  private smokeBlocked(viewerTeam: 0 | 1, p1: Vec2, p2: Vec2): boolean {
+  private smokeBlocked(viewerTeam: 0 | 1, p1: Vec2, p2: Vec2, t = this.T): boolean {
     for (const ab of this.abilities) {
       if (ab.ability !== 'smoke' || ab.side === viewerTeam || ab.at == null || ab.r == null) continue;
-      if (this.T < ab.t || this.T > (ab.until ?? ab.t)) continue;
+      if (t < ab.t || t > (ab.until ?? ab.t)) continue;
       const at = ab.at as Vec2, at2 = (ab as { at2?: Vec2 }).at2;
       if (at2) {
         const mir: Vec2 = [2 * at[0] - at2[0], 2 * at[1] - at2[1]];   // the capsule spans at2 ↔ its mirror through the centre
         if (this.segSegDist(p1, p2, at2, mir) <= (ab.r as number)) return true;
       } else if (this.pointSegDist(at, p1, p2) <= (ab.r as number)) return true;
+    }
+    return false;
+  }
+  /** Is `targetH` visible to the POV team at time `t` — reconstructed from the
+   *  same engine-true math the playback uses (posLegs/faceLegs, never the render's
+   *  separation-nudged positions). Shared by the per-frame fog and the x-ray. */
+  private povSees(targetH: string, t: number, withFire = true): boolean {
+    if (this.pov == null) return true;
+    if (withFire && this.fireReveals.some(rv => rv.h === targetH && t >= rv.t && t <= rv.t + 0.035)) return true;
+    const rd = this.tl.rounds[this.roundIdx];
+    const povSide: 'att' | 'def' = rd.attacker === this.pov ? 'att' : 'def';
+    const tgt = this.agents.find(a => a.handle === targetH);
+    if (!tgt) return false;
+    const tp = posLegs(tgt, tgt.legs, t, tgt.hitch);
+    for (const ab of this.abilities) {
+      if ((ab.ability === 'recon' || ab.ability === 'trap') && ab.side === this.pov && ab.at && ab.r != null
+          && t >= ab.t && t <= (ab.until ?? ab.t)
+          && Math.hypot(tp[0] - (ab.at as Vec2)[0], tp[1] - (ab.at as Vec2)[1]) <= (ab.r as number)) return true;
+    }
+    for (const fr of this.agents) {
+      if (fr.side !== povSide) continue;
+      if (fr.deathT != null && t >= fr.deathT) continue;
+      const fp = posLegs(fr, fr.legs, t, fr.hitch);
+      if (Math.hypot(tp[0] - fp[0], tp[1] - fp[1]) > VISION) continue;
+      const face = faceLegs(fr, fr.legs, fr.hold, t, fr.hitch, fr.ff);
+      if (!this.seesTarget(fp, face, tp)) continue;
+      if (this.smokeBlocked(this.pov, fp, tp, t)) continue;
+      return true;
     }
     return false;
   }
@@ -694,6 +722,11 @@ export class Viewer {
     if (traded) factors.push({ icon: '⇄', text: `Trade — ${e.victim} had just fragged and was punished` });
     if (e.hs) factors.push({ icon: '⊙', text: `Headshot — a clean one-tap, ${e.victim} never got to shoot back` });
     if (e.hp != null && e.hp <= 50) factors.push({ icon: '♥', text: `${e.killer} walked away at ${e.hp}hp — wounded into the next fight` });
+    // TEAM POV: was the killer even on your team's map when the shot came?
+    if (this.povOn && this.pov != null && V && K && V.side === this.pov && K.side !== this.pov
+        && !this.povSees(e.killer, Math.max(0, e.t - 0.012))) {
+      factors.unshift({ icon: '⬢', text: `Fog — your team had NO information on ${e.killer} before the shot` });
+    }
     if (covK >= 0.5) factors.push({ icon: '⛨', text: `${e.killer} was set in cover — ${covK >= 1 ? 'only a sliver of body exposed' : 'a shoulder tucked behind the corner'}` });
     if (covV >= 0.5) factors.push({ icon: '⛨', text: `${e.victim} had cover and still lost the exchange` });
     if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
@@ -986,7 +1019,21 @@ export class Viewer {
       e.title = igl ? `${BUY_LABEL[b] ?? b} — the IGL's call (${igl.handle} runs the economy)` : (BUY_LABEL[b] ?? b);
     });
 
+    this.renderOddsNow(i);
+    this.oddsBars.forEach((c, idx) => c.classList.toggle('cur', idx === i));
+  }
+
+  /** The current round's True-Odds readout. In TEAM POV during playback it stays
+   *  sealed (the verdict names the round winner — an omniscient spoiler); it
+   *  reveals the moment the round finishes, and always in observer view. */
+  private renderOddsNow(i: number) {
+    const r = this.tl.rounds[i];
     if (r.winPct == null) { this.oddsNow.textContent = ''; return; }
+    if (this.povOn && this.pov != null && !this.ended) {
+      this.oddsNow.classList.remove('isupset');
+      this.oddsNow.innerHTML = `<span class="opct pov">⬢</span><span class="olabel">team view — odds reveal when the round ends</span>`;
+      return;
+    }
     const pAtk = r.winPct;
     const fav = (pAtk >= 0.5 ? r.attacker : 1 - r.attacker) as 0 | 1;
     const favPct = Math.round(Math.max(pAtk, 1 - pAtk) * 100);
@@ -998,7 +1045,6 @@ export class Viewer {
       : `<b class="${winCls}">${winTag}</b> closed it`;
     this.oddsNow.innerHTML = `<span class="opct ${favCls}">${favPct}%</span><span class="olabel"><b class="${favCls}">${favTag}</b> favoured · ${verdict}</span>`;
     this.oddsNow.classList.toggle('isupset', upset);
-    this.oddsBars.forEach((c, idx) => c.classList.toggle('cur', idx === i));
   }
 
   /** Broadcast round-result card, revealed when playback reaches the end of a round
@@ -1340,30 +1386,13 @@ export class Viewer {
     const povSide: 'att' | 'def' = this.tl.rounds[this.roundIdx].attacker === this.pov ? 'att' : 'def';
     const seen = new Set<string>();
     if (fogOn) {
-      const friendlies = frame.filter(f => !f.dead && f.a.side === povSide);
       for (const f of frame) {
         if (f.a.side === povSide || f.dead) continue;
-        const h = f.a.handle, ep: Vec2 = [f.p[0], f.p[1]];
-        if (this.fireReveals.some(rv => rv.h === h && this.T >= rv.t && this.T <= rv.t + 0.035)) { seen.add(h); continue; }
-        let vis = false;
-        for (const ab of this.abilities) {
-          if ((ab.ability === 'recon' || ab.ability === 'trap') && ab.side === this.pov && ab.at && ab.r != null
-              && this.T >= ab.t && this.T <= (ab.until ?? ab.t)
-              && Math.hypot(ep[0] - (ab.at as Vec2)[0], ep[1] - (ab.at as Vec2)[1]) <= (ab.r as number)) { vis = true; break; }
-        }
-        if (!vis) for (const fr of friendlies) {
-          const fp: Vec2 = [fr.p[0], fr.p[1]];
-          if (Math.hypot(ep[0] - fp[0], ep[1] - fp[1]) > VISION) continue;
-          const face = faceLegs(fr.a, fr.a.legs, fr.a.hold, fr.prog, fr.a.hitch, fr.a.ff);
-          if (!this.seesTarget(fp, face, ep)) continue;
-          if (this.smokeBlocked(this.pov!, fp, ep)) continue;
-          vis = true; break;
-        }
-        if (vis) { seen.add(h); this.ghosts.delete(h); }
-        else {
+        const h = f.a.handle;
+        if (this.povSees(h, this.T)) { seen.add(h); this.ghosts.delete(h); }
+        else if (!this.ghosts.get(h) && this.lastSeenNow.has(h)) {
           // just slipped out of vision → drop a last-known marker at the spot
-          const g0 = this.ghosts.get(h);
-          if (!g0 && this.lastSeenNow.has(h)) this.ghosts.set(h, { p: ep, t: this.T });
+          this.ghosts.set(h, { p: [f.p[0], f.p[1]], t: this.T });
         }
       }
       // remember who was visible THIS frame (ghosts spawn on the visible→hidden edge)
@@ -1534,6 +1563,7 @@ export class Viewer {
       if (this.boardDirty) { this.boardDirty = false; this.updateBoard(this.T); }
       if (this.T >= 1) {
         this.T = 1; this.ended = true; this.playing = false; this.playBtn.textContent = '▶';
+        this.renderOddsNow(this.roundIdx);   // POV: the sealed odds reveal now
         // last round → the match-final card; otherwise the round card + auto-advance.
         // In LIVE mode the "last round" is just the last one BROADCAST so far — don't
         // reveal a final; park at the live tail and wait for setTimeline to bring more.

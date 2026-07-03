@@ -124,6 +124,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* fog of war: last-known-position ghosts + the POV toggle */
 .ace-ghost circle{fill:rgba(120,130,145,.18);stroke:rgba(170,180,195,.55);stroke-width:1.5;stroke-dasharray:3 3}
 .ace-ghost text{fill:rgba(200,208,220,.8);font-family:var(--label);font-size:13px;font-weight:700;text-anchor:middle}
+.oddsnow .opct.pov{color:var(--muted);font-size:20px}
 /* follow cam: the locked player wears a gold dashed halo */
 .ace-ag.followed .ring{stroke:var(--gold)!important;stroke-dasharray:5 3}
 /* seek-bar event ticks: the round's rhythm at a glance */
