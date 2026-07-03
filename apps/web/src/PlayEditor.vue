@@ -6,7 +6,7 @@
 // points (rotate when a teammate dies) — and the rotation can have its OWN
 // authored route. Routes are capped at MAX_ROUTE_WAYPOINTS (a play is a sketch,
 // not micro). Mutations clone-and-emit so the parent re-sims.
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { MAX_ROUTE_WAYPOINTS as CAP, MAX_ROTATE_STEPS } from '@ace/shared';
 import type { Play, PlayerPlan, RotateStep, RotateTrigger, UtilKind, Vec2, Team, SiteId } from '@ace/shared';
 import { coverOf, pathfind, type Navmesh } from '@ace/maps';
@@ -154,6 +154,34 @@ function commit(mut: (p: Play) => void) {
   emit('update', next);
 }
 
+// --- undo / redo: a drag mistake shouldn't be permanent. A CHECKPOINT snapshots
+// the play at each interaction boundary (drag start, structural edit) — debounced
+// so a slider stream is one entry — and ctrl+z / ctrl+shift+z walk the stack.
+const undoStack: Play[] = [];
+const redoStack: Play[] = [];
+let lastCp = 0;
+function checkpoint() {
+  const now = Date.now();
+  if (now - lastCp < 350) return;
+  lastCp = now;
+  undoStack.push(JSON.parse(JSON.stringify(props.play)));
+  if (undoStack.length > 40) undoStack.shift();
+  redoStack.length = 0;
+}
+function onKey(ev: KeyboardEvent) {
+  if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'z') return;
+  ev.preventDefault();
+  if (ev.shiftKey) {
+    const next = redoStack.pop();
+    if (next) { undoStack.push(JSON.parse(JSON.stringify(props.play))); lastCp = Date.now(); emit('update', next); }
+  } else {
+    const prev = undoStack.pop();
+    if (prev) { redoStack.push(JSON.parse(JSON.stringify(props.play))); emit('update', prev); }
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKey));
+onUnmounted(() => window.removeEventListener('keydown', onKey));
+
 const svgEl = ref<SVGSVGElement | null>(null);
 function toImg(clientX: number, clientY: number): Vec2 {
   const r = svgEl.value!.getBoundingClientRect();  // square container → 1:1 with viewBox
@@ -168,6 +196,7 @@ let drag: { player: string; which: Which; tgt: Target; idx: number; from: Vec2; 
 
 function startDrag(player: string, which: Which, tgt: Target, idx: number, ev: PointerEvent) {
   ev.stopPropagation();          // don't let the map background also fire (route-add)
+  checkpoint();
   drag = { player, which, tgt, idx, from: toImg(ev.clientX, ev.clientY), moved: false };
   (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
   ev.preventDefault();
@@ -191,6 +220,7 @@ function onMove(ev: PointerEvent) {
 // util-lineup markers drag independently of a player plan (they key off index)
 function startDragUtil(idx: number, ev: PointerEvent, which: 'util' | 'util2' = 'util') {
   ev.stopPropagation();
+  checkpoint();
   drag = { player: '', which, tgt: 'hold', idx, from: toImg(ev.clientX, ev.clientY), moved: false };
   (ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
   ev.preventDefault();
@@ -211,6 +241,7 @@ const capHit = ref(false);
 function onBg(ev: PointerEvent) {
   const r = routing.value;
   if (!r) return;                              // clicks only lay points in routing mode
+  checkpoint();
   if (routeLen(r.player, r.tgt) >= CAP) { capHit.value = true; setTimeout(() => (capHit.value = false), 600); return; }
   const pt = toImg(ev.clientX, ev.clientY);
   commit(p => {
@@ -230,6 +261,7 @@ function removeWaypoint(player: string, tgt: Target, idx: number) {
   });
 }
 function clearRoute(player: string, tgt: Target) {
+  checkpoint();
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
     if (tgt === 'hold') { if (pl) delete pl.route; } else if (pl?.rotate) delete pl.rotate.route;
@@ -240,6 +272,7 @@ function clearRoute(player: string, tgt: Target) {
 const stepsOf = (pl: PlayerPlan): RotateStep[] => { const out: RotateStep[] = []; let s = pl.rotate; while (s) { out.push(s); s = s.then; } return out; };
 const stepAt = (pl: PlayerPlan | undefined, i: number): RotateStep | undefined => { let s = pl?.rotate; for (let k = 0; k < i && s; k++) s = s.then; return s; };
 function toggleKill(player: string) {
+  checkpoint();
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
     if (!pl) return;
@@ -250,6 +283,7 @@ function toggleKill(player: string) {
   if (routing.value?.player === player && routing.value.tgt === 'rotate') routing.value = null;
 }
 function addStep(player: string) {
+  checkpoint();
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
     const steps = pl ? stepsOf(pl) : [];
@@ -259,6 +293,7 @@ function addStep(player: string) {
   });
 }
 function removeStep(player: string, si: number) {
+  checkpoint();
   commit(p => {
     const pl = p.plans.find(q => q.player === player);
     if (!pl?.rotate) return;
@@ -271,6 +306,7 @@ const triggerKind = (id: string, si: number) => stepAt(planOf(id), si)?.trigger.
 const deathPlayer = (id: string, si: number) => { const tr = stepAt(planOf(id), si)?.trigger; return tr?.kind === 'death' ? tr.player : ''; };
 const timeT = (id: string, si: number) => { const tr = stepAt(planOf(id), si)?.trigger; return tr?.kind === 'time' ? tr.t : 0.4; };
 function setTriggerKind(player: string, si: number, kind: RotateTrigger['kind']) {
+  checkpoint();
   commit(p => {
     const st = stepAt(p.plans.find(q => q.player === player), si);
     if (!st) return;
@@ -282,6 +318,7 @@ function setDeathPlayer(player: string, si: number, who: string) {
   commit(p => { const st = stepAt(p.plans.find(q => q.player === player), si); if (st) st.trigger = { kind: 'death', player: who }; });
 }
 function setTime(player: string, si: number, t: number) {
+  checkpoint();
   commit(p => { const st = stepAt(p.plans.find(q => q.player === player), si); if (st) st.trigger = { kind: 'time', t }; });
 }
 
@@ -313,11 +350,13 @@ const warnCount = computed(() => {
 
 // --- utility lineups ------------------------------------------------------
 function addLineup(kind: UtilKind) {
+  checkpoint();
   commit(p => { (p.lineups ??= []).push({ player: props.team.players[0].id, kind, at: [460, 380], t: 0.25 }); });
 }
 // an authored WALL: a smoke lineup with two endpoints — the manager draws the
 // capsule the engine will field (the Viper/Harbor setup, drag both ends)
 function addWall() {
+  checkpoint();
   commit(p => { (p.lineups ??= []).push({ player: props.team.players[0].id, kind: 'smoke', at: [410, 370], at2: [530, 370], t: 0.25 }); });
 }
 // wall thickness mirrors the engine (WALL_R + WALL_R_UTIL·u)
@@ -326,12 +365,14 @@ function wallThick(ln: { player: string }): number {
   return 24 + 12 * u;
 }
 function removeLineup(i: number) {
+  checkpoint();
   commit(p => { p.lineups?.splice(i, 1); if (p.lineups && p.lineups.length === 0) delete p.lineups; });
 }
 function setUtilCaster(i: number, player: string) {
   commit(p => { if (p.lineups?.[i]) p.lineups[i].player = player; });
 }
 function setUtilTime(i: number, t: number) {
+  checkpoint();
   commit(p => { if (p.lineups?.[i]) p.lineups[i].t = t; });
 }
 // display radius mirrors the engine's reach (base + util-scaled), using the

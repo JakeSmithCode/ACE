@@ -121,6 +121,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-ag.dead .ring{stroke:var(--muted-2)!important;fill:rgba(8,14,20,.6)}.ace-ag.dead .core{display:none}.ace-ag.dead .np{display:none}
 .ace-ag.dead .xm{display:block;fill:var(--muted)}
 .ace-ag.dead.att .xm{fill:rgba(34,211,238,.7)}.ace-ag.dead.def .xm{fill:rgba(255,92,110,.7)}
+/* follow cam: the locked player wears a gold dashed halo */
+.ace-ag.followed .ring{stroke:var(--gold)!important;stroke-dasharray:5 3}
+/* seek-bar event ticks: the round's rhythm at a glance */
+.ace-controls .seek .tick{position:absolute;top:-3px;bottom:-3px;width:2.5px;transform:translateX(-50%);pointer-events:none;opacity:.9;border-radius:1px}
+.ace-controls .seek .tick.k.att{background:var(--att)}.ace-controls .seek .tick.k.def{background:var(--def)}
+.ace-controls .seek .tick.plant{width:7px;background:var(--gold);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+.ace-controls .seek .tick.defuse{width:7px;background:#7fe3a8;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
 /* on-map kill pop: a brief expanding ring at the death spot, coloured to the victim */
 .ace-killpop{pointer-events:none}
 .ace-killpop .kp-ring{fill:none;animation:killpop .62s ease-out forwards}
@@ -327,6 +334,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-odds{display:flex;gap:8px;align-items:center;margin-left:12px;cursor:help}
 .ace-editor .ed-odd{font-family:var(--label);font-size:12px;letter-spacing:.06em;font-weight:700;padding:4px 9px;font-variant-numeric:tabular-nums;background:rgba(34,211,238,.1);color:var(--att);border:1px solid rgba(34,211,238,.35);clip-path:var(--bevel)}
 .ace-editor .ed-odd.def{background:rgba(255,92,110,.1);color:var(--def);border-color:rgba(255,92,110,.35)}
+.ace-editor .ed-sodd{font-family:var(--label);font-size:11px;letter-spacing:.04em;color:var(--muted);padding:3px 7px;background:rgba(120,140,160,.07);border:1px solid rgba(120,140,160,.2);display:inline-flex;gap:5px;align-items:center}
+.ace-editor .ed-sodd i{font-style:normal;font-variant-numeric:tabular-nums}.ace-editor .ed-sodd i.a{color:var(--att)}.ace-editor .ed-sodd i.d{color:var(--def)}
 .ace-editor .ed-presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%;padding:9px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);order:5}
 .ace-editor .ed-presets label{font-family:var(--label);font-size:10px;letter-spacing:.12em;color:var(--muted-2)}
 .ed-preset{display:inline-flex;align-items:stretch;border:1px solid rgba(34,211,238,.3);clip-path:var(--bevel);overflow:hidden}

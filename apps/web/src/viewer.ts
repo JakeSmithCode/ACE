@@ -241,6 +241,7 @@ export class Viewer {
   private cam: { x: number; y: number; w: number } | null = null;
   private fullBox = { x: 0, y: 0, w: 1000 };
   private camBtn!: HTMLElement;
+  private followHandle: string | null = null;   // click an agent → the director locks onto them
   private sfx = new Sfx();
   private sndBtn!: HTMLElement;
   private lastSpikeTick = -1;   // spike-countdown beeps, indexed by round-time bucket
@@ -781,6 +782,16 @@ export class Viewer {
                sw: e.ability === 'smoke' ? g.children[2] as SVGCircleElement : undefined };
     });
     this.feed.innerHTML = '<div class="empty">Round in progress…</div>'; this.feedItems = []; this.lastKill.clear();
+    // seek-bar EVENT TICKS — where this round's kills/plant/defuse sit in time, so
+    // the round's rhythm reads at a glance and you can scrub straight to the action
+    this.seek.querySelectorAll('.tick').forEach(n2 => n2.remove());
+    for (const e of r.events) {
+      if (e.kind !== 'kill' && e.kind !== 'plant' && e.kind !== 'defuse') continue;
+      const d = el('div', 'tick ' + (e.kind === 'kill' ? 'k ' + (this.teamOf.get(e.killer) === r.attacker ? 'att' : 'def') : e.kind));
+      d.style.left = (e.t * 100).toFixed(1) + '%';
+      d.title = e.kind === 'kill' ? `${e.killer} ▸ ${e.victim}` : e.kind === 'plant' ? 'spike planted' : 'spike defused';
+      this.seek.appendChild(d);
+    }
     this.spike.classList.remove('on'); this.spikePos = null; this.spikePlantT = Infinity;
     // reset the moment layer for the fresh round, then call the round in like a broadcast
     this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
@@ -802,6 +813,11 @@ export class Viewer {
       g.innerHTML = `<circle class="clutch-ring" r="17"></circle><circle class="hp" r="15" transform="rotate(-90)"></circle><circle class="ring ${side}" r="12"></circle><circle class="core ${side}" r="4.5"></circle><text class="xm" y="4.5">✕</text>`
         + `<g class="np"><rect class="np-bg" x="${(-npw / 2).toFixed(1)}" y="-27" width="${npw.toFixed(1)}" height="14" rx="2.5"></rect><text class="hl ${side}" y="-16.5">${mv.agent}</text></g>`;
       g.setAttribute('transform', `translate(${mv.path[0][0]},${mv.path[0][1]})`);
+      g.style.cursor = 'pointer';
+      g.onclick = () => {   // FOLLOW CAM: click a player → the director locks on; click again to release
+        this.followHandle = this.followHandle === mv.agent ? null : mv.agent;
+        if (this.followHandle && !this.camAuto) { this.camAuto = true; this.camBtn.classList.add('on'); }
+      };
       this.agLayer.appendChild(g);
       const tr = svg('polyline') as SVGPolylineElement; tr.setAttribute('class', 'ace-trail ' + side); this.trLayer.appendChild(tr);
       // older timelines predate `hold`; fall back to the final path heading
@@ -1291,6 +1307,7 @@ export class Viewer {
       const q: Vec2 = this.nav && !dead && !this.walkAt(px, py) ? (this.nearestWalkable([px, py]) ?? [px, py]) : [px, py];
       a.node.setAttribute('transform', `translate(${q[0].toFixed(1)},${q[1].toFixed(1)})${agK !== 1 ? ` scale(${agK.toFixed(3)})` : ''}`);
       a.node.classList.toggle('clutch', a === clutcher);
+      a.node.classList.toggle('followed', a.handle === this.followHandle);
       // flash the agent while it's hitched on a trap (the visible "tripped" beat)
       a.node.classList.toggle('tripped', !dead && a.hitch != null && prog >= a.hitch.start && prog <= a.hitch.end);
       // live HP arc — the last hp checkpoint at or before T (scrub-correct); hidden
@@ -1331,11 +1348,16 @@ export class Viewer {
     if (this.camAuto && !this.showHeat) {
       const live = frame.filter(f => !f.dead);
       const pts: Vec2[] = [];
-      for (const f of live) {
-        if (live.some(g => g.a.side !== f.a.side && Math.hypot(g.p[0] - f.p[0], g.p[1] - f.p[1]) < 260)) pts.push([f.p[0], f.p[1]]);
+      // a FOLLOWED player owns the frame (falling back to the action if they're down)
+      const fa = this.followHandle ? live.find(f => f.a.handle === this.followHandle) : null;
+      if (fa) pts.push([fa.p[0], fa.p[1]]);
+      else {
+        for (const f of live) {
+          if (live.some(g => g.a.side !== f.a.side && Math.hypot(g.p[0] - f.p[0], g.p[1] - f.p[1]) < 260)) pts.push([f.p[0], f.p[1]]);
+        }
+        if (!pts.length) for (const f of live) if (f.a.side === 'att') pts.push([f.p[0], f.p[1]]);
+        if (this.spikePos && this.T >= this.spikePlantT) pts.push(this.spikePos);
       }
-      if (!pts.length) for (const f of live) if (f.a.side === 'att') pts.push([f.p[0], f.p[1]]);
-      if (this.spikePos && this.T >= this.spikePlantT) pts.push(this.spikePos);
       if (pts.length) {
         let mnX = 1e9, mnY = 1e9, mxX = -1e9, mxY = -1e9;
         for (const p of pts) { mnX = Math.min(mnX, p[0]); mxX = Math.max(mxX, p[0]); mnY = Math.min(mnY, p[1]); mxY = Math.max(mxY, p[1]); }

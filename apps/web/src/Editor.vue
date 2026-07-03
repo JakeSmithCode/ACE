@@ -56,6 +56,9 @@ const score = ref<[number, number]>([0, 0]);
 // defend) — ~50 counterfactual re-runs per round, so the number moves honestly
 // as you drag holds around. This is the x-ray thesis as an authoring instrument.
 const odds = ref<{ atk: number | null; def: number | null }>({ atk: null, def: null });
+// the same odds SPLIT BY SITE — "DEF 48%" can hide a strong A and a folding B;
+// the per-site read is what tells you WHICH half of the setup to fix
+const siteOdds = ref<{ site: string; atk: number | null; def: number | null }[]>([]);
 const seed = ref(42);
 // re-render the dials when the underlying tactics objects change (e.g. play edits)
 const bump = reactive({ n: 0 });
@@ -89,11 +92,17 @@ function resim() {
     const tl = simulateMatch(input, nav, FORKS);
     score.value = tl.finalScore;
     let aSum = 0, aN = 0, dSum = 0, dN = 0;
+    const per: Record<string, { a: number; an: number; d: number; dn: number }> = {};
     for (const r of tl.rounds) {
       if (r.winPct == null) continue;
-      if (r.attacker === 0) { aSum += r.winPct; aN++; } else { dSum += 1 - r.winPct; dN++; }
+      const b = (per[r.site] ??= { a: 0, an: 0, d: 0, dn: 0 });
+      if (r.attacker === 0) { aSum += r.winPct; aN++; b.a += r.winPct; b.an++; }
+      else { dSum += 1 - r.winPct; dN++; b.d += 1 - r.winPct; b.dn++; }
     }
     odds.value = { atk: aN ? aSum / aN : null, def: dN ? dSum / dN : null };
+    siteOdds.value = Object.keys(per).sort().map(k => ({
+      site: k, atk: per[k].an ? per[k].a / per[k].an : null, def: per[k].dn ? per[k].d / per[k].dn : null,
+    }));
     viewer?.destroy();
     // the preview mutes broadcast audio by default (a re-sim per edit would chirp
     // constantly); the 🔊 toggle still turns it on for a proper watch-through
@@ -124,6 +133,10 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
            title="your True Odds under this exact setup, averaged over the match's rounds (50× counterfactual re-runs each) — edit a hold and watch it move">
         <span class="ed-odd atk" v-if="odds.atk != null">ATK {{ Math.round(odds.atk * 100) }}%</span>
         <span class="ed-odd def" v-if="odds.def != null">DEF {{ Math.round(odds.def * 100) }}%</span>
+        <span class="ed-sodd" v-for="so in siteOdds" :key="so.site"
+              :title="`your True Odds on ${so.site}-site rounds — which half of the setup needs work`">
+          {{ so.site }}<i v-if="so.atk != null" class="a">⚔{{ Math.round(so.atk * 100) }}</i><i v-if="so.def != null" class="d">🛡{{ Math.round(so.def * 100) }}</i>
+        </span>
       </div>
     </div>
     <div class="ed-presets">
