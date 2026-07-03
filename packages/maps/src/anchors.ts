@@ -21,9 +21,15 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   bind:     { atkSpawn: [595, 870], sites: { A: [288, 264], B: [720, 320] }, mid: [549, 581] },
   breeze:   { atkSpawn: [470, 870], sites: { A: [144, 288], B: [864, 456] }, mid: [487, 621] },
   fracture: { atkSpawn: [500, 120], sites: { A: [872, 504], B: [96, 520] },  mid: [492, 316] },
-  haven:    { atkSpawn: [850, 520], sites: { A: [368, 136], B: [344, 470], C: [360, 832] }, mid: [607, 502] },
+  // haven/lotus outer sites sit at the plaza MOUTHS (not centres): the raw centre
+  // anchors put A↔C rotations ~700u apart — unrecoverable for a wrong read — and
+  // both maps measured 60-62% ATK. Pulling the outer anchors toward the middle
+  // (A +80/C +60 on haven; A +60/C +70 on lotus, all snapped walkable) shortens the
+  // rotation tax and lands both `ok` on pnpm balance (54.2 / 54.3). Measured, not
+  // eyeballed — re-sweep with the mirror harness before moving them again.
+  haven:    { atkSpawn: [850, 520], sites: { A: [368, 216], B: [344, 470], C: [360, 772] }, mid: [607, 502] },
   icebox:   { atkSpawn: [850, 540], sites: { A: [608, 208], B: [720, 800] }, mid: [757, 522] },
-  lotus:    { atkSpawn: [500, 850], sites: { A: [864, 320], B: [488, 372], C: [112, 464] }, mid: [494, 621] },
+  lotus:    { atkSpawn: [500, 850], sites: { A: [804, 320], B: [488, 372], C: [182, 464] }, mid: [494, 621] },
   pearl:    { atkSpawn: [533, 860], sites: { A: [848, 312], B: [176, 400] }, mid: [522, 608] },
   split:    { atkSpawn: [130, 520], sites: { A: [320, 88],  B: [320, 816] }, mid: [225, 486] },
   sunset:   { atkSpawn: [520, 860], sites: { A: [816, 368], B: [136, 432] }, mid: [498, 630] },
