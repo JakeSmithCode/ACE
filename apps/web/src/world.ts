@@ -665,7 +665,7 @@ function buildInput(fx: { home: number; away: number }, seed: number, map: MapId
   const tac = (i: number): Tactics => {
     if (i !== myClub.value) return clubs.value[i].tactics;
     const t = clone(myTactics.value);
-    if (map !== MAP) { t.attack.play = undefined; t.defense.play = undefined; }
+    if (map !== MAP) { t.attack.play = undefined; t.attack.play2 = undefined; t.defense.play = undefined; }
     return t;
   };
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};

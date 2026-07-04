@@ -782,8 +782,15 @@ function simulateRound(
   // plan's site bias — unless an authored attack play declares the site it
   // executes (then that's forced). The weighted pick draws one rng value; on a
   // two-site map it reduces exactly to the original A/B coin-flip.
+  // TWO authored executes (`play` + `play2`, distinct sites): the site is
+  // ROLLED as if unforced — the siteBias mind-game returns — and whichever
+  // play matches the rolled site runs, so an authored attack stops being a
+  // tell. One play keeps the forced-site path (byte-identical: no roll drawn).
   const SITES = siteIds(A);
-  const site: SiteId = atkTac.attack.play?.site ?? SITES[pickWeighted(siteWeights(atkTac.attack.siteBias, SITES.length), rng)];
+  const aPlay1 = atkTac.attack.play, aPlay2 = atkTac.attack.play2;
+  const dualExec = !!(aPlay1?.site && aPlay2?.site && aPlay1.site !== aPlay2.site);
+  const site: SiteId = (!dualExec && aPlay1?.site) || SITES[pickWeighted(siteWeights(atkTac.attack.siteBias, SITES.length), rng)];
+  const atkPlay = dualExec ? (aPlay2!.site === site ? aPlay2! : aPlay1!) : aPlay1;
   const sitePt = siteAnchor(A, site);
   // the lurk flanks the off-site = the fielded site whose anchor is farthest from
   // the target (the other one on a two-site map; the far site on a three-site map)
@@ -806,14 +813,14 @@ function simulateRound(
   // attackers: stack at spawn, execute the chosen site. Tempo sets the pace —
   // a fast hit reaches site sooner; a slow default arrives later (more map control).
   const atkSpeed = (0.8 + atkTac.attack.tempo * 0.5) * scale;
-  if (atkTac.attack.play) {
+  if (atkPlay) {
     // AUTHORED execute: each attacker walks an authored route to a placed spot,
     // watches an authored angle, and can carry a push trigger (death/contact/time
     // — e.g. a lurk that flanks on a teammate's death). Like authored defenders,
     // an unrouted attacker is A*'d to its spot; a routed one is walked verbatim.
     const byIdA = new Map(atkTeam.players.map(p => [p.id, p] as const));
     atkTeam.players.forEach((p, i) => {
-      const plan = atkTac.attack.play!.plans.find(q => q.player === p.id);
+      const plan = atkPlay.plans.find(q => q.player === p.id);
       const pos = plan ? plan.pos : sitePt;                 // unplanned players push the site
       const lo = loadouts.get(p.handle)!;
       const spawn: Vec2 = [A.atkSpawn[0] + (i - 2) * 14, A.atkSpawn[1]];  // deterministic spread, no rng
@@ -1010,7 +1017,7 @@ function simulateRound(
   const atkHandleOf = new Map(atkTeam.players.map(p => [p.id, p.handle] as const));
   const defHandleOf = new Map(defTeam.players.map(p => [p.id, p.handle] as const));
   const lineups = [
-    ...(atkTac.attack.play?.lineups ?? []).map(l => ({ ...l, side: attacker, handle: atkHandleOf.get(l.player) })),
+    ...(atkPlay?.lineups ?? []).map(l => ({ ...l, side: attacker, handle: atkHandleOf.get(l.player) })),
     ...(defTac.defense.play?.lineups ?? []).map(l => ({ ...l, side: defender, handle: defHandleOf.get(l.player) })),
   ];
   const authoredCasters = new Set(lineups.map(l => l.handle).filter(Boolean) as string[]);

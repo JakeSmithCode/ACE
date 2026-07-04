@@ -46,6 +46,37 @@ function starterAttack(t: Team): Play {
 }
 const starterFor = (t: Team, side: Side): Play => (side === 'attack' ? starterAttack(t) : starterDefense(t));
 const playRef = (i: number, side: Side) => side === 'attack' ? tac(i).attack : tac(i).defense;
+// a play slot: the defense play, the primary attack execute, or the ALT execute
+// (attack.play2 — with two executes on different sites the engine ROLLS the site
+// per round and runs the matching play, so your authored attack isn't a tell)
+const playOf = (i: number, side: Side, alt = false): Play | undefined =>
+  side === 'attack' ? (alt ? tac(i).attack.play2 : tac(i).attack.play) : tac(i).defense.play;
+function setPlayVal(i: number, side: Side, alt: boolean, p: Play | undefined) {
+  if (side === 'attack') { if (alt) tac(i).attack.play2 = p; else tac(i).attack.play = p; }
+  else tac(i).defense.play = p;
+}
+// the alt starter TRANSPLANTS the primary execute to the next site (translate by
+// the site delta, flip the site) — a rough template the owner then tunes
+function altStarter(i: number): Play {
+  const p1 = tac(i).attack.play!;
+  const list = (['A', 'B', 'C'] as const).filter(s => SITES[s]);
+  const s1 = (p1.site ?? 'A') as typeof list[number];
+  const s2 = list[(list.indexOf(s1) + 1) % list.length];
+  const d = [SITES[s2]![0] - SITES[s1]![0], SITES[s2]![1] - SITES[s1]![1]];
+  const cl = (v: number) => Math.max(0, Math.min(1000, Math.round(v)));
+  const sh = (pt: [number, number]): [number, number] => [cl(pt[0] + d[0]), cl(pt[1] + d[1])];
+  const c: Play = clone(p1);
+  c.site = s2;
+  for (const pl of c.plans) {
+    pl.pos = sh(pl.pos);
+    if (pl.face) pl.face = sh(pl.face);
+    if (pl.route) pl.route = pl.route.map(sh);
+    let st = pl.rotate;
+    while (st) { st.pos = sh(st.pos); if (st.route) st.route = st.route.map(sh); st = st.then; }
+  }
+  for (const ln of c.lineups ?? []) { ln.at = sh(ln.at); if (ln.at2) ln.at2 = sh(ln.at2); }
+  return c;
+}
 
 type Side = 'attack' | 'defense';
 const host = ref<HTMLElement | null>(null);
@@ -62,8 +93,9 @@ const siteOdds = ref<{ site: string; atk: number | null; def: number | null }[]>
 const seed = ref(42);
 // re-render the dials when the underlying tactics objects change (e.g. play edits)
 const bump = reactive({ n: 0 });
-const authoring = ref<{ team: number; side: Side } | null>(null);
-const isOpen = (i: number, side: Side) => authoring.value?.team === i && authoring.value?.side === side;
+const authoring = ref<{ team: number; side: Side; alt?: boolean } | null>(null);
+const isOpen = (i: number, side: Side, alt = false) =>
+  authoring.value?.team === i && authoring.value?.side === side && !!authoring.value?.alt === alt;
 
 // --- the OPPONENT-GHOST overlay: where the enemy ACTUALLY set up, aggregated
 // from the re-simmed rounds you're authoring against — the engine's real
@@ -101,12 +133,21 @@ function toggleAuthor(i: number, side: Side) {
   authoring.value = { team: i, side };
   refreshGhosts();
 }
-function clearPlay(i: number, side: Side) {
-  playRef(i, side).play = undefined;
-  if (isOpen(i, side)) authoring.value = null;
+function toggleAuthorAlt(i: number) {
+  if (isOpen(i, 'attack', true)) { authoring.value = null; return; }
+  if (!tac(i).attack.play2) { tac(i).attack.play2 = altStarter(i); schedule(); }
+  authoring.value = { team: i, side: 'attack', alt: true };
+  refreshGhosts();
+}
+function clearPlay(i: number, side: Side, alt = false) {
+  setPlayVal(i, side, alt, undefined);
+  if (isOpen(i, side, alt)) authoring.value = null;
   schedule();
 }
-function onPlay(i: number, side: Side, play: Play) { playRef(i, side).play = play; bump.n++; schedule(); }
+function onPlay(i: number, side: Side, alt: boolean, play: Play) { setPlayVal(i, side, alt, play); bump.n++; schedule(); }
+// both executes on ONE site can't mix — the engine forces the primary's site then
+const sameSiteWarn = (i: number) =>
+  !!(tac(i).attack.play?.site && tac(i).attack.play2?.site && tac(i).attack.play!.site === tac(i).attack.play2!.site);
 
 let viewer: Viewer | null = null;
 let pending = 0;
@@ -206,6 +247,9 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
           <label>Plays</label>
           <div class="ed-play">
             <button class="ed-author" :class="{ on: isOpen(i, 'attack'), set: tac(i).attack.play }" @click="toggleAuthor(i, 'attack')">✎ attack</button>
+            <button v-if="tac(i).attack.play" class="ed-author edalt" :class="{ on: isOpen(i, 'attack', true), set: tac(i).attack.play2 }"
+                    @click="toggleAuthorAlt(i)"
+                    title="a SECOND execute on the other site — with two authored executes the engine rolls the site each round (your site bias) and runs the matching play, so your attack isn't a tell">⑂ alt</button>
             <button class="ed-author" :class="{ on: isOpen(i, 'defense'), set: tac(i).defense.play }" @click="toggleAuthor(i, 'defense')">✎ defense</button>
           </div>
         </div>
@@ -215,22 +259,24 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
     <div v-if="authoring" class="ed-canvas">
       <div class="ed-canvas-head">
         <span class="ed-tag" :class="authoring.team === 0 ? 'att' : 'def'">{{ teams[authoring.team].tag }}</span>
-        {{ authoring.side }} play — drag to place · <b>{{ teams[authoring.team].name }}</b> {{ authoring.side === 'attack' ? 'attacking' : 'defending' }}
-        <button class="ed-clear" @click="clearPlay(authoring.team, authoring.side)">clear play</button>
+        {{ authoring.side }}{{ authoring.alt ? ' (alt exec)' : '' }} play — drag to place · <b>{{ teams[authoring.team].name }}</b> {{ authoring.side === 'attack' ? 'attacking' : 'defending' }}
+        <span v-if="authoring.side === 'attack' && sameSiteWarn(authoring.team)" class="ed-samesite"
+              title="the per-round site roll needs the two executes on different sites — pick another site for one of them">⚠ both executes target the same site — the roll needs two</span>
+        <button class="ed-clear" @click="clearPlay(authoring.team, authoring.side, authoring.alt)">clear play</button>
         <button class="ed-close" @click="authoring = null">done</button>
       </div>
       <PlayEditor
-        :key="`${authoring.team}-${authoring.side}`"
+        :key="`${authoring.team}-${authoring.side}-${authoring.alt ? 'alt' : 'main'}`"
         :team="teams[authoring.team]"
         :map-url="`/${MAP}.png`"
         :side="authoring.team === 0 ? 'att' : 'def'"
         :mode="authoring.side"
-        :play="playRef(authoring.team, authoring.side).play!"
+        :play="playOf(authoring.team, authoring.side, authoring.alt)!"
         :atk-spawn="ATK_SPAWN"
         :sites="SITES"
         :nav="w.getNav()!"
         :ghosts="ghosts"
-        @update="(p) => onPlay(authoring!.team, authoring!.side, p)"
+        @update="(p) => onPlay(authoring!.team, authoring!.side, !!authoring!.alt, p)"
       />
     </div>
   </div>

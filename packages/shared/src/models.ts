@@ -65,6 +65,10 @@ export interface Tactics {
     entry?: string;     // player id who leads the push (defaults to the best opening duelist)
     lurk?: string;      // player id who peels off to lurk a flank for picks + late info
     play?: Play;        // authored execute: per-player routes/holds + lineups; forces the site
+    play2?: Play;       // OPTIONAL second execute on another site: with two authored
+                        // executes the round site is ROLLED (siteBias — the mind-game
+                        // returns) and the matching play runs, so an authored attack
+                        // stops being a tell. Absent = single-play behaviour, unchanged.
   };
   defense: {
     read: number;       // -1 stack B · 0 spread · +1 stack A  (pre-round site read)
