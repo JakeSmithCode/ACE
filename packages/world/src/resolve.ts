@@ -14,9 +14,12 @@ import type { Fixture, Matchday } from './schedule.js';
  *  fixture. Haven, lotus, and pearl RETURNED with the site-anchor pass: outer
  *  site anchors moved toward the middle (shorter cross-map rotations — the
  *  measured fix for their 60-67% ATK lean; see anchors.ts), landing all three
- *  `ok` under `pnpm balance` (54.2 / 54.3 / 51.6). Icebox resisted the site
- *  lever in three directions and stays out; sunset still stalls. */
-export const MAP_POOL: MapId[] = ['ascent', 'breeze', 'haven', 'lotus', 'pearl', 'split'];
+ *  `ok` under `pnpm balance` (54.2 / 54.3 / 51.6). Bind and icebox RETURNED
+ *  with the defense-SHAPE pass (`defHedge` in anchors.ts — mid-pool bodies
+ *  re-posted as extra site watchers): bind 76.6→57.3 ATK, icebox 41.0→51.6,
+ *  both confirmed `ok` at 200 seeds. Fracture/abyss/sunset stay out — the
+ *  hedge measured short there (see the null ledger in anchors.ts). */
+export const MAP_POOL: MapId[] = ['ascent', 'bind', 'breeze', 'haven', 'icebox', 'lotus', 'pearl', 'split'];
 /** Deterministic per-fixture map from its seed — a result is reproducible (re-sim
  *  to watch) because the map is a pure function of the same seed. */
 export const fixtureMap = (seed: number): MapId => MAP_POOL[(seed >>> 0) % MAP_POOL.length];

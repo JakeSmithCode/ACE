@@ -936,7 +936,24 @@ function simulateRound(
     };
     for (let i = 0; i < onRead; i++) slots.push({ from: jitter(rng, spotFor(readSite, i), 30), site: readSite });
     for (const os of otherSites) slots.push({ from: jitter(rng, spotFor(os, 0), 30), site: os });
-    for (let i = 0; i < 5 - onRead - otherSites.length; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
+    // PER-MAP DEFENSE SHAPE (defHedge, authored like defSpots): rotation-poor maps
+    // re-post mid bodies as EXTRA site watchers — off-site first (wrong-read
+    // insurance: the free-plant failure lives there), then the read stack, so
+    // hedge 2 on a two-site map is the classic 2-2-1. Same total slots + jitter
+    // draw count, so maps without a hedge are byte-identical.
+    const hedge = Math.min(A.defHedge ?? 0, Math.max(0, 5 - onRead - otherSites.length));
+    let hRead = 0; const hOther = otherSites.map(() => 0);
+    for (let h = 0; h < hedge; h++) {
+      if (h % 2 === 0) {
+        const oi = (h >> 1) % otherSites.length;
+        slots.push({ from: jitter(rng, spotFor(otherSites[oi], 1 + hOther[oi]), 30), site: otherSites[oi] });
+        hOther[oi]++;
+      } else {
+        slots.push({ from: jitter(rng, spotFor(readSite, onRead + hRead), 30), site: readSite });
+        hRead++;
+      }
+    }
+    for (let i = 0; i < 5 - onRead - otherSites.length - hedge; i++) slots.push({ from: jitter(rng, fwd, 34), site: 'M' });
     defTeam.players.forEach((p, i) => {
       const st = slots[i];
       const anchor = st.site === site;            // already on the contested site = holding an angle

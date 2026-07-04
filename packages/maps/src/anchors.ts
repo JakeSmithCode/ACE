@@ -16,6 +16,16 @@ export interface MapAnchors {
    *  When present, the read-stack / watchers / site convergence place onto
    *  these spots (same rng draw count — byte-identical when absent). */
   defSpots?: Partial<Record<'A' | 'B' | 'C', Vec2[]>>;
+  /** PER-MAP DEFENSE SHAPE (optional): how many mid-pool bodies re-post as extra
+   *  SITE watchers (alternating off-site → read stack, so 2 on a two-site map is
+   *  the classic 2-2-1). The lever for rotation-poor interiors (fracture/abyss/
+   *  bind/sunset class): their sites sit too far from mid for the default
+   *  mid-heavy pool to contest a wrong read, so one watcher faces a five-man hit
+   *  and the free plant follows. A hedge trades map-control flex for wrong-read
+   *  insurance — WORSE on a map whose mid genuinely covers its sites (that's the
+   *  measured 3-site read-floor null), so it's authored per map and MEASURED with
+   *  `pnpm balance`, never defaulted. Absent = 0 = byte-identical. */
+  defHedge?: number;
 }
 
 // Haven and Lotus are genuinely three-site — they now field all three (A/B/C).
@@ -32,8 +42,23 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   // sites far out = free plants, sites pulled in = mutual blindness. The fix
   // class is LOS-aware placement / defense shape (defSpots is the substrate),
   // not anchors. Icebox is separately DEF-lean (site probes 35-40.5%).
+  //
+  // THE DEFENSE-SHAPE PASS (defHedge) then delivered exactly that fix class —
+  // and RESCUED TWO of them (hedge sweep, 80-seed mirrors, confirmed at 200):
+  // bind hedge=3 76.6→57.3 ok (plant 95→72) and icebox hedge=2 41.0→51.6 ok
+  // (its DEF lean was the mid pool over-intercepting a tiny map — re-posting it
+  // on sites fixed a lean the site-anchor probes couldn't). Both now in
+  // MAP_POOL. The rest are hedge-measured NULLS — don't re-run: fracture
+  // plateaus 83.1→62.2 at hedge 3, abyss 83.4→64.5 (still ATK with ZERO mid
+  // bodies left to shift), sunset's stall doesn't move (37.6→37.2 — it's LOS
+  // starvation, not shape). Combos re-buy the stall coin: fracture hedge×in60-
+  // 160 → 22-34% time, abyss hedge×in60-105 stays 66-73 ATK, sunset hedge3 +
+  // cover-adjacent B-ring defSpots lands 56.3 ATK but 25% time (down from 37 —
+  // closest yet; the residual is mutual-blindness geometry the alpha mask
+  // gives these interiors). A light bind pull under the hedge is noise (in40
+  // 55.4/1.5, in60 58.8/11.5 — non-monotonic), so its anchors stay put.
   abyss:    { atkSpawn: [840, 480], sites: { A: [408, 104], B: [392, 864] }, mid: [620, 482] },
-  bind:     { atkSpawn: [595, 870], sites: { A: [288, 264], B: [720, 320] }, mid: [549, 581] },
+  bind:     { atkSpawn: [595, 870], sites: { A: [288, 264], B: [720, 320] }, mid: [549, 581], defHedge: 3 },
   breeze:   { atkSpawn: [470, 870], sites: { A: [144, 288], B: [864, 456] }, mid: [487, 621] },
   fracture: { atkSpawn: [500, 120], sites: { A: [872, 504], B: [96, 520] },  mid: [492, 316] },
   // haven/lotus outer sites sit at the plaza MOUTHS (not centres): the raw centre
@@ -43,7 +68,7 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   // rotation tax and lands both `ok` on pnpm balance (54.2 / 54.3). Measured, not
   // eyeballed — re-sweep with the mirror harness before moving them again.
   haven:    { atkSpawn: [850, 520], sites: { A: [368, 216], B: [344, 470], C: [360, 772] }, mid: [607, 502] },
-  icebox:   { atkSpawn: [850, 540], sites: { A: [608, 208], B: [720, 800] }, mid: [757, 522] },
+  icebox:   { atkSpawn: [850, 540], sites: { A: [608, 208], B: [720, 800] }, mid: [757, 522], defHedge: 2 },
   lotus:    { atkSpawn: [500, 850], sites: { A: [804, 320], B: [488, 372], C: [182, 464] }, mid: [494, 621] },
   // pearl's sites likewise pulled inward (±45 toward mid — 67.5%→51.6% ATK, the
   // same measured rotation-tax fix; ±90 overshoots STALLY). Icebox RESISTED the
