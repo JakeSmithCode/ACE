@@ -11,7 +11,7 @@ import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
-import { MemoryStore, type FixtureRow } from './store.js';
+import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, seasonLength } from './tick.js';
 import { navOf } from './nav.js';
@@ -32,13 +32,15 @@ export interface LiveServerOpts {
    *  production "matches resolve on a schedule" behaviour (BullMQ in prod; an in-process
    *  IntervalScheduler here). Unset → manual /advance only. */
   autoAdvanceSecs?: number;
+  /** Event-bus replay backlog size (tests shrink it to exercise the resync path). */
+  eventBacklogMax?: number;
   /** Stripe webhook signing secret (`whsec_…`). Set → POST /billing/webhook verifies
    *  Stripe's exact signature scheme and is the VIP source of truth, and /billing/checkout
    *  returns the hosted-checkout stub. Unset (dev) → checkout activates VIP directly so
    *  the loop works without Stripe. */
   stripeWebhookSecret?: string;
 }
-export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; auth: AuthService; close: () => Promise<void> }
+export interface LiveServer { server: Server; url: string; id: string; store: WorldStore; auth: AuthService; close: () => Promise<void> }
 
 const key = (f: { season: number; day: number; slot: number }) => `${f.season}:${f.day}:${f.slot}`;
 
@@ -178,7 +180,10 @@ function standingsView(w: WorldState, rows: FixtureRow[], tier: number, group: n
 export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveServer> {
   const clock = opts.clock ?? (() => Date.now() / 1000);
   const broadcastSecs = opts.broadcastSecs ?? 2400;
-  const store = new MemoryStore();
+  // the read-cache wrapper is the scale fix: 60+ read routes load the world per
+  // request, and a raw store clones the multi-MB WorldState each time — behind
+  // the cache a read is a shared reference (cloned once per WRITE instead).
+  const store = new CachedStore(new MemoryStore());
   const id = await seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
   const accounts = new MemoryAccountStore();
   const auth = new AuthService(accounts, randomBytes(32).toString('hex'), clock);
@@ -280,11 +285,51 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // the legacy engine (DESIGN §9.2): the world remembers its champions, season by season
   const honors: { season: number; champion: string }[] = [];
   // the world news feed (DESIGN §9 — the world feels alive): a rolling log of what's
+  // ── the WORLD EVENT BUS (the live-sync spine) ──────────────────────────────
+  // One SSE stream (`GET /events`) every client hangs on; every state change the
+  // FE cares about is emitted as a SEQUENCE-NUMBERED event. Sync is guaranteed
+  // three ways: (1) push replaces polling, so a connected client is fresh within
+  // one RTT of the change; (2) EventSource auto-reconnect presents Last-Event-ID
+  // and the server REPLAYS the missed tail from a bounded backlog; (3) a gap the
+  // backlog can't cover gets an explicit `resync` event — the client refetches
+  // everything. A client can be behind, but never silently stale.
+  // Account-targeted events (notif/mail) only reach that account's connections.
+  // Fan-out is O(connections) string writes of ONE prebuilt payload — no
+  // per-client compute — so thousands of subscribers are fine.
+  interface EvClient { res: ServerResponse; account: string | null }
+  const evClients = new Set<EvClient>();
+  let evSeq = 0;
+  const EV_BACKLOG_MAX = opts.eventBacklogMax ?? 800;
+  const evBacklog: { seq: number; ev: string; data: string; account?: string }[] = [];
+  const emit = (ev: string, data: unknown, account?: string) => {
+    const seq = ++evSeq;
+    const payload = JSON.stringify(data ?? {});
+    evBacklog.push({ seq, ev, data: payload, account });
+    if (evBacklog.length > EV_BACKLOG_MAX) evBacklog.splice(0, evBacklog.length - EV_BACKLOG_MAX);
+    const msg = `id: ${seq}\nevent: ${ev}\ndata: ${payload}\n\n`;
+    for (const c of evClients) {
+      if (account && c.account !== account) continue;
+      try { c.res.write(msg); } catch { evClients.delete(c); }
+    }
+  };
+  // one shared heartbeat keeps idle streams alive through proxies + prunes the dead
+  const evHeartbeat = setInterval(() => {
+    for (const c of evClients) { try { c.res.write(':hb\n\n'); } catch { evClients.delete(c); } }
+  }, 25000);
+  // the reveal moment is a real event (standings/results unlock) — armed per live day
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  const armReveal = (season: number, day: number, revealAt: number) => {
+    if (revealTimer) clearTimeout(revealTimer);
+    const ms = Math.max(0, (revealAt - clock()) * 1000);
+    revealTimer = setTimeout(() => emit('reveal', { season, day }), ms);
+  };
+
   // happening — signings, champions. Newest pushed last; the API returns it reversed.
   const news: { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }[] = [];
   const pushNews = (kind: 'transfer' | 'champion' | 'season' | 'award', text: string, season: number, day: number) => {
     news.push({ kind, text, season, day });
     if (news.length > 60) news.shift();   // keep it bounded
+    emit('news', { kind, text, season, day });
   };
   // per-account notifications — the world news feed targeted to YOU (your fixtures +
   // results, season outcomes, your player's awards). In-memory keyed by account (the
@@ -298,6 +343,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     list.unshift({ id: ++notifSeq, kind, text, season, day, read: false, at: clock() });
     if (list.length > 50) list.length = 50;   // bounded inbox
     notifs.set(account, list);
+    emit('notif', { kind, text }, account);   // targeted push — the bell updates live
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
   const notifiedBdays = new Set<string>();   // season:day:playerId birthdays already shouted out
@@ -367,10 +413,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // re-sim each watchable fixture once → the live source the match-center streams.
   // Keyed by season:day:slot, so days accumulate as the season advances.
   const timelines = new Map<string, MatchTimeline>();
+  // shared live-broadcast frame hubs, one per (season, day) — see the /live route
+  interface LiveHub { clients: Set<ServerResponse>; timer: ReturnType<typeof setInterval> | null; frame?: () => void }
+  const liveHubs = new Map<string, LiveHub>();
+  // season stat-leaders memo (recomputed only when a new reveal lands)
+  let statsMemo: { key: string; body: unknown } | null = null;
+  // leaderboard/power-rankings memos, keyed by (season, day[, role]) — bounded
+  const rankMemo = new Map<string, unknown>();
   const cacheDay = async (season: number, day: number) => {
     for (const f of await store.fixtures(id, season)) if (f.day === day && f.inputSnapshot && !timelines.has(key(f))) timelines.set(key(f), simulateMatch(f.inputSnapshot, navOf(f.inputSnapshot.map), 0));
   };
   await cacheDay(1, 0);
+  armReveal(1, 0, liveKickoff + broadcastSecs);   // the boot day's reveal is an event too
   /** Tick the next match-day onto the air (a fresh broadcast window). The owner's
    *  authored tactics drive their fixtures, so a season plays out under your plan.
    *  At the season boundary it rolls the season over (playoffs → settle → develop →
@@ -382,6 +436,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       await runTick(store, id, { full: fullDivs(w), navOf, kickoffAt: liveKickoff, broadcastSecs });
       liveDay = w.day;
       await cacheDay(w.season, w.day);
+      // push the new live day to every connected client + arm the reveal moment
+      emit('day', { season: w.season, day: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs });
+      armReveal(w.season, liveDay, liveKickoff + broadcastSecs);
     };
     // the living market: a couple of AI clubs sign the best free agents each tick
     const churnMarket = async (): Promise<number> => {
@@ -391,6 +448,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (signings.length) {
         await store.saveWorld(id, nw);
         signings.forEach(s => { sold.add(s.handle); pushNews('transfer', `${s.club} signed ${s.handle} ($${(s.fee / 1000).toFixed(1)}k)`, w0.season, liveDay); });
+        emit('market', { sold: signings.map(s => s.handle) });   // boards refresh live
       }
       return signings.length;
     };
@@ -542,6 +600,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       }
     }
     await tickAcademies(roll.season + 1);   // develop prospects + deliver the new class
+    emit('season', { season: roll.season + 1, champion: roll.champion ?? null });
     await tickDay((await store.loadWorld(id))!);
     await notifyOwners();   // the new season's day-0 fixture going live
     return { broadcastDay: liveDay, done: false, rollover: true, season: roll.season + 1, champion: roll.champion };
@@ -568,6 +627,30 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const account = (bearer && auth.verify(bearer)) || (req.headers['x-account'] as string | undefined) || null;
 
     if (path[0] === 'health') return json(res, 200, { ok: true, id, now, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs });
+
+    // GET /events[?token=][&since=N]  → the WORLD EVENT STREAM (SSE) — the one
+    // channel a client hangs on for live sync. `hello` carries the current live
+    // cursor + latest seq so a fresh client aligns immediately; a reconnect
+    // presents Last-Event-ID (EventSource does this natively) or ?since= and the
+    // missed tail replays from the backlog; a gap the backlog can't cover gets
+    // `resync` — the client refetches everything. Behind, never silently stale.
+    if (path[0] === 'events' && path.length === 1) {
+      const q = new URL(req.url ?? '/', 'http://x').searchParams;
+      const acct = (q.get('token') ? auth.verify(q.get('token')!) : null) || account;
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'access-control-allow-origin': '*' });
+      const w = (await store.loadWorld(id))!;
+      res.write(`event: hello\ndata: ${JSON.stringify({ seq: evSeq, season: w.season, day: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs })}\n\n`);
+      const since = Number(req.headers['last-event-id'] ?? q.get('since') ?? NaN);
+      if (!Number.isNaN(since) && since < evSeq) {
+        const oldest = evBacklog[0]?.seq ?? evSeq + 1;
+        if (since < oldest - 1) res.write('event: resync\ndata: {}\n\n');   // gap — full refetch
+        else for (const e of evBacklog) if (e.seq > since && (!e.account || e.account === acct)) res.write(`id: ${e.seq}\nevent: ${e.ev}\ndata: ${e.data}\n\n`);
+      }
+      const client: EvClient = { res, account: acct || null };
+      evClients.add(client);
+      req.on('close', () => evClients.delete(client));
+      return;
+    }
 
     // ── self-owned auth (§5/§9): register / login / refresh / verify ──────────
     if (path[0] === 'auth' && req.method === 'POST') {
@@ -653,20 +736,45 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // GET /live/:season/:day  → SSE: the synced live match-center for that day
     if (path[0] === 'live' && path.length === 3) {
       const season = +path[1], day = +path[2];
-      const watched = (await store.fixtures(id, season)).filter(f => f.day === day && timelines.has(key(f)));
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'access-control-allow-origin': '*' });
-      const frame = () => {
-        const t = clock();
-        const fixtures = watched.map(f => {
-          const v = publicView(f, t), m = liveMatchState(timelines.get(key(f))!, v.frac);
-          return { slot: f.slot, status: v.status, frac: +v.frac.toFixed(3), running: [m.scoreA, m.scoreB], round: m.round + 1, rounds: timelines.get(key(f))!.rounds.length, final: v.score ?? null, home: labelOf(f.home), away: labelOf(f.away), map: f.inputSnapshot?.map ?? null };
-        });
-        res.write(`data: ${JSON.stringify({ now: t, fixtures })}\n\n`);
-        if (fixtures.every(f => f.status === 'resolved')) { clearInterval(timer); res.write('event: done\ndata: {}\n\n'); res.end(); }
-      };
-      const timer = setInterval(frame, 1000);
-      frame();
-      req.on('close', () => clearInterval(timer));
+      // SHARED frame hub per (season, day): the frame is computed + stringified
+      // ONCE a second no matter how many clients watch — fan-out is a string
+      // write per socket (the scale property; per-connection compute would be
+      // O(clients × fixtures) JSON work every second).
+      const hubKey = `${season}:${day}`;
+      let hub = liveHubs.get(hubKey);
+      if (!hub) {
+        const watched = (await store.fixtures(id, season)).filter(f => f.day === day && timelines.has(key(f)));
+        const again = liveHubs.get(hubKey);   // an await ran — another request may have built it
+        if (again) hub = again;
+        else {
+          const h: LiveHub = { clients: new Set(), timer: null };
+          const frame = () => {
+            const t = clock();
+            const fixtures = watched.map(f => {
+              const v = publicView(f, t), m = liveMatchState(timelines.get(key(f))!, v.frac);
+              return { slot: f.slot, status: v.status, frac: +v.frac.toFixed(3), running: [m.scoreA, m.scoreB], round: m.round + 1, rounds: timelines.get(key(f))!.rounds.length, final: v.score ?? null, home: labelOf(f.home), away: labelOf(f.away), map: f.inputSnapshot?.map ?? null };
+            });
+            const payload = `data: ${JSON.stringify({ now: t, fixtures })}\n\n`;
+            for (const c of h.clients) { try { c.write(payload); } catch { h.clients.delete(c); } }
+            if (fixtures.every(f => f.status === 'resolved')) {
+              for (const c of h.clients) { try { c.write('event: done\ndata: {}\n\n'); c.end(); } catch { /* gone */ } }
+              if (h.timer) clearInterval(h.timer);
+              liveHubs.delete(hubKey);
+            }
+          };
+          h.timer = setInterval(frame, 1000);
+          h.frame = frame;
+          liveHubs.set(hubKey, h);
+          hub = h;
+        }
+      }
+      hub.clients.add(res);
+      hub.frame?.();   // immediate first frame for the newcomer (shared with everyone — idempotent data)
+      req.on('close', () => {
+        hub!.clients.delete(res);
+        if (hub!.clients.size === 0) { if (hub!.timer) clearInterval(hub!.timer); liveHubs.delete(hubKey); }
+      });
       return;
     }
     // GET /clubs/:slug  → public club PROFILE: identity + the fielded five + how the club
@@ -767,6 +875,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const signed = applySigning(w, mine.id, player, result.paid!);
       const withDeal = { ...signed, clubs: signed.clubs.map(c => c.id === mine.id ? { ...c, roster: c.roster.map(p => p.handle === player.handle ? { ...p, contract: newContract(p, signed.patch, CONTRACT_YEARS) } : p) } : c) };
       await store.saveWorld(id, withDeal);
+      emit('market', { sold: [player.handle] });   // every open board drops him live
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ...result, club: publicClub(after, after.clubs[clubIdx]) });
     }
@@ -780,6 +889,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const sale = resolveSale(w, mine.id, b.ref ?? '');
       if (!sale.ok) return json(res, 200, sale);                      // blocked / no buyer → client shows why
       await store.saveWorld(id, applySale(w, mine.id, b.ref!, sale.buyerIdx!, sale.fee!));
+      emit('market', { sold: [] });   // rosters moved — market/squad views refresh
       const after = (await store.loadWorld(id))!;
       const ci = after.clubs.findIndex(c => c.id === mine.id);
       return json(res, 200, { ...sale, club: publicClub(after, after.clubs[ci]) });
@@ -794,29 +904,39 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'leaderboard' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       const role = new URL(req.url ?? '/', 'http://x').searchParams.get('role') || undefined;
-      return json(res, 200, { players: topPlayers(w, 25, role) });
+      // memoized per (season, day, role): rosters only change on a tick — a full
+      // cross-club sort per request is pure waste under load
+      const mk = `${w.season}:${w.day}:${role ?? ''}`;
+      if (!rankMemo.has(mk)) { if (rankMemo.size > 24) rankMemo.clear(); rankMemo.set(mk, { players: topPlayers(w, 25, role) }); }
+      return json(res, 200, rankMemo.get(mk));
     }
     // GET /powerrankings  → the world's strongest clubs by squad power (+ lifecycle stage)
     if (path[0] === 'powerrankings' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
-      return json(res, 200, { clubs: topClubs(w, 25) });
+      const mk = `pr:${w.season}:${w.day}`;
+      if (!rankMemo.has(mk)) { if (rankMemo.size > 24) rankMemo.clear(); rankMemo.set(mk, { clubs: topClubs(w, 25) }); }
+      return json(res, 200, rankMemo.get(mk));
     }
     // GET /stats  → season player stats (top fraggers) from RESOLVED watched matches only
     // (embargo-safe — a sealed match contributes nothing until it reveals).
     if (path[0] === 'stats' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       const rows = await store.fixtures(id, w.season);
-      const acc = new Map<string, PlayerStat>();
-      for (const f of rows) {
-        if (fixtureStatus(f, now) !== 'resolved') continue;
-        const tl = timelines.get(key(f));
-        if (tl) tallyTimeline(tl, acc);
+      // memoized per (season, resolved-count): the tally walks every resolved
+      // timeline's full event stream — recompute only when a new reveal lands,
+      // not per request (this endpoint sits on the standings panel of every client)
+      const resolved = rows.filter(f => fixtureStatus(f, now) === 'resolved' && timelines.has(key(f)));
+      const memoKey = `${w.season}:${resolved.length}`;
+      if (statsMemo?.key !== memoKey) {
+        const acc = new Map<string, PlayerStat>();
+        for (const f of resolved) tallyTimeline(timelines.get(key(f))!, acc);
+        const players = [...acc.values()]
+          .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
+          .slice(0, 25)
+          .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills, hsPct: s.kills ? Math.round((s.hs / s.kills) * 100) : 0 }));
+        statsMemo = { key: memoKey, body: { season: w.season, players } };
       }
-      const players = [...acc.values()]
-        .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
-        .slice(0, 25)
-        .map((s, i) => ({ rank: i + 1, ...s, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills, hsPct: s.kills ? Math.round((s.hs / s.kills) * 100) : 0 }));
-      return json(res, 200, { season: w.season, players });
+      return json(res, 200, statsMemo.body);
     }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
     if (path[0] === 'notifications' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
@@ -871,6 +991,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const base = { id: mid, threadId, fromAccount: account, fromTag: mine.tag, fromName: mine.name, toTag: target.tag, subject, body: (b.body ?? '').slice(0, 1000), season: w.season, day: liveDay, at: clock() };
       pushMail(target.owner, { ...base, read: false, mine: false });           // recipient: unread, incoming
       pushMail(account, { ...base, read: true, mine: true });                   // sender: a read copy (sent items)
+      emit('mail', { from: mine.tag, subject }, target.owner);                  // the recipient's ✉ badge updates live
       notify(target.owner, 'system', `✉ New message from ${mine.tag}: ${subject}`, w.season, liveDay);
       await persistAccount(target.owner); await persistAccount(account);        // durable: both mailboxes (+ recipient's notif)
       return json(res, 200, { ok: true });
@@ -1372,7 +1493,16 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     server.listen(opts.port ?? 0, () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : opts.port;
-      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => { scheduler?.stop(); server.close(() => r()); }) });
+      resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => {
+      scheduler?.stop();
+      clearInterval(evHeartbeat);
+      if (revealTimer) clearTimeout(revealTimer);
+      for (const h of liveHubs.values()) { if (h.timer) clearInterval(h.timer); for (const c of h.clients) { try { c.end(); } catch { /* gone */ } } }
+      liveHubs.clear();
+      for (const c of evClients) { try { c.res.end(); } catch { /* gone */ } }
+      evClients.clear();
+      server.close(() => r());
+    }) });
     });
   });
 }

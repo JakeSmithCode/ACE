@@ -194,6 +194,20 @@ export class AceServer {
   }
   /** Post a message to a room ('global' or your own division room). */
   sendChat(token: string, room: string, text: string): Promise<{ ok: boolean; error?: string }> { return this.post('/chat/send', { room, text }, token); }
+  /** The WORLD EVENT STREAM — the live-sync spine. One SSE connection carrying
+   *  sequence-numbered events (`hello`/`day`/`reveal`/`season`/`news`/`market` +
+   *  account-targeted `notif`/`mail`). EventSource auto-reconnects presenting
+   *  Last-Event-ID, the server replays the missed tail, and a gap it can't cover
+   *  arrives as `resync` — so the caller's `onResync` (full refetch) is the
+   *  guarantee that a client is never silently stale. Returns unsubscribe. */
+  events(token: string | null, onEvent: (ev: string, data: Record<string, unknown>) => void, onResync: () => void): () => void {
+    const es = new EventSource(`${this.base}/events${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+    for (const ev of ['hello', 'day', 'reveal', 'season', 'news', 'market', 'notif', 'mail']) {
+      es.addEventListener(ev, e => { try { onEvent(ev, JSON.parse((e as MessageEvent).data || '{}')); } catch { /* keepalive */ } });
+    }
+    es.addEventListener('resync', () => onResync());
+    return () => es.close();
+  }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }

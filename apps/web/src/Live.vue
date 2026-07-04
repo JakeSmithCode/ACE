@@ -22,6 +22,7 @@ const world = ref<WorldSummary | null>(null);
 const table = ref<StandingRow[]>([]);
 const fixtures = ref<LiveFixture[]>([]);
 let stopStream: (() => void) | null = null;
+let stopEvents: (() => void) | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 const season = computed(() => world.value?.season ?? 1);
@@ -71,6 +72,7 @@ async function doAuth() {
     }
     authOpen.value = false; password.value = '';
     await refreshMe();
+    openEvents();   // re-key the event stream with the signed-in token (targeted notif/mail)
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
 async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); } }
@@ -92,7 +94,7 @@ async function doClaim() {
   try { myClub.value = await server.value.claim(claimTag.value, token.value); await refreshMe(); }  // refresh → /me carries the plan
   catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-function signOut() { token.value = null; myClub.value = null; authErr.value = ''; planOpen.value = false; }
+function signOut() { token.value = null; myClub.value = null; authErr.value = ''; planOpen.value = false; openEvents(); }
 
 // --- author your club's tactics (PATCH /me/plan → drives your next tick) ------
 const planOpen = ref(false);
@@ -431,9 +433,9 @@ async function connect() {
     // a shared deep-link (?watch=season/day/slot) → auto-open that replay
     const wp = new URL(location.href).searchParams.get('watch');
     if (wp) { const [ws, wd, wsl] = wp.split('/').map(Number); if (![ws, wd, wsl].some(isNaN)) void watchAt(ws, wd, wsl); }
-    // standings only move at reveal — refresh them every few seconds while watching
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); if (!mailOpen.value) loadMail(); }, 4000);
+    // the live-sync spine: one /events stream pushes every change (day/reveal/
+    // market/notif/mail/season) — no per-client polling loops
+    openEvents();
   } catch (e) { status.value = 'error'; errMsg.value = (e as Error).message; }
 }
 function openStream() {
@@ -464,6 +466,59 @@ async function advance() {
     if (cupOpen.value) await loadCup();
   } catch (e) { errMsg.value = (e as Error).message; } finally { advancing.value = false; }
 }
+// ── the live-sync layer: server events drive every refresh ──────────────────
+// The /events stream is the source of truth for "something changed". Each event
+// refreshes exactly the affected slices; `resync` (or a reconnect that lands on
+// a moved world) falls back to a FULL refetch — so this client can lag by a
+// round-trip but can never be silently stale. A slow 60s failsafe poll remains
+// as belt-and-braces (vs the old 4s × 3-endpoint poll per client).
+async function fullRefresh() {
+  if (!server.value) return;
+  try {
+    world.value = await server.value.world();
+    DAY.value = world.value.broadcastDay ?? 0;
+    openStream();
+    await refreshMe(); await refreshTable(); await loadNews(); await loadHonors();
+    if (board.value.length || marketOpen.value) await loadBoard();
+    if (statsOpen.value) await loadStats();
+    if (cupOpen.value) await loadCup();
+  } catch { /* transient — the failsafe or the next event catches us up */ }
+}
+function openEvents() {
+  if (!server.value) return;
+  stopEvents?.();
+  stopEvents = server.value.events(token.value, async (ev, data) => {
+    if (ev === 'hello') {   // (re)connected: if the world moved while we were away, catch up fully
+      if (world.value && (data.day as number) !== DAY.value) await fullRefresh();
+      return;
+    }
+    if (ev === 'season') {
+      if (data.champion) champBanner.value = { season: (data.season as number) - 1, champion: data.champion as string };
+      cupView.value = null;   // a new season → a fresh cup
+      await fullRefresh();
+      return;
+    }
+    if (ev === 'day') {
+      // instant: the event carries the new cursor — flip the header + live-score
+      // stream NOW (cheap, shared hub), then spread the heavy refetch over a few
+      // seconds so a thousand clients don't stampede the API in the same instant
+      DAY.value = data.day as number;
+      if (world.value) world.value = { ...world.value, season: data.season as number, broadcastDay: data.day as number };
+      openStream();
+      await new Promise(r => setTimeout(r, Math.random() * 2500));
+      await fullRefresh();
+      return;
+    }
+    if (ev === 'reveal') { await refreshTable(); if (statsOpen.value) await loadStats(); return; }
+    if (ev === 'news') { await loadNews(); return; }
+    if (ev === 'market') { await refreshMe(); if (board.value.length || marketOpen.value) await loadBoard(); return; }
+    if (ev === 'notif') { await loadNotifs(); return; }
+    if (ev === 'mail') { await loadMail(); return; }
+  }, fullRefresh);
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); if (!mailOpen.value) loadMail(); }, 60000);
+}
+
 // the standings follow YOUR division — a relegated/promoted owner sees their own table
 // (an unowned/visitor view defaults to the Premier).
 const tableTier = computed(() => myClub.value?.tier ?? 0);
@@ -775,7 +830,7 @@ const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.
 const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
 
 onMounted(() => { connect(); window.addEventListener('keydown', onKey); });
-onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
+onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
 </script>
 
 <template>

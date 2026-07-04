@@ -61,6 +61,48 @@ export function fixtureRow(worldId: string, season: number, day: number, slot: n
   };
 }
 
+/** A write-through READ CACHE over any WorldStore — the scale fix for the HTTP
+ *  layer. Dozens of read routes each load the world per request, and a raw store
+ *  clones the whole multi-MB WorldState every time (a row read). At thousands of
+ *  users that clone IS the CPU bill, so this wrapper keeps ONE shared snapshot
+ *  per world: cloned once per WRITE (writes are a few per match-day), handed out
+ *  by reference on every read.
+ *
+ *  CONTRACT: callers must treat a loaded world as IMMUTABLE. The HTTP layer and
+ *  the tick already do (every update spreads into new objects and goes through
+ *  saveWorld) — never mutate a loaded world in place behind this cache.
+ *  The snapshot is cloned on save, so the inner store can never be corrupted by
+ *  a caller mutating the object it passed to saveWorld afterwards. */
+export class CachedStore implements WorldStore {
+  private worlds = new Map<string, WorldState>();
+  constructor(private inner: WorldStore) {}
+  async createWorld(w: WorldState): Promise<string> {
+    const id = await this.inner.createWorld(w);
+    this.worlds.set(id, structuredClone(w));
+    return id;
+  }
+  async loadWorld(id: string): Promise<WorldState | null> {
+    const hit = this.worlds.get(id);
+    if (hit) return hit;
+    const w = await this.inner.loadWorld(id);   // already a private copy (row read)
+    if (w) this.worlds.set(id, w);
+    return w;
+  }
+  async saveWorld(id: string, w: WorldState): Promise<void> {
+    await this.inner.saveWorld(id, w);
+    this.worlds.set(id, structuredClone(w));
+  }
+  listWorlds(): Promise<string[]> { return this.inner.listWorlds(); }
+  appendFixtures(id: string, rows: FixtureRow[]): Promise<void> { return this.inner.appendFixtures(id, rows); }
+  fixtures(id: string, season?: number): Promise<FixtureRow[]> { return this.inner.fixtures(id, season); }
+  tickDone(id: string, season: number, day: number, kind: TickKind): Promise<boolean> { return this.inner.tickDone(id, season, day, kind); }
+  recordTick(row: TickRow): Promise<void> { return this.inner.recordTick(row); }
+  ticks(id: string): Promise<TickRow[]> { return this.inner.ticks(id); }
+  loadAccountData(id: string, account: string): Promise<Record<string, unknown> | null> { return this.inner.loadAccountData(id, account); }
+  saveAccountData(id: string, account: string, data: Record<string, unknown>): Promise<void> { return this.inner.saveAccountData(id, account, data); }
+  listAccountData(id: string): Promise<{ account: string; data: Record<string, unknown> }[]> { return this.inner.listAccountData(id); }
+}
+
 /** In-memory implementation — proves the boundary and runs the whole tick loop
  *  headless. Deterministic (no clock / random): world ids are a simple counter. */
 export class MemoryStore implements WorldStore {
