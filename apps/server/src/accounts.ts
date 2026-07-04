@@ -10,7 +10,7 @@ import { hashPassword, verifyPassword, signToken, verifyToken, newRefreshToken, 
  *  the dev flow + headless tests can complete verification without a mail server. */
 export interface RegisterResult extends Session { verifyToken: string }
 
-export interface Account { id: string; email: string; passwordHash: string; createdAt: number; verified: boolean; verifyToken: string | null }
+export interface Account { id: string; email: string; passwordHash: string; createdAt: number; verified: boolean; verifyToken: string | null; vipUntil: number | null }
 export interface RefreshRow { accountId: string; tokenHash: string; expiresAt: number; revoked: boolean }
 
 /** **Async** so a `PgAccountStore` fits the same interface (the `MemoryAccountStore`
@@ -23,6 +23,9 @@ export interface AccountStore {
   byVerifyToken(token: string): Promise<Account | undefined>;
   /** Mark an account email-verified and clear its pending token. */
   markVerified(accountId: string): Promise<void>;
+  /** Set the VIP horizon (epoch seconds; null clears). The Stripe webhook is the
+   *  source of truth — this is only ever called from billing (DESIGN §8.4). */
+  setVip(accountId: string, vipUntil: number | null): Promise<void>;
   saveRefresh(accountId: string, hash: string, expiresAt: number): Promise<void>;
   /** The live row for a refresh-token hash (or undefined) — for verify + rotation. */
   refresh(hash: string): Promise<RefreshRow | undefined>;
@@ -38,7 +41,7 @@ export class MemoryAccountStore implements AccountStore {
   async create(email: string, passwordHash: string, now: number, verifyToken: string): Promise<Account> {
     const norm = email.trim().toLowerCase();
     if (this.byEmailIdx.has(norm)) throw new Error('email already registered');
-    const acc: Account = { id: `acct-${++this.n}`, email: norm, passwordHash, createdAt: now, verified: false, verifyToken };
+    const acc: Account = { id: `acct-${++this.n}`, email: norm, passwordHash, createdAt: now, verified: false, verifyToken, vipUntil: null };
     this.accounts.set(acc.id, acc);
     this.byEmailIdx.set(norm, acc.id);
     return acc;
@@ -47,6 +50,7 @@ export class MemoryAccountStore implements AccountStore {
   async byId(id: string): Promise<Account | undefined> { return this.accounts.get(id); }
   async byVerifyToken(token: string): Promise<Account | undefined> { for (const a of this.accounts.values()) if (a.verifyToken && a.verifyToken === token) return a; return undefined; }
   async markVerified(accountId: string): Promise<void> { const a = this.accounts.get(accountId); if (a) this.accounts.set(accountId, { ...a, verified: true, verifyToken: null }); }
+  async setVip(accountId: string, vipUntil: number | null): Promise<void> { const a = this.accounts.get(accountId); if (a) this.accounts.set(accountId, { ...a, vipUntil }); }
   async saveRefresh(accountId: string, hash: string, expiresAt: number): Promise<void> { this.refreshes.set(hash, { accountId, tokenHash: hash, expiresAt, revoked: false }); }
   async refresh(hash: string): Promise<RefreshRow | undefined> { return this.refreshes.get(hash); }
   async revokeRefresh(hash: string): Promise<void> { const r = this.refreshes.get(hash); if (r) this.refreshes.set(hash, { ...r, revoked: true }); }

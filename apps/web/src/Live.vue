@@ -74,6 +74,19 @@ async function doAuth() {
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
 async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); } }
+// VIP supporter tier (never pay-to-win): dev servers activate instantly; a
+// Stripe-configured server returns the hosted checkout and the webhook flips it.
+const vipBusy = ref(false);
+const vipDate = (t?: number | null) => t ? new Date(t * 1000).toLocaleDateString() : '';
+async function goVip() {
+  if (!server.value || !token.value) return;
+  vipBusy.value = true;
+  try {
+    const r = await server.value.checkoutVip(token.value);
+    if (r.url) window.open(r.url, '_blank');
+    else await refreshMe();   // dev checkout — VIP is live immediately
+  } catch (e) { errMsg.value = (e as Error).message; } finally { vipBusy.value = false; }
+}
 async function doClaim() {
   if (!server.value || !token.value || !claimTag.value) return; busy.value = true; authErr.value = '';
   try { myClub.value = await server.value.claim(claimTag.value, token.value); await refreshMe(); }  // refresh → /me carries the plan
@@ -811,6 +824,9 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
             <button class="lv-planbtn trophies" :class="{ on: trophiesOpen }" @click="showPanel('trophies')">🏆 trophies</button>
           </span>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
+          <span v-if="myClub.vip" class="lv-vip" :title="`VIP supporter — half-price scout reports + the club badge. Renews ${vipDate(myClub.vipUntil)}`">★ VIP</span>
+          <button v-else class="lv-vipbtn" :disabled="vipBusy" @click="goVip"
+                  title="become a VIP supporter — half-price scout reports, a club badge. Convenience only, never pay-to-win: the sim is identical for everyone">☆ go VIP</button>
           <div class="lv-bellwrap">
             <button class="lv-bell" :class="{ on: notifOpen }" @click="toggleNotifs" title="notifications">🔔<span v-if="notifUnread" class="lv-bellbadge">{{ notifUnread > 9 ? '9+' : notifUnread }}</span></button>
           </div>
@@ -1512,6 +1528,7 @@ onUnmounted(() => { stopStream?.(); chatStop?.(); if (pollTimer) clearInterval(p
               <span class="lv-clubdiv">{{ clubModal.division || tierName(clubModal.tier) }}</span>
               <span class="lv-stars" :title="`squad quality`">{{ '★'.repeat(clubStars(clubModal.power)) }}<i>{{ '★'.repeat(5 - clubStars(clubModal.power)) }}</i></span>
               <span :class="clubModal.owned ? 'lv-owntag' : 'lv-aitag'">{{ clubModal.owned ? '◉ OWNED' : '⚙ AI' }}</span>
+              <span v-if="clubModal.vip" class="lv-vip" title="this club's owner is a VIP supporter">★ VIP</span>
               <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
             </div>
             <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>

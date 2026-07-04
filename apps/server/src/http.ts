@@ -18,6 +18,7 @@ import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus, liveFrac } from './live.js';
 import { claim, savePlan, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
+import { verifyStripeSig, vipFromEvent, vipActive, VIP_DAYS } from './billing.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
 import { buildCircuitView, type CircuitView } from './circuitView.js';
 import { buildWorldCupView, type WorldCupView } from './worldCupView.js';
@@ -31,6 +32,11 @@ export interface LiveServerOpts {
    *  production "matches resolve on a schedule" behaviour (BullMQ in prod; an in-process
    *  IntervalScheduler here). Unset → manual /advance only. */
   autoAdvanceSecs?: number;
+  /** Stripe webhook signing secret (`whsec_…`). Set → POST /billing/webhook verifies
+   *  Stripe's exact signature scheme and is the VIP source of truth, and /billing/checkout
+   *  returns the hosted-checkout stub. Unset (dev) → checkout activates VIP directly so
+   *  the loop works without Stripe. */
+  stripeWebhookSecret?: string;
 }
 export interface LiveServer { server: Server; url: string; id: string; store: MemoryStore; auth: AuthService; close: () => Promise<void> }
 
@@ -81,6 +87,13 @@ const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve
   let buf = '';
   req.on('data', c => (buf += c));
   req.on('end', () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
+});
+// the RAW body — the Stripe webhook signature is computed over the exact bytes,
+// so it must be verified BEFORE any JSON parse.
+const readRaw = (req: IncomingMessage): Promise<string> => new Promise(resolve => {
+  let buf = '';
+  req.on('data', c => (buf += c));
+  req.on('end', () => resolve(buf));
 });
 
 /** A player's highest-mastery agent (the engine's default pick; name tiebreak). */
@@ -167,7 +180,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const broadcastSecs = opts.broadcastSecs ?? 2400;
   const store = new MemoryStore();
   const id = await seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
-  const auth = new AuthService(new MemoryAccountStore(), randomBytes(32).toString('hex'), clock);
+  const accounts = new MemoryAccountStore();
+  const auth = new AuthService(accounts, randomBytes(32).toString('hex'), clock);
+  /** Is this account VIP right now? Feature checks read this and nothing else —
+   *  VIP is convenience/depth (scout discount, badge), never the sim. */
+  const isVip = async (acct: string | null): Promise<boolean> =>
+    !!acct && vipActive((await accounts.byId(acct))?.vipUntil, clock());
   const circuitSeed = opts.seed ?? 7;
   let circuit: CircuitView | undefined;   // the international circuit, computed once on demand
   let worldCupCache: WorldCupView | undefined;   // the World Cup, recomputed each season
@@ -566,6 +584,37 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       return json(res, 404, { error: 'unknown auth route' });
     }
 
+    // ── Stripe VIP billing (PHASE2 §12 — the webhook is the source of truth) ──
+    // POST /billing/checkout → start a VIP subscription. With a Stripe secret
+    // configured this returns the hosted-checkout stub (the NestJS build creates
+    // the real session via the SDK); in dev it activates VIP directly so the
+    // full loop works without Stripe. Never pay-to-win: VIP gates convenience.
+    if (path[0] === 'billing' && path[1] === 'checkout' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      if (opts.stripeWebhookSecret) {
+        return json(res, 200, { url: `https://checkout.stripe.com/c/pay/ace-vip#${account}`, note: 'complete checkout with Stripe — the webhook flips VIP' });
+      }
+      const until = Math.floor(clock()) + VIP_DAYS * 86400;
+      await accounts.setVip(account, until);
+      return json(res, 200, { dev: true, vip: true, vipUntil: until });
+    }
+    // POST /billing/webhook → Stripe events, verified with Stripe's exact
+    // `stripe-signature` scheme over the RAW body. 400 on a bad signature;
+    // events that don't change VIP are acknowledged and ignored.
+    if (path[0] === 'billing' && path[1] === 'webhook' && req.method === 'POST') {
+      const secret = opts.stripeWebhookSecret;
+      if (!secret) return json(res, 501, { error: 'no webhook secret configured' });
+      const raw = await readRaw(req);
+      if (!verifyStripeSig(req.headers['stripe-signature'] as string | undefined, raw, secret, Math.floor(clock()))) {
+        return json(res, 400, { error: 'invalid signature' });
+      }
+      let evt: { type?: string; data?: { object?: Record<string, unknown> } };
+      try { evt = JSON.parse(raw); } catch { return json(res, 400, { error: 'invalid payload' }); }
+      const change = vipFromEvent(evt, Math.floor(clock()));
+      if (change) await accounts.setVip(change.accountId, change.vipUntil);
+      return json(res, 200, { received: true, applied: !!change });
+    }
+
     // GET /fixtures/:season/:day/:slot  → spoiler-safe public view (+ who's playing)
     if (path[0] === 'fixtures' && path.length === 4) {
       const f = await fixtureAt(+path[1], +path[2], +path[3]);
@@ -660,6 +709,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         cupTitles: cupHistory.filter(t => t.tag === c.tag).length,
         form, record: { w: wins, l: played.length - wins }, standing: standing || null, divSize: table.length,
         vsYou,
+        // the owner's VIP badge (cosmetic — a supporter flag on the public page)
+        vip: c.owner ? await isVip(c.owner) : false,
       });
     }
     // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)
@@ -687,7 +738,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!player) return json(res, 404, { error: 'not on the board' });
       const level = scoutLevelOf(account, player.handle);
       if (level >= SCOUT_MAX) return json(res, 200, { ok: false, reason: 'fully scouted', level, ceiling: scoutedRange(player, false, level) });
-      const cost = scoutCost(level);
+      // VIP perk (faster scouting — DESIGN §8.4): reports at half price. Pure
+      // convenience: the information itself is identical for everyone.
+      const cost = Math.round(scoutCost(level) * ((await isVip(account)) ? 0.5 : 1));
       if (cost > mine.balance) return json(res, 200, { ok: false, reason: 'insufficient funds', cost, level, ceiling: scoutedRange(player, false, level) });
       await store.saveWorld(id, chargeScout((await store.loadWorld(id))!, mine.id, cost));
       const reports = scoutReports.get(account) ?? new Map<string, number>();
@@ -1040,7 +1093,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!account) return json(res, 401, { error: 'no account' });
       const c = await myClub(store, id, account);
       const wm = (await store.loadWorld(id))!;
-      if (!c) return json(res, 200, null);
+      const acct = await accounts.byId(account);
+      const vip = vipActive(acct?.vipUntil, clock());
+      if (!c) return json(res, 200, vip ? { vip, vipUntil: acct?.vipUntil ?? null } : null);
       const academy = academyView(acadOf(account), c.balance, h => scoutLevelOf(account, h));
       const facilities = c.facilities ?? defaultFacilities();
       const staff = c.staff ?? {};
@@ -1063,7 +1118,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const rivalClub = c.rival ? wm.clubs.find(x => x.id === c.rival) : null;
       const rival = rivalClub ? { tag: rivalClub.tag, name: rivalClub.name } : null;
       const nextDerby = oppIdx >= 0 && c.rival === wm.clubs[oppIdx].id;
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0 });
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.
@@ -1182,7 +1237,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!p) return json(res, 404, { error: 'not in your academy' });
       const level = scoutLevelOf(account, p.handle);
       if (level >= SCOUT_MAX) return json(res, 200, { ok: false, reason: 'fully scouted', level, ceiling: scoutedRange(p, true, level) });
-      const cost = scoutCost(level);
+      // VIP perk: half-price reports (same discount as the market — convenience only)
+      const cost = Math.round(scoutCost(level) * ((await isVip(account)) ? 0.5 : 1));
       if (cost > mine.balance) return json(res, 200, { ok: false, reason: 'insufficient funds', cost, level, ceiling: scoutedRange(p, true, level) });
       await store.saveWorld(id, chargeScout((await store.loadWorld(id))!, mine.id, cost));
       addReport(account, p.handle, level + 1);

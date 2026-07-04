@@ -367,6 +367,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-author.edalt.set{border-color:rgba(230,198,106,.55);color:#e6c66a}
 .ace-editor .ed-author.edalt.on{background:#e6c66a;border-color:#e6c66a;color:var(--bg)}
 .ed-samesite{font-size:11px;color:#e6c66a}
+/* VIP supporter tier (convenience only — never pay-to-win) */
+.lv-vip{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:#e6c66a;border:1px solid rgba(230,198,106,.55);border-radius:4px;padding:2px 7px;background:linear-gradient(90deg,rgba(230,198,106,.14),rgba(230,198,106,.04));white-space:nowrap}
+.lv-vipbtn{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line-2);border-radius:4px;padding:2px 7px;background:transparent;cursor:pointer;white-space:nowrap}
+.lv-vipbtn:hover{color:#e6c66a;border-color:rgba(230,198,106,.55)}
 .ace-editor .ed-author.set:not(.on){border-color:var(--brand);color:var(--text)}
 .ace-editor .ed-author.set:not(.on)::after{content:"●";margin-left:5px;color:var(--brand);font-size:8px;vertical-align:middle}
 .pe-site{display:flex;align-items:center;gap:7px;font-family:var(--label);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-bottom:8px;margin-bottom:2px;border-bottom:1px solid var(--line)}
