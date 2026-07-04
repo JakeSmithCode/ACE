@@ -661,7 +661,18 @@ function resolveRound(
       }
     }
 
-    // plant: an attacker controls the site
+    // plant: an attacker controls the site.
+    // MEASURED NULL — an LOS-gated contest ("a defender only contests the plant
+    // if he can SEE the planter": losClear + a CONTEST_R proximity exemption)
+    // was tried for the sunset-donut stall (B times out 76% of rounds at 1.6
+    // kills — an island body freezes a plant it can't see) and REVERTED on the
+    // numbers: the pool's balance genuinely leans on close non-LOS contest
+    // (bare gate: lotus 55→71, haven 53→59, pearl 52→59 ATK; even CONTEST_R=100
+    // leaves lotus 59.7 / haven 58.2), and the moment sunset B's plants unblock
+    // the site flips 75-92% ATK anyway — the ring defense can't win those
+    // rounds, so the donut's stall and its balance are the same coin at the
+    // COMBAT-model level, not a plant-rule bug. Don't re-gate the contest
+    // without a fight model that lets the ring defense hold an open site.
     if (!planted) {
       const atkAtSite = atk().filter(a => dist(posAt(a, t), sitePt) < PLANT_R);
       const defAtSite = def().filter(d => dist(posAt(d, t), sitePt) < SITE_R);

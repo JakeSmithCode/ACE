@@ -90,6 +90,18 @@ export const ANCHORS: Partial<Record<MapId, MapAnchors>> = {
   // sunset site is contestable it loses to the tucked fan; the remaining fix
   // is defense STRENGTH/shape on open-entry maps, not placement. defSpots stays
   // (dormant, byte-identical when absent) as the substrate for that pass.
+  // UPDATE 2 (per-site diagnosis + the LOS-contest null): sunset is TWO broken
+  // maps in one — A is the free-plant class (81.5% ATK, 94% plant, 0 stalls)
+  // and B is the donut (76% timeouts at 1.6 kills, plant 24%: an island body
+  // inside SITE_R freezes a plant it cannot SEE, and nobody can kill it
+  // through the wall). Decoupling the coin was tried every way it can be
+  // authored — plant point moved to the ring (east/south) x island-cover
+  // defSpots x hedge2/3 x A-pulls — and B is BIMODAL in all of them: plants
+  // blocked = 25-45% timeouts, plants unblocked = 69-95% ATK. An engine-level
+  // LOS-gated contest (losClear + proximity exemption) was also swept and
+  // REVERTED — it broke lotus/haven/pearl at every radius that helped B (the
+  // null lives in sim.ts at the plant block). Sunset stays out until the
+  // combat model gives a ring defense a way to WIN an open site.
   sunset:   { atkSpawn: [520, 860], sites: { A: [816, 368], B: [136, 432] }, mid: [498, 630] },
 };
 
