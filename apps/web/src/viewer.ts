@@ -730,7 +730,11 @@ export class Viewer {
     if (covK >= 0.5) factors.push({ icon: '⛨', text: `${e.killer} was set in cover — ${covK >= 1 ? 'only a sliver of body exposed' : 'a shoulder tucked behind the corner'}` });
     if (covV >= 0.5) factors.push({ icon: '⛨', text: `${e.victim} had cover and still lost the exchange` });
     if (smoke) factors.push({ icon: '◍', text: `A ${smoke.side === K?.side ? 'friendly' : 'enemy'} smoke sat on the sightline` });
-    if (flash) factors.push({ icon: '✲', text: `${e.victim} was caught by a ${flash.ability}` });
+    // recon REVEALS (the killer knew exactly where he was); a flash CONCUSSES
+    // (he lost his hold/cover — couldn't stay set through the window)
+    if (flash) factors.push(flash.ability === 'flash'
+      ? { icon: '✲', text: `${e.victim} was concussed — flashed off his angle, nothing "set" survives the window` }
+      : { icon: '✲', text: `${e.victim} was revealed by recon — ${e.killer} knew exactly where to look` });
     if (trap) factors.push({ icon: '◇', text: `${e.victim} tripped ${e.killer}'s side's trap` });
     // weapon range identity (mirrors the engine's W_RANGE bands: close ≤70, long ≥125)
     const sniper = (w: string) => w === 'Operator' || w === 'Marshal';

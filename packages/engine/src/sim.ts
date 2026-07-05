@@ -87,6 +87,15 @@ const CTRL_RESMOKE_U = 0.5;                   // utility a controller needs to t
 const RESMOKE_T0 = 0.30;                      // the second smoke blooms just after the first — sustained coverage through the hit
 const WALL_AGENTS = new Set(['Viper', 'Harbor']);   // wall-controllers: their smoke is a CAPSULE, not a sphere
 const RECAST_AGENTS = new Set(['Omen', 'Astra', 'Clove']);  // recast-controllers: two windows with a GAP
+// INITIATOR kit identity (the controller-pass pattern, applied to the pulse):
+// RECON initiators (Sova/Fade/Gekko) REVEAL — the pulse grants their side the
+// first shot in its window (the original model). CONCUSS initiators
+// (Breach/Skye/KAY/O) FLASH — the pulse STRIPS a caught enemy of everything
+// "set" (hold bonus, cover edge, set-weapon bonus) instead: you don't learn
+// where he is, but he can't hold his angle through it. Same rng draws either
+// way (only the pulse's kind differs), so the comp picks WHICH HALF of a duel
+// the utility bends: information vs denial.
+const CONCUSS_AGENTS = new Set(['Breach', 'Skye', 'KAY/O']);
 const RECAST_SPLIT = 0.64;                    // each recast window's share of the base duration
 const RECAST_GAP = 0.035;                     // the OPEN beat between windows — the defender's swing window
 const BRIM_R = 1.12, BRIM_DUR = 1.2;          // Brimstone: one BIGGER, longer window (post-draw scales)
@@ -306,7 +315,7 @@ const mapScale = (a: MapAnchors): number => charDist(a) / ASCENT_CHAR;
 /** A smoke cloud. `c2` (optional) makes it a WALL — a capsule from c to c2 of
  *  radius r (the Viper/Harbor kit identity) instead of a sphere at c. */
 interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; c2?: Vec2; }
-interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; }
+interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; concuss?: boolean }
 
 function unit(from: Vec2, to: Vec2): Vec2 {
   const dx = to[0] - from[0], dy = to[1] - from[1];
@@ -477,8 +486,8 @@ function resolveRound(
     (s.c2 ? segSegDist(p1, p2, s.c, s.c2) : segDist(p1, p2, s.c)) <= s.r;
   const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
     smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && sightHits(s, p1, p2));
-  const pulseFor = (s: 0 | 1, p: Vec2, t: number): boolean =>
-    pulses.some(u => u.side === s && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
+  const pulseAt = (s: 0 | 1, p: Vec2, t: number, conc: boolean): boolean =>
+    pulses.some(u => u.side === s && !!u.concuss === conc && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
   const atk = () => agents.filter(a => a.side === attacker && a.alive);
   const def = () => agents.filter(a => a.side === defender && a.alive);
 
@@ -547,10 +556,13 @@ function resolveRound(
         const dSeesA = !blindedThrough(defender, pd, pa, t) && inView(nav, pd, fd, pa, ENGAGE, FOV);
         if (!aSeesD && !dSeesA) continue;              // mutual blindside, no LOS, or both smoked — no fight
         let surprise = aSeesD === dSeesA ? 0 : (aSeesD ? FIRST_SHOT : -FIRST_SHOT);
-        // recon/flash overrides who gets the first shot inside its pulse
-        const atkPulse = pulseFor(attacker, pd, t), defPulse = pulseFor(defender, pa, t);
+        // RECON overrides who gets the first shot inside its pulse; CONCUSS
+        // instead strips a caught fighter of everything "set" (below) — the
+        // information tool wins the peek, the denial tool breaks the hold.
+        const atkPulse = pulseAt(attacker, pd, t, false), defPulse = pulseAt(defender, pa, t, false);
         if (atkPulse && !defPulse) surprise = FIRST_SHOT;
         else if (defPulse && !atkPulse) surprise = -FIRST_SHOT;
+        const dConc = pulseAt(attacker, pd, t, true), aConc = pulseAt(defender, pa, t, true);
         // trade: a teammate punishes a just-exposed killer they can see — the
         // single biggest reason spacing and support play matter. A moderate edge
         // that never weakens an already-larger advantage the same way.
@@ -559,7 +571,7 @@ function resolveRound(
         if (aCanTrade && !dCanTrade) surprise = Math.max(surprise, TRADE_EDGE);
         else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
-        const holdEdge = planted ? -POSTPLANT_HOLD : d.holdBonus;
+        const holdEdge = planted ? (aConc ? 0 : -POSTPLANT_HOLD) : (dConc ? 0 : d.holdBonus);
         // recovery state: a fighter mid-reload after a kill loses their set-weapon bonus
         // (you're not scoped while re-chambering) and duels at a penalty
         const aReload = inPause(a, t), dReload = inPause(d, t);
@@ -568,7 +580,7 @@ function resolveRound(
         // holding a spot, never sprinting past a wall), so it rewards CHOSEN positions:
         // procedural holds near geometry and authored plays hugging a corner. Pure
         // geometry, no rng draws — the stream shifts only where a duel probability flips.
-        const aSet = isSet(a, t), dSet = isSet(d, t);
+        const aSet = isSet(a, t) && !aConc, dSet = isSet(d, t) && !dConc;   // a concussed fighter is never "set"
         const aCov = aSet ? coverOf(nav, pd, pa) : 0;
         const dCov = dSet ? coverOf(nav, pa, pd) : 0;
         const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, aSet && !aReload, dSet && !dReload, aReload, dReload, aCov, dCov);
@@ -1086,8 +1098,12 @@ function simulateRound(
       // attackers time the execute to their tempo (fast hits flash earlier)
       const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
       const r = PULSE_R + PULSE_R_UTIL * u, t1 = t0 + PULSE_DUR + PULSE_DUR_UTIL * u;
-      pulses.push({ side: ag.side, c, r, t0, t1 });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole === 'initiator' ? 'recon' : 'flash', side: ag.side, at: c, r, until: t1 });
+      // the fielded initiator decides the ARCHETYPE: recon reveals, concuss denies
+      // (same draws — only the pulse kind differs). A duelist entry flash stays a
+      // first-shot tool (his job is winning the peek he takes himself).
+      const conc = ag.agentRole === 'initiator' && CONCUSS_AGENTS.has(loadouts.get(ag.handle)?.agent ?? '');
+      pulses.push({ side: ag.side, c, r, t0, t1, concuss: conc || undefined });
+      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole !== 'initiator' || conc ? 'flash' : 'recon', side: ag.side, at: c, r, until: t1 });
     } else if (ag.agentRole === 'sentinel') {
       // a sentinel LOCKS THE FLANK: a trap on the off-site lane that catches an enemy
       // crossing it — granting the sentinel's side the first shot there for the whole
@@ -1102,8 +1118,9 @@ function simulateRound(
     }
   }
   // authored lineups: deterministic (no rng), reach/duration still express the
-  // caster's utility. A smoke blinds attackers through it; a flash/recon grants
-  // the defender the first shot in its window.
+  // caster's utility. A smoke blinds the enemy through it; a RECON lineup grants
+  // its side the first shot in its window; a FLASH lineup CONCUSSES — a caught
+  // enemy loses everything "set" (hold/cover/scoped) instead.
   for (const ln of lineups) {
     const caster = agents.find(a => a.handle === ln.handle);
     const u = caster ? (caster.p.attr.utility / 100) * caster.utilFactor : 0.5;
@@ -1119,7 +1136,7 @@ function simulateRound(
       if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: 'smoke', side: ln.side, at: mid, at2: ln.at2, r: wr, until: t1 });
     } else {
     if (ln.kind === 'smoke') smokes.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
-    else pulses.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1 });
+    else pulses.push({ side: ln.side, c: ln.at, r, t0: ln.t, t1, concuss: ln.kind === 'flash' || undefined });
     if (ln.handle) events.push({ t: ln.t, kind: 'ability', agent: ln.handle, ability: ln.kind, side: ln.side, at: ln.at, r, until: t1 });
     }
   }
