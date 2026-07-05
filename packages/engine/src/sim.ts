@@ -96,6 +96,23 @@ const RECAST_AGENTS = new Set(['Omen', 'Astra', 'Clove']);  // recast-controller
 // way (only the pulse's kind differs), so the comp picks WHICH HALF of a duel
 // the utility bends: information vs denial.
 const CONCUSS_AGENTS = new Set(['Breach', 'Skye', 'KAY/O']);
+// SENTINEL kit identity: WIRE sentinels (Cypher/Deadlock/Vyse) lay TWO half-reach
+// zones layered along the flank lane — wider coverage, thinner each, and an enemy
+// who crosses BOTH is slowed twice; SAGE fields a SLOW-FIELD — no reveal at all
+// (information-free), but the crossing costs DOUBLE (pure denial); LOCKDOWN
+// (Killjoy/Chamber) is the classic single deep zone — byte-identical to the
+// pre-identity trap, so it's the neutral default. Same rng draws in every branch
+// (one jitter + one range; the wire's second zone is a deterministic offset).
+const WIRE_AGENTS = new Set(['Cypher', 'Deadlock', 'Vyse']);
+const SLOWFIELD_AGENTS = new Set(['Sage']);
+const WIRE_R_MUL = 0.62;      // each wire's reach vs the classic zone
+const WIRE_FLANK_F = 0.4;     // wire A: the flank lane at the lurk's own hold mark
+const WIRE_CONN_F = 0.55;     // wire B: the mid→CONTESTED-site connector — the info net
+                              // (rotators cross it on your attack, pushers on your defense)
+const WIRE_CONN_R_MUL = 0.45; // the connector wire is a THIN tripwire (swept — 0.62 lit
+                              // every rotator and ran the mirror to 59% ATK)
+const SLOWFIELD_MUL = 2;      // Sage's crossing hitch vs the classic
+const SLOWFIELD_R_MUL = 1.3;  // her pool is BIGGER (denial specialist — it taxes wider)
 const RECAST_SPLIT = 0.64;                    // each recast window's share of the base duration
 const RECAST_GAP = 0.035;                     // the OPEN beat between windows — the defender's swing window
 const BRIM_R = 1.12, BRIM_DUR = 1.2;          // Brimstone: one BIGGER, longer window (post-draw scales)
@@ -1020,7 +1037,7 @@ function simulateRound(
   // comp you pick changes a team's utility profile. Mastery scales each effect.
   const smokes: Smoke[] = [];
   const pulses: Pulse[] = [];
-  const traps: { side: 0 | 1; c: Vec2; r: number }[] = [];
+  const traps: { side: 0 | 1; c: Vec2; r: number; slow?: number }[] = [];
   const choke = lerp(A.mid, sitePt, 0.55);
   // authored utility lineups (either side): a caster's lineup REPLACES their auto
   // cast, so collect those handles to skip below, then add the lineups verbatim.
@@ -1112,9 +1129,35 @@ function simulateRound(
       // by geometry. Reuses the pulse first-shot machinery, side = the sentinel's.
       const c = jitter(rng, lerp(A.mid, otherPt, 0.5), 24);
       const t0 = TRAP_T0 + rng.range(0, 0.04), r = TRAP_R + TRAP_R_UTIL * u, t1 = t0 + TRAP_DUR;
-      pulses.push({ side: ag.side, c, r, t0, t1 });
-      traps.push({ side: ag.side, c, r });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: c, r, until: t1 });
+      // the fielded sentinel decides the SHAPE (same draws — geometry only):
+      const sentAgent = loadouts.get(ag.handle)?.agent ?? '';
+      if (WIRE_AGENTS.has(sentAgent)) {
+        // an INFO NET, not a deeper trap: wire A watches the flank lane at the
+        // lurk's own hold mark; wire B watches the mid→contested-site CONNECTOR
+        // (rotators cross it on your attack halves, pushers on your defense).
+        // Thinner each; both share the one jitter draw as a common offset.
+        const base = lerp(A.mid, otherPt, 0.5);
+        const jx = c[0] - base[0], jy = c[1] - base[1];   // the jitter delta, shared
+        const wireAt: [Vec2, number][] = [[lerp(A.mid, otherPt, WIRE_FLANK_F), WIRE_R_MUL], [lerp(A.mid, sitePt, WIRE_CONN_F), WIRE_CONN_R_MUL]];
+        for (const [at, mul] of wireAt) {
+          const wc: Vec2 = [at[0] + jx, at[1] + jy];
+          const wr = r * mul;
+          pulses.push({ side: ag.side, c: wc, r: wr, t0, t1 });
+          traps.push({ side: ag.side, c: wc, r: wr });
+          events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: wc, r: wr, until: t1 });
+        }
+      } else if (SLOWFIELD_AGENTS.has(sentAgent)) {
+        // Sage's SLOW-FIELD: no reveal pulse at all — crossing it just COSTS
+        // (double hitch, wider pool). Pure denial, information-free — and it
+        // taxes BOTH directions: enemy rotators crossing it arrive late too.
+        traps.push({ side: ag.side, c, r: r * SLOWFIELD_R_MUL, slow: SLOWFIELD_MUL });
+        events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: c, r: r * SLOWFIELD_R_MUL, until: t1 });
+      } else {
+        // LOCKDOWN (Killjoy/Chamber): the classic single deep zone — unchanged
+        pulses.push({ side: ag.side, c, r, t0, t1 });
+        traps.push({ side: ag.side, c, r });
+        events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'trap', side: ag.side, at: c, r, until: t1 });
+      }
     }
   }
   // authored lineups: deterministic (no rng), reach/duration still express the
@@ -1149,7 +1192,7 @@ function simulateRound(
   // round-fraction on every map. No-op when no sentinel is fielded (traps empty).
   for (const ag of agents) {
     if (ag.path.length < 2) continue;
-    if (traps.some(tp => tp.side !== ag.side && pathHitsZone(ag.path, tp.c, tp.r))) ag.arrive += TRAP_SLOW * scale;
+    for (const tp of traps) if (tp.side !== ag.side && pathHitsZone(ag.path, tp.c, tp.r)) ag.arrive += TRAP_SLOW * (tp.slow ?? 1) * scale;
   }
 
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
