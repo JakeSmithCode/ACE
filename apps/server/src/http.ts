@@ -988,6 +988,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (friendlies.length > 200) friendlies.length = 200;
       await persistSocial();
       const won = score[0] > score[1];
+      // two OWNERS clashing is world news — the whole server sees the scrap
+      if (target.owner) pushNews('transfer', `⚔ Friendly: ${mine.tag} ${score[0]}–${score[1]} ${target.tag} on ${map}`, w.season, liveDay);
       notify(account, 'result', `⚔ Friendly: ${won ? 'WON' : 'lost'} ${score[0]}–${score[1]} vs ${target.tag} on ${map}`, w.season, liveDay);
       if (target.owner) notify(target.owner, 'result', `⚔ ${mine.tag} challenged you to a friendly — you ${score[1] > score[0] ? 'WON' : 'lost'} ${score[1]}–${score[0]} on ${map} (watch it under ⚔ friendlies)`, w.season, liveDay);
       return json(res, 200, { ok: true, id: f.id, map, score, home: f.home, away: f.away, human: !!target.owner });

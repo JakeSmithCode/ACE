@@ -1773,6 +1773,13 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               <span class="hq-rmap">{{ f.map }}</span>
               <span class="lv-fmeta">s{{ f.season }} · day {{ f.day + 1 }}</span>
               <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(f.id)">▷ watch</button>
+              <button class="lv-challenge" :disabled="challengeBusy" title="run it back (one friendly per pair per match-day)"
+                      @click="doChallenge(mine(f.home.tag) ? f.away.tag : f.home.tag)">⚔ rematch</button>
+            </div>
+            <div v-if="challengeResult && friendliesOpen" class="lv-chresult">
+              ⚔ <b>{{ challengeResult.home.tag }}</b> {{ challengeResult.score[0] }}–{{ challengeResult.score[1] }} <b>{{ challengeResult.away.tag }}</b>
+              on <i class="hq-rmap">{{ challengeResult.map }}</i>
+              <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(challengeResult.id)">▷ watch it</button>
             </div>
             <div v-if="Object.keys(friendlyH2h).length" class="lv-fh2h">
               <span class="lv-upclabel">H2H</span>
