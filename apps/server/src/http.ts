@@ -9,11 +9,12 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, MAP_POOL, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, seasonLength } from './tick.js';
+import { resolveFriendly } from './sim.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus, liveFrac } from './live.js';
 import { claim, savePlan, savePlay, myClub } from './owner.js';
@@ -416,6 +417,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // shared live-broadcast frame hubs, one per (season, day) — see the /live route
   interface LiveHub { clients: Set<ServerResponse>; timer: ReturnType<typeof setInterval> | null; frame?: () => void }
   const liveHubs = new Map<string, LiveHub>();
+  // FRIENDLY CHALLENGES — on-demand matches (human vs human, or a scrim vs an AI
+  // club): resolved INSTANTLY with the real engine (playbooks/fitness/morale all
+  // bite), no standings impact, no embargo — the snapshot is stored verbatim so
+  // the replay reproduces byte-for-byte. Bounded list, newest first.
+  interface Friendly { id: number; at: number; season: number; day: number; map: string; home: { tag: string; name: string }; away: { tag: string; name: string }; score: [number, number]; snapshot: MatchInput; accounts: string[] }
+  const friendlies: Friendly[] = [];
+  let friendlySeq = 0;
+
   // season stat-leaders memo (recomputed only when a new reveal lands)
   let statsMemo: { key: string; body: unknown } | null = null;
   // leaderboard/power-rankings memos, keyed by (season, day[, role]) — bounded
@@ -819,6 +828,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         vsYou,
         // the owner's VIP badge (cosmetic — a supporter flag on the public page)
         vip: c.owner ? await isVip(c.owner) : false,
+        // scouting read on a HUMAN rival: WHICH maps they've authored plays on
+        // (coverage only, never the plays themselves — expect set pieces there)
+        playbookMaps: c.owner ? Object.keys(c.plays ?? {}) : [],
       });
     }
     // GET /standings/:season/:tier/:group  → embargo-aware table (resolved only)
@@ -893,6 +905,42 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const after = (await store.loadWorld(id))!;
       const ci = after.clubs.findIndex(c => c.id === mine.id);
       return json(res, 200, { ...sale, club: publicClub(after, after.clubs[ci]) });
+    }
+    // POST /challenge { tag }  → a FRIENDLY, right now: your club vs theirs (another
+    // human's club, or any AI club as a practice scrim), full engine, instantly
+    // watchable. Both owners are notified; nothing touches the standings.
+    if (path[0] === 'challenge' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { tag?: string };
+      const w = (await store.loadWorld(id))!;
+      const target = w.clubs.find(c => c.tag.toLowerCase() === (b.tag ?? '').toLowerCase());
+      if (!target) return json(res, 404, { error: 'no such club' });
+      if (target.id === mine.id) return json(res, 400, { error: 'you cannot challenge yourself' });
+      const hi = w.clubs.findIndex(c => c.id === mine.id), ai = w.clubs.findIndex(c => c.id === target.id);
+      const seed = (Math.floor(clock()) ^ (++friendlySeq * 0x9e3779b1)) >>> 0;
+      const { input, map, score } = resolveFriendly(w, hi, ai, seed, navOf);
+      const f: Friendly = { id: friendlySeq, at: clock(), season: w.season, day: liveDay, map,
+        home: { tag: mine.tag, name: mine.name }, away: { tag: target.tag, name: target.name },
+        score, snapshot: input, accounts: [account, target.owner ?? ''].filter(Boolean) };
+      friendlies.unshift(f);
+      if (friendlies.length > 200) friendlies.length = 200;
+      const won = score[0] > score[1];
+      notify(account, 'result', `⚔ Friendly: ${won ? 'WON' : 'lost'} ${score[0]}–${score[1]} vs ${target.tag} on ${map}`, w.season, liveDay);
+      if (target.owner) notify(target.owner, 'result', `⚔ ${mine.tag} challenged you to a friendly — you ${score[1] > score[0] ? 'WON' : 'lost'} ${score[1]}–${score[0]} on ${map} (watch it under ⚔ friendlies)`, w.season, liveDay);
+      return json(res, 200, { ok: true, id: f.id, map, score, home: f.home, away: f.away, human: !!target.owner });
+    }
+    // GET /friendlies  → your recent friendlies (either side), light rows
+    if (path[0] === 'friendlies' && path.length === 1) {
+      if (!account) return json(res, 401, { error: 'no account' });
+      return json(res, 200, { friendlies: friendlies.filter(f => f.accounts.includes(account)).slice(0, 20).map(({ snapshot: _s, accounts: _a, ...rest }) => rest) });
+    }
+    // GET /friendlies/:id/replay  → the stored snapshot (no embargo — already resolved)
+    if (path[0] === 'friendlies' && path.length === 3 && path[2] === 'replay') {
+      const f = friendlies.find(x => x.id === +path[1]);
+      if (!f) return json(res, 404, { error: 'no such friendly' });
+      return json(res, 200, { snapshot: f.snapshot, score: f.score, home: f.home, away: f.away, map: f.map });
     }
     // GET /honors  → the Hall of Fame: season champions + all-time title leaders
     if (path[0] === 'honors' && path.length === 1) {
@@ -1203,9 +1251,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const tier = +path[1], group = +path[2];
       const members = membersOfDiv(w.clubs.map(c => c.tier), w.clubs.map(c => c.group), tier, group);
       const rows = await store.fixtures(id, w.season);
-      const matchdays = divisionSchedule(members).map((day, d) => day.map(fx => {
+      const matchdays = divisionSchedule(members).map((day, d) => day.map((fx, slot) => {
         const row = rows.find(r => r.day === d && r.home === fx.home && r.away === fx.away);
-        return { day: d, home: w.clubs[fx.home].tag, away: w.clubs[fx.away].tag, status: row ? fixtureStatus(row, now) : 'scheduled' };
+        // the map is knowable in advance (seed-derived) — a published rotation the
+        // manager can PREPARE for (author the playbook before the fixture lands)
+        const map = fixtureMap(fixtureSeed(seasonSeedOf(w), d, slot + divSeedOffset(tier, group)));
+        return { day: d, slot, map, home: w.clubs[fx.home].tag, away: w.clubs[fx.away].tag, status: row ? fixtureStatus(row, now) : 'scheduled' };
       }));
       return json(res, 200, { tier, group, matchdays });
     }

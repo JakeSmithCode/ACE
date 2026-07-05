@@ -13,7 +13,7 @@ import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -78,7 +78,7 @@ async function doAuth() {
     openEvents();   // re-key the event stream with the signed-in token (targeted notif/mail)
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); } }
+async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); await loadUpcoming(); } }
 // VIP supporter tier (never pay-to-win): dev servers activate instantly; a
 // Stripe-configured server returns the hosted checkout and the webhook flips it.
 const vipBusy = ref(false);
@@ -158,6 +158,52 @@ async function pbSave(play: Play | null, slot: PbSlot) {
   } catch (e) { errMsg.value = (e as Error).message; }
 }
 async function pbClear() { if (!pbSlot.value) return; await pbSave(null, pbSlot.value); pbSlot.value = null; }
+// UPCOMING fixtures + their (seed-derived) maps — the published rotation you
+// prepare the playbook against: "day 7 vs SHS on BIND — no plays yet".
+const upcoming = ref<{ day: number; opp: string; map: string; home: boolean }[]>([]);
+async function loadUpcoming() {
+  if (!server.value || !myClub.value) { upcoming.value = []; return; }
+  try {
+    const sc = await server.value.schedule(myClub.value.tier, (myClub.value as { group?: number }).group ?? 0);
+    const mineTag = myClub.value.tag;
+    upcoming.value = sc.matchdays.flat()
+      .filter((r: ScheduleRow) => (r.home === mineTag || r.away === mineTag) && r.status === 'scheduled' && r.day > DAY.value)
+      .sort((a, b) => a.day - b.day).slice(0, 5)
+      .map(r => ({ day: r.day, opp: r.home === mineTag ? r.away : r.home, map: r.map, home: r.home === mineTag }));
+  } catch { /* transient */ }
+}
+// ── FRIENDLIES: challenge any club to an instant, engine-resolved match ──────
+const challengeBusy = ref(false);
+const challengeResult = ref<{ id: number; map: string; score: [number, number]; home: { tag: string }; away: { tag: string }; human: boolean } | null>(null);
+async function doChallenge(tag: string) {
+  if (!server.value || !token.value) return;
+  challengeBusy.value = true; challengeResult.value = null;
+  try {
+    const r = await server.value.challenge(token.value, tag);
+    if (r.ok) { challengeResult.value = r; await loadFriendlies(); }
+    else errMsg.value = r.error ?? 'challenge failed';
+  } catch (e) { errMsg.value = (e as Error).message; } finally { challengeBusy.value = false; }
+}
+const friendliesOpen = ref(false);
+const friendlyRows = ref<FriendlyRow[]>([]);
+async function loadFriendlies() { if (server.value && token.value) try { friendlyRows.value = (await server.value.friendlies(token.value)).friendlies; } catch { /* transient */ } }
+async function toggleFriendlies() { friendliesOpen.value = !friendliesOpen.value; if (friendliesOpen.value) await loadFriendlies(); }
+async function watchFriendly(fid: number) {
+  if (!server.value) return;
+  loadingWatch.value = true;
+  try {
+    const rep = await server.value.friendlyReplay(fid);
+    const map = rep.snapshot.map;
+    const nav = await ensureNav(map);
+    const out = simulateMatch(rep.snapshot, nav, 50);
+    watching.value = { home: rep.home, away: rep.away, final: rep.score, map, season: season.value, day: -1, slot: -1, cup: true };
+    followed.value = null;
+    computeBox(out);
+    const pov = mine(rep.home.tag) ? 0 as const : mine(rep.away.tag) ? 1 as const : undefined;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
+    clubModal.value = null;
+  } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
+}
 async function savePlan() {
   if (!server.value || !token.value || !tac.value) return; busy.value = true; authErr.value = '';
   try { await server.value.setPlan(tac.value, token.value); planSaved.value = true; setTimeout(() => (planSaved.value = false), 2200); await refreshMe(); }
@@ -1118,6 +1164,15 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
             <button v-for="m in MAP_POOL" :key="m" class="ed-map" :class="{ on: pbMap === m, has: !!pbBook[m] }"
                     :title="pbBook[m] ? `you have authored plays on ${m}` : `no plays on ${m} yet`" @click="pbPick(m)">{{ m }}<i v-if="pbBook[m]" class="ed-mapdot">●</i></button>
           </div>
+          <!-- the published rotation: your NEXT fixtures + their maps — prep where you'll play -->
+          <div v-if="upcoming.length" class="lv-upcoming">
+            <span class="lv-upclabel">UPCOMING</span>
+            <button v-for="u in upcoming" :key="u.day" class="lv-upc" :class="{ ready: !!pbBook[u.map] }"
+                    :title="pbBook[u.map] ? 'playbook ready for this map' : 'no plays authored on this map yet — click to author'"
+                    @click="pbPick(u.map as MapId)">
+              d{{ u.day + 1 }} {{ u.home ? 'vs' : '@' }} {{ u.opp }} · <b>{{ u.map }}</b> {{ pbBook[u.map] ? '✓' : '⚠' }}
+            </button>
+          </div>
           <div class="lv-pbslots">
             <button class="ed-author" :class="{ on: pbSlot === 'attack', set: pbBook[pbMap]?.attack }" @click="pbOpen('attack')">✎ attack</button>
             <button v-if="pbBook[pbMap]?.attack" class="ed-author edalt" :class="{ on: pbSlot === 'attack2', set: pbBook[pbMap]?.attack2 }"
@@ -1616,6 +1671,25 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
         </template>
       </div>
 
+      <!-- friendlies — your on-demand human-vs-human matches (and AI scrims) -->
+      <div v-if="myClub" class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="toggleFriendlies">⚔ Friendlies <i class="lv-disc" :class="{ open: friendliesOpen }">▾</i></button>
+          <span class="lv-note">challenge any club from its page — instant, engine-resolved, watchable; standings untouched</span>
+        </div>
+        <template v-if="friendliesOpen">
+          <div class="lv-ldboard">
+            <div v-for="f in friendlyRows" :key="f.id" class="lv-frow">
+              <span class="lv-fscore"><b :class="{ win: f.score[0] > f.score[1] && mine(f.home.tag) || f.score[1] > f.score[0] && mine(f.away.tag) }">{{ f.home.tag }} {{ f.score[0] }}–{{ f.score[1] }} {{ f.away.tag }}</b></span>
+              <span class="hq-rmap">{{ f.map }}</span>
+              <span class="lv-fmeta">s{{ f.season }} · day {{ f.day + 1 }}</span>
+              <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(f.id)">▷ watch</button>
+            </div>
+            <div v-if="!friendlyRows.length" class="lv-empty">no friendlies yet — open any club's page and hit ⚔ challenge</div>
+          </div>
+        </template>
+      </div>
+
       <!-- the ACE Cup — every club in the world, open draw; a minnow can knock out a giant -->
       <div class="lv-leaders">
         <div class="lv-tableh">
@@ -1670,12 +1744,25 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
               <span class="lv-stars" :title="`squad quality`">{{ '★'.repeat(clubStars(clubModal.power)) }}<i>{{ '★'.repeat(5 - clubStars(clubModal.power)) }}</i></span>
               <span :class="clubModal.owned ? 'lv-owntag' : 'lv-aitag'">{{ clubModal.owned ? '◉ OWNED' : '⚙ AI' }}</span>
               <span v-if="clubModal.vip" class="lv-vip" title="this club's owner is a VIP supporter">★ VIP</span>
+              <button v-if="myClub && !mine(clubModal.tag)" class="lv-challenge" :disabled="challengeBusy"
+                      :title="clubModal.owned ? 'challenge this owner to a FRIENDLY — instant, engine-resolved, watchable; standings untouched' : 'scrim this AI club — instant, engine-resolved, watchable'"
+                      @click="doChallenge(clubModal.tag)">⚔ {{ challengeBusy ? 'playing…' : clubModal.owned ? 'challenge' : 'scrim' }}</button>
               <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
             </div>
             <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>
           </div>
         </div>
         <!-- VS YOU: how you stack up against the club you're scouting -->
+        <div v-if="challengeResult" class="lv-chresult">
+          ⚔ <b>{{ challengeResult.home.tag }}</b> {{ challengeResult.score[0] }}–{{ challengeResult.score[1] }} <b>{{ challengeResult.away.tag }}</b>
+          on <i class="hq-rmap">{{ challengeResult.map }}</i>
+          <span :class="challengeResult.score[0] > challengeResult.score[1] ? 'pos' : 'neg'">{{ challengeResult.score[0] > challengeResult.score[1] ? 'you won the friendly' : 'they took it' }}</span>
+          <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(challengeResult.id)">▷ watch it</button>
+        </div>
+        <div v-if="clubModal.owned && clubModal.playbookMaps?.length" class="lv-pbscout"
+             title="which maps this owner has AUTHORED plays on (coverage only — the plays themselves stay private). Expect set pieces there; the uncovered maps run on dials alone.">
+          ▦ authored playbooks: <b v-for="m in clubModal.playbookMaps" :key="m" class="lv-pbmap">{{ m }}</b>
+        </div>
         <div v-if="clubModal.vsYou" class="lv-vsyou">
           <span class="lv-vslbl">⚔ VS YOU</span>
           <span class="lv-vsmine">{{ clubModal.vsYou.tag }} <i>{{ clubModal.vsYou.power }}</i></span>

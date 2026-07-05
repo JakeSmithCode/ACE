@@ -383,6 +383,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-pbmaps{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 .lv-pbslots{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .lv-pbcanvas{max-width:640px;background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:8px;padding:8px}
+/* upcoming fixtures strip (the published rotation → prep your playbook) */
+.lv-upcoming{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
+.lv-upclabel{font-family:var(--label);font-size:9px;letter-spacing:.08em;color:var(--muted-2)}
+.lv-upc{font-size:11px;background:transparent;border:1px solid rgba(230,198,106,.4);color:#e6c66a;border-radius:4px;padding:3px 8px;cursor:pointer}
+.lv-upc b{text-transform:uppercase}
+.lv-upc.ready{border-color:rgba(59,209,127,.4);color:#3bd17f}
+/* friendlies + challenge */
+.lv-challenge{font-family:var(--label);font-size:10px;letter-spacing:.05em;background:rgba(255,92,110,.1);border:1px solid rgba(255,92,110,.5);color:#ff5c6e;border-radius:4px;padding:3px 10px;cursor:pointer}
+.lv-challenge:hover{background:rgba(255,92,110,.22)}
+.lv-chresult{display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px 12px;background:rgba(255,92,110,.06);border:1px solid rgba(255,92,110,.3);border-radius:6px;font-size:13px}
+.lv-chresult .pos{color:#3bd17f}.lv-chresult .neg{color:#e2768a}
+.lv-pbscout{margin:6px 0;font-size:12px;color:var(--muted)}
+.lv-pbscout .lv-pbmap{margin-left:6px;text-transform:uppercase;color:#e6c66a;font-size:11px;border:1px solid rgba(230,198,106,.35);border-radius:3px;padding:1px 6px}
+.lv-frow{display:flex;align-items:center;gap:12px;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
+.lv-fscore b.win{color:#3bd17f}
+.lv-fmeta{color:var(--muted-2);font-size:11px;margin-left:auto}
 .ed-nextmap b{text-transform:uppercase}
 .ed-nextmap.ready{color:#3bd17f;border-color:rgba(59,209,127,.4)}
 .ed-mapname{text-transform:uppercase;color:var(--brand)}

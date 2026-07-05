@@ -37,7 +37,7 @@ export interface ClubPlan { tactics: Tactics; comp?: Record<string, string>; lin
 export interface Prospect { id: string; handle: string; role: string; age: number; overall: number; ceiling: [number, number]; room: number; scoutLevel: number; attrs: AttrScout[] }
 export interface AcademyView { level: number; max: number; cost: number | null; canUpgrade: boolean; upkeep: number; intakeNext: number; wageBill: number; prospects: Prospect[] }
 export interface Dossier { attack: string; defense: string; lurk: boolean; counter: string; smoke?: string | null }
-export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; cupTitles?: number; facilities?: { bootcamp: number; recovery: number; analyst: number }; facilityUpkeep?: number; staff?: Record<string, StaffMember>; staffMarket?: Record<string, StaffMember[]>; staffWageBill?: number; sponsor?: (SponsorOffer & { yearsLeft: number }) | null; sponsorOffers?: SponsorOffer[]; objective?: { kind: string; label: string; needRank: number; bonus: number } | null; objectiveRank?: number; boardConfidence?: number; boardStatus?: { key: string; label: string }; boardOutcome?: { met: boolean; label: string; bonus: number; finish: number } | null; teamTalk?: string | null; talkReads?: Record<string, TalkRead>; squadMood?: number; favourite?: 'fav' | 'dog' | 'even'; rival?: { tag: string; name: string } | null; derbyRecord?: { w: number; l: number }; nextDerby?: boolean; camp?: string | null; campOpen?: boolean; cohesion?: number; career?: CareerEntry[]; leagueTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number }; vip?: boolean; vipUntil?: number | null; plays?: Record<string, { attack?: unknown; attack2?: unknown; defense?: unknown }>; planFive?: { id: string; handle: string; role: string; utility: number }[] }
+export interface ClubPage { tag: string; name: string; tier: number; group: number; titles: number; intlTitles?: number; owned: boolean; rating: number; phase?: string; style?: { archetype: string; label: string } | null; dossier?: Dossier | null; five: FivePlayer[]; plan?: ClubPlan; balance?: number; squad?: SquadPlayer[]; academy?: AcademyView; division?: string; power?: number; powerRank?: number | null; totalClubs?: number; infra?: number; wcTitles?: number; cupTitles?: number; facilities?: { bootcamp: number; recovery: number; analyst: number }; facilityUpkeep?: number; staff?: Record<string, StaffMember>; staffMarket?: Record<string, StaffMember[]>; staffWageBill?: number; sponsor?: (SponsorOffer & { yearsLeft: number }) | null; sponsorOffers?: SponsorOffer[]; objective?: { kind: string; label: string; needRank: number; bonus: number } | null; objectiveRank?: number; boardConfidence?: number; boardStatus?: { key: string; label: string }; boardOutcome?: { met: boolean; label: string; bonus: number; finish: number } | null; teamTalk?: string | null; talkReads?: Record<string, TalkRead>; squadMood?: number; favourite?: 'fav' | 'dog' | 'even'; rival?: { tag: string; name: string } | null; derbyRecord?: { w: number; l: number }; nextDerby?: boolean; camp?: string | null; campOpen?: boolean; cohesion?: number; career?: CareerEntry[]; leagueTitles?: number; form?: { r: string; us: number; them: number; opp: string; day: number }[]; record?: { w: number; l: number }; standing?: number | null; divSize?: number; vsYou?: { tag: string; power: number; w: number; l: number; played: number }; vip?: boolean; vipUntil?: number | null; plays?: Record<string, { attack?: unknown; attack2?: unknown; defense?: unknown }>; planFive?: { id: string; handle: string; role: string; utility: number }[]; playbookMaps?: string[] }
 
 export interface LeaderRow { rank: number; handle: string; name?: string; flag?: string; role: string; age: number; overall: number; soloLabel: string; soloTier: string; club: string; clubTag: string; tier: number; owned: boolean }
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
@@ -46,6 +46,8 @@ export interface StatRow { rank: number; handle: string; club: string; role: str
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
+export interface FriendlyRow { id: number; at: number; season: number; day: number; map: string; home: ClubLabel; away: ClubLabel; score: [number, number] }
+export interface ScheduleRow { day: number; slot: number; map: MapId; home: string; away: string; status: string }
 
 export interface IntlSide { region: string; tag: string }
 export interface CircuitView {
@@ -208,6 +210,12 @@ export class AceServer {
     es.addEventListener('resync', () => onResync());
     return () => es.close();
   }
+  /** A division's full season schedule — every fixture's day, clubs, STATUS and
+   *  (seed-derived, knowable in advance) MAP: the published rotation a manager
+   *  prepares his playbook against. */
+  schedule(tier: number, group = 0): Promise<{ tier: number; group: number; matchdays: ScheduleRow[][] }> {
+    return fetch(`${this.base}/schedule/${tier}/${group}`).then(r => j(r));
+  }
   standings(season: number, tier: number, group = 0): Promise<{ tier: number; group: number; table: StandingRow[] }> {
     return fetch(`${this.base}/standings/${season}/${tier}/${group}`).then(r => j<{ tier: number; group: number; table: StandingRow[] }>(r));
   }
@@ -241,6 +249,19 @@ export class AceServer {
   /** Claim an AI club (by tag or id) for the bearer's account. */
   claim(clubTag: string, token: string): Promise<ClubPage> { return this.post(`/clubs/${clubTag}/claim`, {}, token); }
   /** The club this account owns (null if none). */
+  /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
+   *  (your playbooks/fitness/morale all bite), watchable at once, standings
+   *  untouched. Works vs another human's club or any AI club (a scrim). */
+  challenge(token: string, tag: string): Promise<{ ok: boolean; id: number; map: string; score: [number, number]; home: ClubLabel; away: ClubLabel; human: boolean; error?: string }> {
+    return this.post('/challenge', { tag }, token);
+  }
+  friendlies(token: string): Promise<{ friendlies: FriendlyRow[] }> {
+    return fetch(`${this.base}/friendlies`, { headers: { authorization: `Bearer ${token}` } }).then(r => j(r));
+  }
+  friendlyReplay(fid: number): Promise<{ snapshot: MatchInput; score: [number, number]; home: ClubLabel; away: ClubLabel; map: string }> {
+    return fetch(`${this.base}/friendlies/${fid}/replay`).then(r => j(r));
+  }
+
   /** Set/clear one slot of your PER-MAP playbook — what your club fields when a
    *  fixture lands on that map. Sanitized server-side at the write boundary. */
   setPlay(token: string, map: string, slot: 'attack' | 'attack2' | 'defense', play: unknown | null): Promise<{ ok: boolean; plays?: Record<string, unknown>; error?: string }> {

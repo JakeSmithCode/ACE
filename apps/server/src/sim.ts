@@ -65,3 +65,16 @@ export function fullSimResolver(w: WorldState, navOf: (map: MatchInput['map']) =
   };
   return { resolve, snapshots };
 }
+
+/** A FRIENDLY / scrim between two clubs, on demand (no standings impact, no
+ *  embargo): the SAME plan-building the tick uses — playbooks, fitness, morale,
+ *  meta comps all bite — resolved with the real engine. The snapshot is returned
+ *  so the match is immediately watchable (re-sim reproduces byte-for-byte). */
+export function resolveFriendly(w: WorldState, homeIdx: number, awayIdx: number, seed: number, navOf: (m: MatchInput['map']) => Navmesh): { input: MatchInput; map: MapId; score: [number, number] } {
+  const map = fixtureMap(seed);
+  const h = clubPlan(w.clubs[homeIdx], w.clubs[awayIdx], w.patch, map, w.fitness, w.morale);
+  const a = clubPlan(w.clubs[awayIdx], w.clubs[homeIdx], w.patch, map, w.fitness, w.morale);
+  const input = buildMatchInput({ seed, map, patch: w.patch, home: h.team, away: a.team, tactics: [h.tactics, a.tactics], comp: [h.comp, a.comp] });
+  const [hs, as] = simulateMatch(input, navOf(map), 0).finalScore;
+  return { input, map, score: [hs, as] };
+}

@@ -150,7 +150,12 @@ export function worldDivisions(w: WorldState): WorldDivision[] {
 /** Per-fixture seed offset for a division. Spaced so tiers (×1000) and groups
  *  (×1e6) never collide with a within-day slot, and **group 0 reduces to the old
  *  `tier·1000`** — so a flat world's fixture seeds are unchanged. */
-const divSeedOffset = (tier: number, group: number): number => tier * 1000 + group * 1_000_000;
+/** The per-division fixture-seed offset (exported so API layers can precompute a
+ *  FUTURE fixture's seed → its map — the rotation is knowable, like a real
+ *  published schedule). Same convention `resolveSeasonDay` resolves with. */
+export const divSeedOffset = (tier: number, group: number): number => tier * 1000 + group * 1_000_000;
+/** A season's fixture-seed base — resolveSeasonDay's exact convention. */
+export const seasonSeedOf = (w: { seed: number; season: number }): number => (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
 
 /** Assign `n` strength-descending clubs to `(tier, group)` slots per a layout: tier
  *  t holds `size·layout[t]` clubs top-down, snake-seeded across its groups by
@@ -256,7 +261,7 @@ export function resolveSeasonDay(w: WorldState, day: number, devRng: Rng, opts: 
 } = {}): { results: MatchResult[]; clubs: WorldClub[] } {
   const divs = worldDivisions(w);
   const schedules = opts.schedules ?? divs.map(d => divisionSchedule(d.members));
-  const seasonSeed = (w.seed ^ (w.season * 0x85ebca6b)) >>> 0;
+  const seasonSeed = seasonSeedOf(w);
   const total = schedules[0].length;
   const results: MatchResult[] = [];
   divs.forEach((d, di) => schedules[di][day].forEach((fx, slot) => {
