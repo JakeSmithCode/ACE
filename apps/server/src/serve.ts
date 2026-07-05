@@ -1,24 +1,62 @@
 // `pnpm run server:serve` — boot the live-broadcast server and KEEP it running (vs
 // http-demo.ts which acts as a client and exits). This is what the web app's Match
-// Center connects to: a real world ticked day 0 with the Premier full-simmed and a
-// live broadcast window, served over HTTP+SSE with the result embargo. Flags:
-//   --seed N         world seed (default 7)
-//   --broadcast SECS live window length (default 600 — long enough to watch live)
-//   --port N         listen port (default 8787)
-//   --auto SECS      auto-advance a match-day every N seconds (the scheduled tick
-//                    worker — the production "matches resolve on a schedule" behaviour;
-//                    0/unset = manual /advance only)
-import { startLiveServer } from './http.js';
+// Center connects to, and it doubles as the PRODUCTION entrypoint: environment
+// variables select the durable stores and the server RESUMES an existing world
+// instead of seeding a fresh one (the restart-resume property the deploy relies on).
+//
+// Flags (dev):                          Env (production):
+//   --seed N       world seed (7)         PORT             listen port
+//   --broadcast S  live window (600s)     ACE_SEED         world seed (fresh worlds only)
+//   --port N       listen port (8787)     ACE_BROADCAST    live window seconds
+//   --auto SECS    auto-advance cadence   ACE_AUTO         auto-advance cadence (the tick worker)
+//                                         ACE_JWT_SECRET   STABLE token secret (sessions survive restarts)
+//                                         STRIPE_WEBHOOK_SECRET  arms /billing/webhook (VIP source of truth)
+//                                         DATABASE_URL     Postgres → PgStore/PgAccountStore (durable
+//                                                          world + accounts; requires `pg` installed —
+//                                                          the one optional dependency, loaded dynamically)
+import { startLiveServer, type LiveServerOpts } from './http.js';
+import { PgStore, PgAccountStore } from './pg.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: number) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? parseInt(argv[i + 1], 10) : d; };
+const env = (n: string) => process.env[n];
 
-const autoAdvanceSecs = flag('auto', 0);
-const srv = await startLiveServer({ seed: flag('seed', 7), broadcastSecs: flag('broadcast', 600), port: flag('port', 8787), autoAdvanceSecs });
-const revealIn = Math.round((await (await fetch(`${srv.url}/health`)).json()).revealAt - Date.now() / 1000);
+const opts: LiveServerOpts = {
+  seed: flag('seed', Number(env('ACE_SEED') ?? 7)),
+  broadcastSecs: flag('broadcast', Number(env('ACE_BROADCAST') ?? 600)),
+  port: flag('port', Number(env('PORT') ?? 8787)),
+  autoAdvanceSecs: flag('auto', Number(env('ACE_AUTO') ?? 0)),
+  jwtSecret: env('ACE_JWT_SECRET'),
+  stripeWebhookSecret: env('STRIPE_WEBHOOK_SECRET'),
+};
+
+// DATABASE_URL → the durable Pg stores. `pg` is deliberately NOT a dependency of
+// this zero-dep slice (PgStore takes an injected Queryable); a deployment that
+// wants Postgres installs `pg` and this dynamic import picks it up.
+if (env('DATABASE_URL')) {
+  try {
+    const { Pool } = await import('pg' as string) as { Pool: new (o: { connectionString: string }) => { query(q: string, p?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> } };
+    const pool = new Pool({ connectionString: env('DATABASE_URL')! });
+    opts.store = new PgStore(pool);
+    opts.accounts = new PgAccountStore(pool);
+    console.log('  durable stores: Postgres (DATABASE_URL) — the world resumes across restarts');
+  } catch {
+    console.error('DATABASE_URL is set but the `pg` package is not installed — `pnpm add pg` in the deployment, or unset DATABASE_URL for in-memory.');
+    process.exit(1);
+  }
+}
+if (env('DATABASE_URL') && !env('ACE_JWT_SECRET')) {
+  console.warn('  ⚠ DATABASE_URL without ACE_JWT_SECRET: accounts persist but tokens die each restart — set a stable secret.');
+}
+
+const srv = await startLiveServer(opts);
+const health = await (await fetch(`${srv.url}/health`)).json() as { revealAt: number; broadcastDay: number };
+const revealIn = Math.round(health.revealAt - Date.now() / 1000);
 console.log(`\n  ACE live server · ${srv.url} · world ${srv.id}`);
-console.log(`  Premier match-day live now — reveals in ~${revealIn}s. Point the web Match Center here.`);
-if (autoAdvanceSecs) console.log(`  ⏱ scheduled tick worker ON — auto-advancing a match-day every ${autoAdvanceSecs}s (the BullMQ job's contract).`);
+console.log(revealIn > 0
+  ? `  match-day ${health.broadcastDay + 1} live now — reveals in ~${revealIn}s. Point the web Match Center here.`
+  : `  resumed at match-day ${health.broadcastDay + 1} (history revealed). Point the web Match Center here.`);
+if (opts.autoAdvanceSecs) console.log(`  ⏱ scheduled tick worker ON — auto-advancing a match-day every ${opts.autoAdvanceSecs}s (the BullMQ job's contract).`);
 console.log('');
 console.log(`  GET /world · /standings/1/0/0 · /schedule/0/0 · /live/1/0 (SSE) · /fixtures/1/0/:slot[/replay]\n`);
 

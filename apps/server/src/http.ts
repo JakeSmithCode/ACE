@@ -35,6 +35,15 @@ export interface LiveServerOpts {
   autoAdvanceSecs?: number;
   /** Event-bus replay backlog size (tests shrink it to exercise the resync path). */
   eventBacklogMax?: number;
+  /** DEPLOYMENT SEAM — inject durable stores and the server RESUMES the world they
+   *  hold instead of seeding a fresh one: the day cursor, standings, ownership,
+   *  academies/mail/social all come back (verified by the restart-resume test).
+   *  Omitted → an in-memory world seeded per boot (the dev/demo behaviour). */
+  store?: WorldStore;
+  accounts?: import('./accounts.js').AccountStore;
+  /** Stable JWT signing secret (env in production) — with an injected account
+   *  store this keeps issued tokens VALID across restarts. Default: random per boot. */
+  jwtSecret?: string;
   /** Stripe webhook signing secret (`whsec_…`). Set → POST /billing/webhook verifies
    *  Stripe's exact signature scheme and is the VIP source of truth, and /billing/checkout
    *  returns the hosted-checkout stub. Unset (dev) → checkout activates VIP directly so
@@ -184,10 +193,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // the read-cache wrapper is the scale fix: 60+ read routes load the world per
   // request, and a raw store clones the multi-MB WorldState each time — behind
   // the cache a read is a shared reference (cloned once per WRITE instead).
-  const store = new CachedStore(new MemoryStore());
-  const id = await seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
-  const accounts = new MemoryAccountStore();
-  const auth = new AuthService(accounts, randomBytes(32).toString('hex'), clock);
+  const store = new CachedStore(opts.store ?? new MemoryStore());
+  // RESUME an existing world (an injected durable store across a restart) or
+  // seed a fresh one (dev/demo). Resume restores the live cursor from the world
+  // itself; the interrupted broadcast window is treated as already revealed.
+  const priorIds = await store.listWorlds();
+  const resumed = priorIds.length > 0;
+  const id = resumed ? priorIds[0] : await seedWorld(store, { seed: opts.seed ?? 7, region: 'AMER' });
+  const accounts = opts.accounts ?? new MemoryAccountStore();
+  const auth = new AuthService(accounts, opts.jwtSecret ?? randomBytes(32).toString('hex'), clock);
   /** Is this account VIP right now? Feature checks read this and nothing else —
    *  VIP is convenience/depth (scout discount, badge), never the sim. */
   const isVip = async (acct: string | null): Promise<boolean> =>
@@ -409,6 +423,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
     friendlies, friendlySeq,
     playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
+    honors, worldCupHistory, cupHistory,
   });
   {
     const social = await store.loadAccountData(id, SOCIAL_KEY);
@@ -417,6 +432,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       friendlySeq = (social.friendlySeq as number) ?? friendlies.reduce((m, f) => Math.max(m, f.id), 0);
       if (Array.isArray(social.playoffHistory)) playoffHistory.push(...(social.playoffHistory as PlayoffView[]));
       for (const [k, v] of Object.entries((social.playoffSnaps as Record<string, MatchInput>) ?? {})) playoffSnaps.set(k, v);
+      if (Array.isArray(social.honors)) honors.push(...(social.honors as typeof honors));
+      if (Array.isArray(social.worldCupHistory)) worldCupHistory.push(...(social.worldCupHistory as typeof worldCupHistory));
+      if (Array.isArray(social.cupHistory)) cupHistory.push(...(social.cupHistory as typeof cupHistory));
     }
   }
   // live chat — real-time channels (SSE fan-out), one ROOM per channel: 'global' (the
@@ -447,7 +465,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const owned = new Set(w.clubs.filter(c => c.owner).map(c => c.tier));
     return (d: number) => d === 0 || owned.has(d);
   };
-  await runTick(store, id, { full: fullDivs((await store.loadWorld(id))!), navOf, kickoffAt: liveKickoff, broadcastSecs });
+  if (resumed) {
+    // the world's day cursor is the NEXT day to resolve; the last resolved one is
+    // back on air as already-revealed history (its window ended with the old process)
+    const w0 = (await store.loadWorld(id))!;
+    liveDay = Math.max(0, w0.day - 1);
+    liveKickoff = clock() - broadcastSecs - 1;
+  } else {
+    await runTick(store, id, { full: fullDivs((await store.loadWorld(id))!), navOf, kickoffAt: liveKickoff, broadcastSecs });
+  }
 
   // re-sim each watchable fixture once → the live source the match-center streams.
   // Keyed by season:day:slot, so days accumulate as the season advances.
@@ -462,8 +488,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const cacheDay = async (season: number, day: number) => {
     for (const f of await store.fixtures(id, season)) if (f.day === day && f.inputSnapshot && !timelines.has(key(f))) timelines.set(key(f), simulateMatch(f.inputSnapshot, navOf(f.inputSnapshot.map), 0));
   };
-  await cacheDay(1, 0);
-  armReveal(1, 0, liveKickoff + broadcastSecs);   // the boot day's reveal is an event too
+  {
+    // rebuild the live-source timelines from the stored snapshots: the boot day on a
+    // fresh world, EVERY resolved day of the current season on a resume (stats +
+    // live views need them; each is one deterministic re-sim of a stored input).
+    const w0 = (await store.loadWorld(id))!;
+    for (let d = 0; d <= liveDay; d++) await cacheDay(w0.season, d);
+    armReveal(w0.season, liveDay, liveKickoff + broadcastSecs);
+  }
   /** Tick the next match-day onto the air (a fresh broadcast window). The owner's
    *  authored tactics drive their fixtures, so a season plays out under your plan.
    *  At the season boundary it rolls the season over (playoffs → settle → develop →
@@ -628,7 +660,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       });
       if (changed) await store.saveWorld(id, { ...nw, clubs });
     }
-    if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); }
+    if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); await persistSocial(); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
     if (cupChampClub) {
@@ -992,6 +1024,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (target.owner) pushNews('transfer', `⚔ Friendly: ${mine.tag} ${score[0]}–${score[1]} ${target.tag} on ${map}`, w.season, liveDay);
       notify(account, 'result', `⚔ Friendly: ${won ? 'WON' : 'lost'} ${score[0]}–${score[1]} vs ${target.tag} on ${map}`, w.season, liveDay);
       if (target.owner) notify(target.owner, 'result', `⚔ ${mine.tag} challenged you to a friendly — you ${score[1] > score[0] ? 'WON' : 'lost'} ${score[1]}–${score[0]} on ${map} (watch it under ⚔ friendlies)`, w.season, liveDay);
+      await persistAccount(account);   // durable: the result notif survives a restart
+      if (target.owner) await persistAccount(target.owner);
       return json(res, 200, { ok: true, id: f.id, map, score, home: f.home, away: f.away, human: !!target.owner });
     }
     // GET /friendlies  → your recent friendlies (either side), light rows
