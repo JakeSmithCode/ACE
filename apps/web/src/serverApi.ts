@@ -252,6 +252,8 @@ export class AceServer {
   /** Claim an AI club (by tag or id) for the bearer's account. */
   claim(clubTag: string, token: string): Promise<ClubPage> { return this.post(`/clubs/${clubTag}/claim`, {}, token); }
   /** The club this account owns (null if none). */
+  /** The managers online right now (live event-stream connections → club tags). */
+  presence(): Promise<{ online: number; tags: string[] }> { return fetch(`${this.base}/presence`).then(r => j(r)); }
   /** The Premier playoff brackets (engine-simmed at each rollover, watchable). */
   playoffs(): Promise<{ history: PlayoffView[] }> { return fetch(`${this.base}/playoffs`).then(r => j(r)); }
   playoffReplay(season: number, seed: number): Promise<{ snapshot: MatchInput }> {

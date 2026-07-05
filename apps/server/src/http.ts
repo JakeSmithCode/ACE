@@ -397,6 +397,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   interface Friendly { id: number; at: number; season: number; day: number; map: string; home: { tag: string; name: string }; away: { tag: string; name: string }; score: [number, number]; snapshot: MatchInput; accounts: string[] }
   const friendlies: Friendly[] = [];
   let friendlySeq = 0;
+  // anti-spam: one challenge per PAIR per match-day (either direction) — a rival
+  // can't flood your bell, and a farmed H2H means nothing.
+  const challengedToday = new Set<string>();
+  const pairKey = (a: string, b: string) => { const [x, y] = [a, b].sort(); return `${x}|${y}`; };
 
   // WORLD-SCOPED social state (friendlies + playoff brackets) rides the same
   // durable blob store under a reserved key — a Pg-backed deployment keeps the
@@ -971,6 +975,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const target = w.clubs.find(c => c.tag.toLowerCase() === (b.tag ?? '').toLowerCase());
       if (!target) return json(res, 404, { error: 'no such club' });
       if (target.id === mine.id) return json(res, 400, { error: 'you cannot challenge yourself' });
+      const ck = `${pairKey(mine.id, target.id)}:${w.season}:${liveDay}`;
+      if (challengedToday.has(ck)) return json(res, 429, { error: 'you two already played a friendly this match-day — advance a day and rematch' });
+      challengedToday.add(ck);
       const hi = w.clubs.findIndex(c => c.id === mine.id), ai = w.clubs.findIndex(c => c.id === target.id);
       const seed = (Math.floor(clock()) ^ (++friendlySeq * 0x9e3779b1)) >>> 0;
       const { input, map, score } = resolveFriendly(w, hi, ai, seed, navOf);
@@ -1005,6 +1012,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const f = friendlies.find(x => x.id === +path[1]);
       if (!f) return json(res, 404, { error: 'no such friendly' });
       return json(res, 200, { snapshot: f.snapshot, score: f.score, home: f.home, away: f.away, map: f.map });
+    }
+    // GET /presence  → the managers ONLINE right now (accounts holding a live
+    // /events stream, mapped to their club tags) — the world feels inhabited.
+    if (path[0] === 'presence' && path.length === 1) {
+      const w = (await store.loadWorld(id))!;
+      const online = new Set<string>();
+      for (const c of evClients) if (c.account) online.add(c.account);
+      const tags = [...online].map(a => w.clubs.find(c => c.owner === a)?.tag).filter((t): t is string => !!t).sort();
+      return json(res, 200, { online: online.size, tags });
     }
     // GET /playoffs  → the Premier playoff brackets (newest first), engine-simmed + watchable
     if (path[0] === 'playoffs' && path.length === 1) {

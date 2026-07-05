@@ -184,6 +184,16 @@ async function doChallenge(tag: string) {
     else errMsg.value = r.error ?? 'challenge failed';
   } catch (e) { errMsg.value = (e as Error).message; } finally { challengeBusy.value = false; }
 }
+// who's online — live event-stream connections mapped to club tags
+const presence = ref<{ online: number; tags: string[] }>({ online: 0, tags: [] });
+async function loadPresence() { if (server.value) try { presence.value = await server.value.presence(); } catch { /* transient */ } }
+let presenceTimer: ReturnType<typeof setInterval> | null = null;
+// a notification points somewhere — clicking it opens the right surface
+function notifGo(n: { text: string }) {
+  if (n.text.includes('Playoffs')) { playoffsOpen.value = true; void loadPlayoffs(); }
+  else if (n.text.startsWith('⚔')) { friendliesOpen.value = true; void loadFriendlies(); }
+  notifOpen.value = false;
+}
 // the Premier playoffs — the season climax, engine-simmed + watchable
 const playoffsOpen = ref(false);
 const playoffViews = ref<PlayoffView[]>([]);
@@ -559,6 +569,9 @@ async function connect() {
     // the live-sync spine: one /events stream pushes every change (day/reveal/
     // market/notif/mail/season) — no per-client polling loops
     openEvents();
+    await loadPresence();
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = setInterval(loadPresence, 30000);
   } catch (e) { status.value = 'error'; errMsg.value = (e as Error).message; }
 }
 function openStream() {
@@ -954,7 +967,7 @@ const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.
 const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
 
 onMounted(() => { connect(); window.addEventListener('keydown', onKey); });
-onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
+onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTimer) clearInterval(presenceTimer); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
 </script>
 
 <template>
@@ -1082,7 +1095,8 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
             <div v-if="notifOpen" class="lv-notifpanel">
               <div class="lv-notifhead"><span class="lv-kicker">Notifications</span><button class="lv-notifx" @click="notifOpen = false">✕</button></div>
               <div class="lv-notiflist">
-                <div v-for="n in notifList" :key="n.id" class="lv-notifrow" :class="[n.kind, { unread: !n.read }]">
+                <div v-for="n in notifList" :key="n.id" class="lv-notifrow clickable" :class="[n.kind, { unread: !n.read }]"
+                     title="open the related panel" @click="notifGo(n)">
                   <i class="lv-notifico">{{ notifIcon[n.kind] }}</i>
                   <span class="lv-notiftext">{{ n.text }}</span>
                   <span class="lv-notifage">S{{ n.season }}</span>
@@ -1091,6 +1105,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
               </div>
             </div>
           </Teleport>
+          <span v-if="presence.online" class="lv-presence" :title="`managers online now: ${presence.tags.join(', ') || presence.online}`">● {{ presence.online }} online</span>
           <button class="lv-signout" @click="signOut">sign out</button>
         </template>
         <template v-else-if="authed">

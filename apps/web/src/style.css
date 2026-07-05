@@ -1993,3 +1993,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-fh2hchip{font-size:11px;font-family:var(--label);border:1px solid var(--line-2);border-radius:4px;padding:2px 8px;color:var(--muted)}
 .lv-fh2hchip.up{color:#3bd17f;border-color:rgba(59,209,127,.4)}
 .lv-fh2hchip.down{color:#e2768a;border-color:rgba(226,118,138,.4)}
+/* presence + clickable notifications */
+.lv-presence{font-family:var(--label);font-size:10px;letter-spacing:.05em;color:#3bd17f;white-space:nowrap}
+.lv-notifrow.clickable{cursor:pointer}
+.lv-notifrow.clickable:hover{background:rgba(255,255,255,.045)}
