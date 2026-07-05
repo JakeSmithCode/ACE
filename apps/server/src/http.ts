@@ -140,6 +140,29 @@ const smokeShape = (ctrlAgent: string | undefined): string | null => {
   return null;
 };
 
+/** The full KIT read — every fielded agent's archetype line, mirrored from the
+ *  engine's identity sets (initiator recon/concuss, sentinel lockdown/wire/slow,
+ *  duelist dash/nade/flash). The comp IS the utility geometry now; this makes an
+ *  opponent's comp legible as a game plan, not a list of names. */
+const kitRead = (five: { role: string; handle: string }[], agentOf: (i: number) => string): string[] => {
+  const lines: string[] = [];
+  five.forEach((p, i) => {
+    const a = agentOf(i);
+    if (p.role === 'initiator') {
+      if (['Sova', 'Fade', 'Gekko'].includes(a)) lines.push(`${a} recon — they take the first shot off the reveal; don't hold the obvious angle`);
+      else if (['Breach', 'Skye', 'KAY/O'].includes(a)) lines.push(`${a} concuss — set holds get stripped in the pulse; don't anchor inside it`);
+    } else if (p.role === 'sentinel') {
+      if (['Cypher', 'Deadlock', 'Vyse'].includes(a)) lines.push(`${a} wires — an info NET (flank + connector); your rotations get lit`);
+      else if (a === 'Sage') lines.push(`Sage slow-field — crossing costs time but reveals nothing; pay the delay, not the flank`);
+      else lines.push(`${a} lockdown — one deep flank zone; a lurk walks into it`);
+    } else if (p.role === 'duelist') {
+      if (['Jett', 'Neon'].includes(a)) lines.push(`${a} dash — the opening pick may not stick (escapes once a round); re-hit while she recovers`);
+      else if (a === 'Raze') lines.push(`Raze nade — entries come with chip damage; don't stack the entry cone`);
+    }
+  });
+  return lines;
+};
+
 /** The public club page (§9) — identity, division, lifecycle, the fielded five (with each
  *  player's fielded AGENT, so you scout the real comp), and whether a human owns it. For an
  *  AI club this is exactly what it'll field next: `aiBestFive` (the patch-aware five) + the
@@ -161,6 +184,7 @@ const publicClub = (w: WorldState, c: WorldClub) => {
       ...scoutDossier(aiTactics(team)),
       smoke: smokeShape(fivePlayers.map(p => comp[p.id] ?? topAgentOf(p)).find(a2 =>
         ['Viper', 'Harbor', 'Brimstone', 'Omen', 'Astra', 'Clove'].includes(a2))),
+      kit: kitRead(fivePlayers, i => comp[fivePlayers[i].id] ?? topAgentOf(fivePlayers[i])),
     } : null,
     five: fivePlayers.map(p => {
       const ovr = Math.round(overall(p)), sr = soloRank(ovr);

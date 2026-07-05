@@ -1907,6 +1907,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div class="lv-dosrow"><i>ATTACK</i><span>{{ clubModal.dossier.attack }}<em v-if="clubModal.dossier.lurk"> · runs a lurk</em></span></div>
           <div class="lv-dosrow"><i>DEFENSE</i><span>{{ clubModal.dossier.defense }}</span></div>
           <div v-if="clubModal.dossier.smoke" class="lv-dosrow"><i>UTILITY</i><span>{{ clubModal.dossier.smoke }}</span></div>
+          <div v-for="(k, ki) in clubModal.dossier.kit ?? []" :key="'kit' + ki" class="lv-dosrow" style="opacity:.85"><i>{{ ki === 0 ? 'KITS' : '' }}</i><span>{{ k }}</span></div>
           <div class="lv-doscounter"><i>⮞ COUNTER</i><span>{{ clubModal.dossier.counter }}</span></div>
         </div>
         <div class="lv-clubfive">
