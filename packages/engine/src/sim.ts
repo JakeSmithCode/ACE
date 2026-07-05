@@ -288,8 +288,19 @@ function resolveChain(rt: RotateStep | undefined, byId: Map<string, Player>, dep
 }
 
 function addLoadouts(into: Map<string, Loadout>, team: Team, comp: Comp | undefined, patch: PatchState): void {
+  // one agent per team (the Valorant rule) — a duplicate pick (two teammates
+  // mained on the same agent, or a sloppy/hostile comp) coerces the LATER
+  // player (roster order) to their next-best untaken agent. Pure + rng-free,
+  // and byte-identical when the comp is already unique.
+  const taken = new Set<string>();
   for (const p of team.players) {
-    const agent = comp?.[p.id] ?? topAgent(p);
+    let agent = comp?.[p.id] ?? topAgent(p);
+    if (taken.has(agent)) {
+      const alt = [...p.agents].sort((x, y) => y.level - x.level || (x.agent < y.agent ? -1 : 1))
+        .find(a => !taken.has(a.agent));
+      if (alt) agent = alt.agent;                            // whole pool taken → keep the dup (never break the sim)
+    }
+    taken.add(agent);
     const known = p.agents.find(a => a.agent === agent);
     const mastery = known ? known.level : 45;                 // an off-pool pick is rough
     const tier = patch.agentTier[agent] ?? 1.0;

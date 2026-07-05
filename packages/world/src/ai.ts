@@ -115,8 +115,20 @@ function bestAgent(p: Player, patch?: PatchState): { agent: string; value: numbe
  *  highest-mastery agent) would be — but emitting the explicit map is harmless and keeps
  *  the resolver simple. Pure + deterministic; the engine treats it as a normal `Comp`. */
 export function aiComp(team: Team, patch?: PatchState): Comp {
+  // one agent per team (the Valorant rule): each player takes the highest-value
+  // UNTAKEN agent from their pool, in team order — a second Jett main fields
+  // his next agent instead (the engine also coerces, but the AI should pick a
+  // legal comp in the first place so the scouted comp is the fielded comp).
   const comp: Comp = {};
-  for (const p of team.players) comp[p.id] = bestAgent(p, patch).agent;
+  const taken = new Set<string>();
+  for (const p of team.players) {
+    const pool = (p.agents.length ? p.agents : [{ agent: 'Jett', level: 45 }])
+      .map(a => ({ agent: a.agent, value: agentValue(a.level, a.agent, patch) }))
+      .sort((x, y) => y.value - x.value || (x.agent < y.agent ? -1 : 1));
+    const pick = pool.find(a => !taken.has(a.agent)) ?? pool[0];
+    comp[p.id] = pick.agent;
+    taken.add(pick.agent);
+  }
   return comp;
 }
 
