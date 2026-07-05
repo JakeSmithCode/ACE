@@ -184,6 +184,21 @@ async function doChallenge(tag: string) {
     else errMsg.value = r.error ?? 'challenge failed';
   } catch (e) { errMsg.value = (e as Error).message; } finally { challengeBusy.value = false; }
 }
+// ── TOASTS: pushed events surface ON SCREEN the moment they land (the bell
+// badge still accumulates; a toast is the live nudge). Click → the right panel.
+interface Toast { id: number; icon: string; text: string; kind: string }
+const toasts = ref<Toast[]>([]);
+let toastSeq = 0;
+function pushToast(icon: string, text: string, kind = 'info') {
+  const t: Toast = { id: ++toastSeq, icon, text, kind };
+  toasts.value = [...toasts.value, t].slice(-4);   // stack caps at 4
+  setTimeout(() => (toasts.value = toasts.value.filter(x => x.id !== t.id)), 6500);
+}
+function toastGo(t: Toast) {
+  notifGo({ text: t.text });
+  toasts.value = toasts.value.filter(x => x.id !== t.id);
+}
+
 // who's online — live event-stream connections mapped to club tags
 const presence = ref<{ online: number; tags: string[] }>({ online: 0, tags: [] });
 async function loadPresence() { if (server.value) try { presence.value = await server.value.presence(); } catch { /* transient */ } }
@@ -642,6 +657,7 @@ function openEvents() {
       DAY.value = data.day as number;
       if (world.value) world.value = { ...world.value, season: data.season as number, broadcastDay: data.day as number };
       openStream();
+      pushToast('📡', `Match-day ${(data.day as number) + 1} is LIVE — broadcasts rolling`, 'day');
       await new Promise(r => setTimeout(r, Math.random() * 2500));
       await fullRefresh();
       return;
@@ -649,8 +665,8 @@ function openEvents() {
     if (ev === 'reveal') { await refreshTable(); if (statsOpen.value) await loadStats(); return; }
     if (ev === 'news') { await loadNews(); return; }
     if (ev === 'market') { await refreshMe(); if (board.value.length || marketOpen.value) await loadBoard(); return; }
-    if (ev === 'notif') { await loadNotifs(); return; }
-    if (ev === 'mail') { await loadMail(); return; }
+    if (ev === 'notif') { pushToast('🔔', String((data as { text?: string }).text ?? 'notification'), 'notif'); await loadNotifs(); return; }
+    if (ev === 'mail') { pushToast('✉', `mail from ${String((data as { from?: string }).from ?? 'an owner')}: ${String((data as { subject?: string }).subject ?? '')}`, 'mail'); await loadMail(); return; }
   }, fullRefresh);
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); if (!mailOpen.value) loadMail(); }, 60000);
@@ -1797,6 +1813,14 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
     </template>
 
     <!-- the public club page (read-only) -->
+    <Teleport to="body">
+      <div class="lv-toasts">
+        <div v-for="t in toasts" :key="t.id" class="lv-toast" :class="t.kind" @click="toastGo(t)">
+          <i>{{ t.icon }}</i><span>{{ t.text }}</span>
+        </div>
+      </div>
+    </Teleport>
+
     <div v-if="clubModal" class="lv-clubmodal" @click.self="clubModal = null">
       <div class="lv-clubcard">
         <button class="lv-clubx" @click="clubModal = null">✕</button>

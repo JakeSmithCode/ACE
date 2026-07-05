@@ -1997,3 +1997,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-presence{font-family:var(--label);font-size:10px;letter-spacing:.05em;color:#3bd17f;white-space:nowrap}
 .lv-notifrow.clickable{cursor:pointer}
 .lv-notifrow.clickable:hover{background:rgba(255,255,255,.045)}
+/* live toasts — pushed events surfacing the moment they land */
+.lv-toasts{position:fixed;right:18px;bottom:18px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:380px}
+.lv-toast{display:flex;align-items:center;gap:9px;background:rgba(14,18,24,.96);border:1px solid var(--line-2);border-left:3px solid var(--brand);border-radius:7px;padding:9px 13px;font-size:12.5px;color:var(--text);cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.45);animation:toast-in .22s ease}
+.lv-toast:hover{border-color:var(--brand)}
+.lv-toast i{font-style:normal}
+.lv-toast.mail{border-left-color:#e6c66a}
+.lv-toast.day{border-left-color:#3bd17f}
+@keyframes toast-in{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
