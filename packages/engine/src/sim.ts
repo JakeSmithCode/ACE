@@ -267,6 +267,18 @@ function iglEco(team: Team): number {
   return Math.max(-1, Math.min(1, (sense - 70) / 25));             // 45→-1 .. 70→0 .. 95→+1
 }
 
+/** The COMMS battle: how much better one side's trade structure is than the
+ *  other's, from the DIFFERENCE between the two IGLs' cerebral stats. Trading —
+ *  the refrag — is the most comms-shaped act in a round (~37% of kills), so the
+ *  sharper caller's side collects a slightly stronger trade edge and the weaker
+ *  caller's a slightly softer one. RELATIVE by design: equal (or absent) IGLs
+ *  cancel to exactly 0, so mirrors — and the tuned map pool — are untouched by
+ *  construction. Bounded ±2.5 (never rivals the base TRADE_EDGE). */
+function iglTradeDiff(a: Team, b: Team): number {
+  const sense = (t: Team) => { const g = t.players.find(p => p.igl); return g ? (g.attr.gameSense + g.attr.clutch) / 2 : 70; };
+  return Math.max(-2.5, Math.min(2.5, (sense(a) - sense(b)) / 10));
+}
+
 /** A kill-point trigger with a death's player id resolved to a handle (the form
  *  the engine fires on). Returns null if the named teammate doesn't exist. */
 type ResolvedTrig = { kind: 'death'; handle: string } | { kind: 'contact' } | { kind: 'time'; t: number };
@@ -527,6 +539,7 @@ function forkSeed(seed: number, n: number, i: number): number {
 function resolveRound(
   agents: Ag[], smokes: Smoke[], pulses: Pulse[], nav: Navmesh,
   sitePt: Vec2, site: SiteId, attacker: 0 | 1, defender: 0 | 1, scale: number, rng: Rng,
+  atkTradeDiff = 0,
 ): { winner: 0 | 1; method: RoundMethod; events: MatchEvent[] } {
   // work on a PER-RUN copy of the smokes: the retake smoke below is planned at
   // plant time, and pushing it into the shared setup array would leak one run's
@@ -647,8 +660,10 @@ function resolveRound(
         // that never weakens an already-larger advantage the same way.
         const aCanTrade = d.exposedUntil >= t && aSeesD;
         const dCanTrade = a.exposedUntil >= t && dSeesA;
-        if (aCanTrade && !dCanTrade) surprise = Math.max(surprise, TRADE_EDGE);
-        else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -TRADE_EDGE);
+        // the trade edge carries the COMMS battle: the sharper IGL's refrag
+        // structure is a touch stronger (relative — equal IGLs cancel to 0)
+        if (aCanTrade && !dCanTrade) surprise = Math.max(surprise, TRADE_EDGE + atkTradeDiff);
+        else if (dCanTrade && !aCanTrade) surprise = Math.min(surprise, -(TRADE_EDGE - atkTradeDiff));
         // pre-plant the defender holds the angle; post-plant the attacker holds the crossfire
         const holdEdge = planted ? (aConc ? 0 : -POSTPLANT_HOLD) : (dConc ? 0 : d.holdBonus);
         // recovery state: a fighter mid-reload after a kill loses their set-weapon bonus
@@ -1019,6 +1034,13 @@ function simulateRound(
         agentRole: lo.role, agentName: lo.agent, dashUsed: false, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
     });
+    // NOTE — an attack-IGL "arrival sync" (pushers' arrives pulled toward the
+    // group mean) was tried here and MEASURED NULL (+0.5pt over 200 asymmetric-
+    // IGL matches): the procedural fan is ALREADY coordinated (near-uniform
+    // path lengths), so there is no straggle to sync — the entry's lost lead
+    // cancels the pack's gained tightness. The attack IGL expresses through
+    // the TRADE edge instead (iglTradeDiff below). Don't re-add without a
+    // straggling execute model to bind on.
   }
 
   const dAgg = defTac.defense.aggression;
@@ -1329,17 +1351,19 @@ function simulateRound(
   // Counterfactual forks: replay this exact setup on throwaway rng to measure
   // how often the attacker wins — the round's true odds. These never draw from
   // the match rng, so the canonical timeline stays byte-identical.
+  // the comms battle: the two IGLs' relative trade sharpness (0 on equal/absent)
+  const tradeDiff = iglTradeDiff(atkTeam, defTeam);
   let atkForkWins = 0;
   for (let i = 0; i < forks; i++) {
     // fresh hp/pauses/fightFace per clone — `pauses` MUST be a new array (a shared ref
     // would leak fork fight-halts into the canonical pass and break byte-identity)
     const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {}, doneLegs: [], dashUsed: false }));
-    const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
+    const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)), tradeDiff);
     if (fr.winner === attacker) atkForkWins++;
   }
 
   // Canonical resolution draws from the match rng (same order as ever).
-  const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, scale, rng);
+  const res = resolveRound(agents, smokes, pulses, nav, sitePt, site, attacker, defender, scale, rng, tradeDiff);
   events.push(...res.events);
 
   // emit one move event per agent (full path + arrival); viewer freezes on death.

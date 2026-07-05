@@ -160,6 +160,9 @@ const topAgent = (p: Player) => [...p.agents].sort((a, b) => b.level - a.level)[
 const pick = (p: Player) => myComp.value[p.id] ?? topAgent(p);
 const masteryOf = (p: Player, agent: string) => p.agents.find(a => a.agent === agent)?.level ?? 45; // off-pool = rough
 const agentsFor = (p: Player) => Array.from(new Set([...p.agents.map(a => a.agent), ...ROLE_AGENTS[p.role]]));
+// one agent per team (the engine coerces a duplicate — the UI shouldn't offer one)
+const takenBy = (p: Player, agent: string) =>
+  club(myClub.value).team.players.some(q => q.id !== p.id && pick(q) === agent);
 function setComp(p: Player, agent: string) {
   myComp.value = agent === topAgent(p) ? omit(myComp.value, p.id) : { ...myComp.value, [p.id]: agent };
 }
@@ -249,7 +252,7 @@ onUnmounted(() => { viewer?.destroy(); });
           <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
           <span class="hq-cph">{{ p.handle }}</span>
           <select :value="pick(p)" @change="setComp(p, ($event.target as HTMLSelectElement).value)">
-            <option v-for="ag in agentsFor(p)" :key="ag" :value="ag">{{ ag }}</option>
+            <option v-for="ag in agentsFor(p)" :key="ag" :value="ag" :disabled="takenBy(p, ag)">{{ ag }}{{ takenBy(p, ag) ? ' — taken' : '' }}</option>
           </select>
           <span class="hq-mast" :class="{ off: masteryOf(p, pick(p)) < 50 }">
             {{ masteryOf(p, pick(p)) >= 50 ? 'mastery ' + masteryOf(p, pick(p)) : 'off-pool' }}
