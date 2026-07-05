@@ -173,7 +173,7 @@ export function resolveAiMarket(w: WorldState, available: Player[], max = 2): { 
  *  veteran sitting on his ceiling is done improving (flip him). `room` is that gap
  *  (ceiling-top − OVR), the at-a-glance "upside left" read. Owned → tighter bands
  *  (your staff watch them daily) but the residual is real plasticity. */
-export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; wage: number; contractYears: number; renew: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[]; focus: string | null; mentor: boolean; mentee: boolean; mood: number; captain: boolean }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; wage: number; contractYears: number; renew: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[]; focus: string | null; mentor: boolean; mentee: boolean; mood: number; captain: boolean; loan?: { tag: string; tier: number } | null }
 export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
   const five = new Set(planFive(c).map(p => p.id));   // the five actually FIELDED (honours a saved lineup), so XI matches who plays + develops
   const hasM = c.roster.some(isMentor);   // a vet leader on the roster mentors the kids (faster growth)
@@ -181,6 +181,7 @@ export function squadView(w: WorldState, c: WorldClub): SquadPlayer[] {
   return c.roster.map(p => {
     const ovr = Math.round(overall(p)), ceiling = scoutedRange(p, true, 0);
     const agents = [...p.agents].sort((a, b) => b.level - a.level).slice(0, 5).map(a => ({ agent: a.agent, level: a.level }));
-    return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), igl: !!p.igl, fatigue: Math.round(fatigueOf(w.fitness, p.id)), injury: injuryOf(w.fitness, p.id), wage: Math.round(contractWage(p, w.patch)), contractYears: p.contract?.years ?? 0, renew: Math.round(demandWage(p, w.patch)), ceiling, room: Math.max(0, ceiling[1] - ovr), attrs: scoutedAttrs(p, true, 0), agents, focus: c.focuses?.[p.id] ?? null, mentor: isMentor(p), mentee: isMentee(p, hasM), mood: Math.round(moodOf(w.morale, p.id)), captain: cap?.id === p.id };
+    const ln = c.loans?.find(l => l.playerId === p.id);
+    return { id: p.id, handle: p.handle, role: p.role, age: p.age, overall: ovr, value: playerValue(p, w.patch), starter: five.has(p.id), igl: !!p.igl, fatigue: Math.round(fatigueOf(w.fitness, p.id)), injury: injuryOf(w.fitness, p.id), wage: Math.round(contractWage(p, w.patch)), contractYears: p.contract?.years ?? 0, renew: Math.round(demandWage(p, w.patch)), ceiling, room: Math.max(0, ceiling[1] - ovr), attrs: scoutedAttrs(p, true, 0), agents, focus: c.focuses?.[p.id] ?? null, mentor: isMentor(p), mentee: isMentee(p, hasM), mood: Math.round(moodOf(w.morale, p.id)), captain: cap?.id === p.id, loan: ln ? { tag: ln.hostTag, tier: ln.hostTier } : null };
   }).sort((a, b) => Number(b.starter) - Number(a.starter) || b.overall - a.overall);
 }

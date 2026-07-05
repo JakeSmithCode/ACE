@@ -28,7 +28,7 @@ export interface AttrScout { key: string; cur: number; ceil: number; mech: boole
 export interface MarketEntry { handle: string; role: string; age: number; overall: number; value: number; contested: boolean; ceiling: [number, number]; scoutLevel: number; attrs: AttrScout[] }
 export interface ScoutResult { ok: boolean; reason?: string; level: number; cost?: number; nextCost?: number | null; ceiling: [number, number]; balance?: number }
 export interface BidResult { ok: boolean; reason?: string; leader?: string; leadBid?: number; paid?: number; club?: ClubPage }
-export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; wage: number; contractYears: number; renew: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[]; focus: string | null; mentor: boolean; mentee: boolean; mood: number; captain: boolean }
+export interface SquadPlayer { id: string; handle: string; role: string; age: number; overall: number; value: number; starter: boolean; igl: boolean; fatigue: number; injury: number; wage: number; contractYears: number; renew: number; ceiling: [number, number]; room: number; attrs: AttrScout[]; agents: { agent: string; level: number }[]; focus: string | null; mentor: boolean; mentee: boolean; mood: number; captain: boolean; loan?: { tag: string; tier: number } | null }
 export interface TalkRead { fit: 'great' | 'ok' | 'poor'; edge: number; mood: number }
 export interface CareerEntry { season: number; tier: number; divName: string; finish: number; champion: boolean; promoted: boolean; relegated: boolean; cupWon: boolean; intlWon: boolean; briefMet: boolean }
 export interface SaleResult { ok: boolean; reason?: string; fee?: number; buyer?: string; club?: ClubPage }
@@ -264,6 +264,12 @@ export class AceServer {
   /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
    *  (your playbooks/fitness/morale all bite), watchable at once, standings
    *  untouched. Works vs another human's club or any AI club (a scrim). */
+  loanOut(token: string, playerId: string): Promise<{ ok: boolean; reason?: string; loan?: { tag: string; tier: number } }> {
+    return this.post('/loan', { id: playerId }, token);
+  }
+  recallLoan(token: string, playerId: string): Promise<{ ok: boolean; reason?: string }> {
+    return this.post('/loan/recall', { id: playerId }, token);
+  }
   offerTransfer(token: string, tag: string, handle: string, amount: number): Promise<{ ok: boolean; offer?: TransferOffer; error?: string }> {
     return this.post('/transfer/offer', { tag, handle, amount }, token);
   }

@@ -258,6 +258,21 @@ async function answerOffer(o: TransferOffer, accept: boolean) {
     await loadTransfers(); await refreshMe();
   } catch (e) { errMsg.value = (e as Error).message; }
 }
+async function doLoan(sp: SquadPlayer) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try {
+    const r = await server.value.loanOut(token.value, sp.id);
+    sellMsg.value = { ...sellMsg.value, [sp.id]: r.ok ? `✓ loaned to ${r.loan!.tag} (tier ${r.loan!.tier + 1}) — starter reps all season` : (r.reason ?? 'loan failed') };
+    if (r.ok) await refreshMe();
+  } catch (e) { sellMsg.value = { ...sellMsg.value, [sp.id]: (e as Error).message }; } finally { marketBusy.value = false; }
+}
+async function doRecall(sp: SquadPlayer) {
+  if (!server.value || !token.value) return;
+  marketBusy.value = true;
+  try { const r = await server.value.recallLoan(token.value, sp.id); if (r.ok) await refreshMe(); }
+  catch { /* transient */ } finally { marketBusy.value = false; }
+}
 async function pullOffer(o: TransferOffer) {
   if (!server.value || !token.value) return;
   try { await server.value.withdrawTransfer(token.value, o.id); await loadTransfers(); } catch { /* transient */ }
@@ -1350,6 +1365,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
                   <i v-if="sp.mentor" class="lv-sqment mentor" title="a veteran leader — he develops your young players faster (mentoring)">🎓 mentor</i>
                   <i v-else-if="sp.mentee" class="lv-sqment mentee" title="a young player being mentored by a senior leader — he grows faster">↑ mentored</i>
                   <i v-if="sp.focus" class="lv-sqfocus" :title="`training focus: ${ATTR_LABEL[sp.focus] || sp.focus} grows faster (the rest a touch slower)`">◎ {{ ATTR_LABEL[sp.focus] || sp.focus }}</i>
+                  <i v-if="sp.loan" class="lv-sqment mentee" :title="`out on loan at ${sp.loan.tag} (tier ${sp.loan.tier + 1}) — starter minutes all season, back at the rollover. He can't be fielded here until recalled.`">⇆ on loan @ {{ sp.loan.tag }}</i>
                   <i v-if="sp.injury" class="lv-sqinj" :title="`injured — out ${sp.injury} more match-day(s); a reserve covers, or he plays hurt`">⚕ OUT {{ sp.injury }}d</i>
                   <i v-else-if="sp.fatigue >= 40" class="lv-sqfat" :class="{ tired: sp.fatigue >= 70 }" :title="`match fatigue ${sp.fatigue}% — rotate him out to recover; high fatigue dulls his game and risks injury`">◔ {{ sp.fatigue }}%</i>
                   <i class="lv-sqmood" :class="{ hi: sp.mood >= 72, lo: sp.mood < 48 }" :title="`morale ${sp.mood}% — high lifts his match game a touch, low drags it`">{{ sp.mood >= 72 ? '☺' : sp.mood < 48 ? '☹' : '·' }} {{ sp.mood }}%</i>
@@ -1367,9 +1383,13 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               <span class="lv-squadacts">
                 <button class="lv-scoutbtn ghost" title="per-skill breakdown" @click="toggleExpand('s:'+sp.id)">{{ expanded.has('s:'+sp.id) ? '▾' : '▸' }}</button>
                 <button v-if="sp.contractYears > 0 && sp.contractYears <= 1" class="lv-scoutbtn renew" :disabled="marketBusy" :title="`re-sign at his current wage (${kfmt(sp.renew)}/yr) — or he walks free at season's end`" @click="renew(sp)">renew</button>
-                <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>
-                <button v-else-if="canBench(sp)" class="lv-scoutbtn" :disabled="marketBusy" title="bench him (a benched player rusts)" @click="benchStarter(sp)">bench</button>
-                <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
+                <button v-if="sp.loan" class="lv-scoutbtn" :disabled="marketBusy" title="recall him from the loan — back in your fielding pool (and back to bench reps unless you start him)" @click="doRecall(sp)">⇆ recall</button>
+                <template v-else>
+                  <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>
+                  <button v-else-if="canBench(sp)" class="lv-scoutbtn" :disabled="marketBusy" title="bench him (a benched player rusts)" @click="benchStarter(sp)">bench</button>
+                  <button v-if="!sp.starter" class="lv-scoutbtn" :disabled="marketBusy" title="loan him to a lower-division club for the season — STARTER reps there (a benched player rusts; a loaned one grows), back at the rollover" @click="doLoan(sp)">⇆ loan</button>
+                  <button class="lv-sellbtn" :disabled="marketBusy" @click="sell(sp)">sell</button>
+                </template>
               </span>
               <span class="lv-mktmsg" :class="{ ok: (sellMsg[sp.id] || '').startsWith('✓') }">{{ sellMsg[sp.id] }}</span>
             </div>

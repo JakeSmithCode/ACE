@@ -7,7 +7,7 @@
 // call them too. The engine never sees any of this — seed 42 is byte-identical.
 import { MAX_ROTATE_STEPS, MAX_ROUTE_WAYPOINTS } from '@ace/shared';
 import type { Tactics, Comp, MapId, Play, Player, PlayerPlan, RotateStep, Vec2 } from '@ace/shared';
-import { type WorldState, type WorldClub, type ClubPlaybook, validFive } from './state.js';
+import { type WorldState, type WorldClub, type ClubPlaybook, type Loan, validFive, startingFive } from './state.js';
 
 /** A club's **plan** — the saved lineup + comp + tactics the tick grabs (§4). An
  *  AI/ghosting club always has one (its generated tactics + comp, best five); a
@@ -114,4 +114,53 @@ export function setClubPlay(w: WorldState, clubId: string, map: MapId, slot: key
   const plays = { ...(c.plays ?? {}) };
   if (Object.keys(book).length) plays[map] = book; else delete plays[map];
   return replace(w, i, { ...c, plays: Object.keys(plays).length ? plays : undefined });
+}
+
+
+// ── player LOANS (the CS-manager staple: minutes drive development) ──────────
+export const MAX_LOANS = 2;
+
+/** The deterministic loan HOST for a player: a club one tier below the lender
+ *  (the tier where he'd start), picked by a stable hash of (player, season) so
+ *  the same loan always lands at the same club. Pure flavour + display — the
+ *  host's own resolution is untouched (the development reps are the mechanics). */
+export function loanHostFor(w: WorldState, lenderIdx: number, playerId: string): { host: string; hostTag: string; hostTier: number } {
+  const lender = w.clubs[lenderIdx];
+  const tier = Math.min(lender.tier + 1, Math.max(...w.clubs.map(c => c.tier)));
+  const cands = w.clubs.filter((c, i) => c.tier === tier && i !== lenderIdx);
+  let h = 2166136261 >>> 0;
+  for (const ch of `${playerId}:${w.season}`) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const pick = cands[h % Math.max(1, cands.length)] ?? lender;
+  return { host: pick.id, hostTag: pick.tag, hostTier: pick.tier };
+}
+
+/** Loan a player out for the season: he can't be fielded (planFive excludes him)
+ *  but develops with STARTER reps at the host. Blocked if the remaining roster
+ *  couldn't field a valid five, if he's already loaned, or at the loan cap. */
+export function loanOut(w: WorldState, clubId: string, playerId: string): { ok: boolean; reason?: string; world?: WorldState; loan?: Loan } {
+  const i = indexOf(w, clubId);
+  const c = w.clubs[i];
+  const player = c.roster.find(p => p.id === playerId || p.handle === playerId);
+  if (!player) return { ok: false, reason: 'not on your roster' };
+  const loans = c.loans ?? [];
+  if (loans.some(l => l.playerId === player.id)) return { ok: false, reason: 'already out on loan' };
+  if (loans.length >= MAX_LOANS) return { ok: false, reason: `loan limit reached (${MAX_LOANS} per season)` };
+  const away = new Set([...loans.map(l => l.playerId), player.id]);
+  if (!validFive(startingFive(c.roster.filter(p => !away.has(p.id))))) return { ok: false, reason: 'loaning him would break your valid five' };
+  const host = loanHostFor(w, i, player.id);
+  const loan: Loan = { playerId: player.id, ...host, season: w.season };
+  const world = { ...w, clubs: w.clubs.map((cc, j) => j === i ? { ...cc, loans: [...loans, loan] } : cc) };
+  return { ok: true, world, loan };
+}
+
+/** Recall a loan mid-season: he's back in the fielding pool (and back to bench
+ *  reps unless you start him). */
+export function recallLoan(w: WorldState, clubId: string, playerId: string): { ok: boolean; reason?: string; world?: WorldState } {
+  const i = indexOf(w, clubId);
+  const c = w.clubs[i];
+  const loans = c.loans ?? [];
+  if (!loans.some(l => l.playerId === playerId)) return { ok: false, reason: 'not out on loan' };
+  const left = loans.filter(l => l.playerId !== playerId);
+  const world = { ...w, clubs: w.clubs.map((cc, j) => j === i ? { ...cc, loans: left.length ? left : undefined } : cc) };
+  return { ok: true, world };
 }

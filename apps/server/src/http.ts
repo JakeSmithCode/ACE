@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, loanOut, recallLoan, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -1062,6 +1062,32 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       return json(res, 200, { ok: true, id: f.id, map, score, home: f.home, away: f.away, human: !!target.owner });
     }
     // GET /friendlies  → your recent friendlies (either side), light rows
+    // ── player LOANS (development via minutes — the CS-manager staple) ─────
+    // POST /loan { id } → send a non-starter for a season of STARTER reps at a
+    // lower-tier club; he can't be fielded until recalled/returned.
+    if (path[0] === 'loan' && path.length === 1 && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { id?: string };
+      const w = (await store.loadWorld(id))!;
+      const r = loanOut(w, mine.id, b.id ?? '');
+      if (!r.ok) return json(res, 200, { ok: false, reason: r.reason });
+      await store.saveWorld(id, r.world!);
+      return json(res, 200, { ok: true, loan: { tag: r.loan!.hostTag, tier: r.loan!.hostTier } });
+    }
+    // POST /loan/recall { id } → bring him home mid-season
+    if (path[0] === 'loan' && path[1] === 'recall' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { id?: string };
+      const w = (await store.loadWorld(id))!;
+      const r = recallLoan(w, mine.id, b.id ?? '');
+      if (!r.ok) return json(res, 200, { ok: false, reason: r.reason });
+      await store.saveWorld(id, r.world!);
+      return json(res, 200, { ok: true });
+    }
     // ── human-to-human transfers (the direct PvP economy) ─────────────────
     // POST /transfer/offer { tag, handle, amount } → bid for a player on another
     // HUMAN owner's roster (AI clubs go through the normal market). The seller's

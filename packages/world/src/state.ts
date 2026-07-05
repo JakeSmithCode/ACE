@@ -67,7 +67,15 @@ export interface WorldClub {
    *  setup fields exactly when the rotation lands on bind. Additive/optional:
    *  undefined = no plays = byte-identical worlds. */
   plays?: Partial<Record<MapId, ClubPlaybook>>;
+  /** An owner's players OUT ON LOAN this season (the CS-manager staple ACE lacked):
+   *  a loaned player can't be fielded but develops with STARTER reps (he's getting
+   *  real minutes at the host club — the whole point, since a benched prospect
+   *  rusts). Auto-returns at the rollover. Additive/owner-scoped: undefined =
+   *  byte-identical worlds. */
+  loans?: Loan[];
 }
+
+export interface Loan { playerId: string; host: string; hostTag: string; hostTier: number; season: number }
 
 /** One map's authored plays: the primary execute, the optional ALT execute (two
  *  executes on different sites make the engine roll the site per round), and the
@@ -109,9 +117,12 @@ const hasDevLevers = (c: WorldClub): boolean => !!c.owner && (!!c.focuses || c.r
  *  into each player's boost; AI clubs use the plain boost, so a no-owner world is byte-identical. */
 function developClubDay(c: WorldClub, five: Set<string>, total: number, rng: Rng): Player[] {
   const boost = clubDevBoost(c);
-  if (!hasDevLevers(c)) return c.roster.map(p => developInSeason(p, five.has(p.id), total, rng, boost));
+  // a loaned player is STARTING at his host club — reps, not bench rust (the
+  // point of the loan). Undefined loans → the boolean path, byte-identical.
+  const ctx = (p: Player) => c.loans?.some(l => l.playerId === p.id) ? 'starter' as const : five.has(p.id);
+  if (!hasDevLevers(c)) return c.roster.map(p => developInSeason(p, ctx(p), total, rng, boost));
   const hasM = c.roster.some(isMentor);
-  return c.roster.map(p => developInSeason(p, five.has(p.id), total, rng, mentorBoost(boost, p, hasM), c.focuses?.[p.id]));
+  return c.roster.map(p => developInSeason(p, ctx(p), total, rng, mentorBoost(boost, p, hasM), c.focuses?.[p.id]));
 }
 
 /** Develop a club's roster the off-season bootcamp share (age +1). Owner levers as above. */
@@ -202,11 +213,18 @@ export function validFive(five: Player[]): boolean {
  *  can never break the always-field-a-competent-five rule — a stale/invalid one
  *  simply falls back (defense in depth alongside the `setClubPlan` validation). */
 export function planFive(c: WorldClub): Player[] {
+  // a loaned player is at ANOTHER club this season — he can't be fielded. If
+  // excluding the loans would break the valid five (roster churn after the loan
+  // was made), fall back to the full roster rather than ever fielding fewer
+  // than five (the same defense-in-depth as a stale lineup).
+  const away = c.loans?.length ? new Set(c.loans.map(l => l.playerId)) : null;
+  const pool = away ? c.roster.filter(p => !away.has(p.id)) : c.roster;
+  const roster = validFive(startingFive(pool)) ? pool : c.roster;
   if (c.lineup && c.lineup.length === 5) {
-    const chosen = c.lineup.map(id => c.roster.find(p => p.id === id)).filter((p): p is Player => !!p);
+    const chosen = c.lineup.map(id => roster.find(p => p.id === id)).filter((p): p is Player => !!p);
     if (validFive(chosen)) return chosen.map(p => ({ ...p, igl: p.role === 'sentinel' }));
   }
-  return startingFive(c.roster);
+  return startingFive(roster);
 }
 export const clubTeam = (c: WorldClub): Team => ({ id: c.id, tag: c.tag, name: c.name, players: planFive(c) });
 
@@ -357,7 +375,8 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
       const yl = sponsor.yearsLeft - 1;
       sponsor = yl > 0 ? { ...sponsor, yearsLeft: yl } : undefined;
     }
-    return { ...c, sponsor, roster, camp: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
+    // loans auto-RETURN at the rollover (a loan is one season of minutes)
+    return { ...c, sponsor, roster, camp: undefined, loans: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
   });
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP
