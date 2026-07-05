@@ -4,7 +4,7 @@
 // run. Your club gets two manager overlays the AI clubs don't: an authored comp
 // and authored tactics, both injected into your fixtures.
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { Attributes, Comp, MapId, MatchInput, PatchState, Player, Role, Tactics, Team } from '@ace/shared';
+import type { Attributes, Comp, MapId, MatchInput, PatchState, Play, Player, Role, Tactics, Team } from '@ace/shared';
 import type { Navmesh } from '@ace/maps';
 import { simulateMatch, PATCH, Rng } from '@ace/engine';
 import {
@@ -72,6 +72,31 @@ const season = ref(1);
 const prevById = ref<Map<string, { age: number; attr: Attributes }>>(new Map());  // season-start snapshot, for roster deltas (set below)
 const myComp = ref<Comp>({});                          // your authored comp (overlay)
 const myTactics = ref<Tactics>(clone(clubs.value[myClub.value].tactics));  // your authored tactics (overlay)
+/** Your PER-MAP playbook. A play's coordinates are map-space, so a play only
+ *  makes sense on the map it was drawn on — with the 8-map rotation, keying the
+ *  plays by map is what lets your authored setups field on EVERY map you've
+ *  authored (previously only Ascent; everywhere else they were dropped).
+ *  `buildInput` overlays the fixture map's slots; the dials stay map-agnostic. */
+export interface MapPlays { attack?: Play; attack2?: Play; defense?: Play }
+const myPlays = ref<Partial<Record<MapId, MapPlays>>>({});
+function setMapPlay(map: MapId, slot: keyof MapPlays, play: Play | undefined) {
+  const cur = { ...(myPlays.value[map] ?? {}) };
+  if (play) cur[slot] = play; else delete cur[slot];
+  const next = { ...myPlays.value };
+  if (Object.keys(cur).length) next[map] = cur; else delete next[map];
+  myPlays.value = next;   // immutable reassign — the autosave watcher sees it
+}
+// older careers stored plays inside myTactics (Ascent-only era) — move them into
+// the ascent slot of the playbook once, then keep myTactics dials-only.
+function migratePlays() {
+  const t = myTactics.value;
+  if (!t.attack.play && !t.attack.play2 && !t.defense.play) return;
+  const cur = myPlays.value.ascent ?? {};
+  myPlays.value = { ...myPlays.value, ascent: {
+    attack: cur.attack ?? t.attack.play, attack2: cur.attack2 ?? t.attack.play2, defense: cur.defense ?? t.defense.play,
+  } };
+  myTactics.value = { ...t, attack: { ...t.attack, play: undefined, play2: undefined }, defense: { ...t.defense, play: undefined } };
+}
 // every player on YOUR roster is under a contract (a wage locked for a term). Seed
 // the starting squad with staggered terms so renewals don't all land in one season.
 function seedContracts(roster: Player[]): Player[] {
@@ -658,14 +683,17 @@ function withAffinity(team: Club['team'], m: MapId): Club['team'] {
   }) };
 }
 // build a fixture's MatchInput on its map (seed-derived, or an explicit veto map),
-// overlaying YOUR comp + tactics + each club's map affinity. Your authored PLAYS
-// are Ascent-coordinates, so on any other pool map they're dropped — your dials
-// (map-agnostic) still apply.
+// overlaying YOUR comp + tactics + each club's map affinity. Plays are PER-MAP
+// (the playbook): the fixture map's authored slots are fielded, any other map's
+// stay home — your dials (map-agnostic) always apply.
 function buildInput(fx: { home: number; away: number }, seed: number, map: MapId = fixtureMap(seed)): MatchInput {
   const tac = (i: number): Tactics => {
     if (i !== myClub.value) return clubs.value[i].tactics;
     const t = clone(myTactics.value);
-    if (map !== MAP) { t.attack.play = undefined; t.attack.play2 = undefined; t.defense.play = undefined; }
+    const pb = myPlays.value[map];
+    t.attack.play = pb?.attack ? clone(pb.attack) : undefined;
+    t.attack.play2 = pb?.attack2 ? clone(pb.attack2) : undefined;
+    t.defense.play = pb?.defense ? clone(pb.defense) : undefined;
     return t;
   };
   const cmp = (i: number): Comp => i === myClub.value ? clone(myComp.value) : {};
@@ -976,6 +1004,7 @@ function selectClub(i: number) {
   myClub.value = i;
   myComp.value = {};
   myTactics.value = clone(clubs.value[i].tactics);
+  myPlays.value = {};
   myRoster.value = seedContracts([...clubs.value[i].team.players]);
   prevById.value = snapRosters();   // new club → new baseline
   ledger.value = null;
@@ -997,6 +1026,7 @@ function newWorld(s = Math.floor(Math.random() * 100000)) {
   results.value = []; dayIdx.value = 0; season.value = 1;
   myComp.value = {};
   myTactics.value = clone(clubs.value[myClub.value].tactics);
+  myPlays.value = {};
   myRoster.value = seedContracts([...clubs.value[myClub.value].team.players]);
   prevById.value = snapRosters();   // fresh season-1 baseline
   balances.value = clubs.value.map(c => startingBalance(c.strength));
@@ -1328,7 +1358,7 @@ async function ensureNav() {
   await Promise.all(MAP_POOL.map(async m => { if (!navs[m]) navs[m] = await fetch(`/${m}.navmesh.json`).then(r => r.json()); }));
   navReady = true;
 }
-const getNav = () => navs[MAP] ?? null;   // the editor's map (Ascent)
+const getNav = (m: MapId = MAP) => navs[m] ?? null;   // any loaded pool map (editor defaults Ascent)
 
 // --- career persistence (localStorage) ---------------------------------------
 // A whole career lives in the refs above; here we snapshot the mutated state to
@@ -1345,7 +1375,7 @@ function snapshot() {
     seasonSeed: seasonSeed.value, season: season.value, myClub: myClub.value, dayIdx: dayIdx.value,
     clubs: clubs.value, division: division.value, lastMoves: lastMoves.value,
     results: results.value, balances: balances.value, ledger: ledger.value,
-    titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myRoster: myRoster.value,
+    titles: titles.value, myComp: myComp.value, myTactics: myTactics.value, myPlays: myPlays.value, myRoster: myRoster.value,
     freeAgentPool: freeAgentPool.value, listings: listings.value, myListed: [...myListed.value],
     patch: patch.value, metaChanges: metaChanges.value, playoffs: playoffs.value, myPromoPlayoff: myPromoPlayoff.value,
     cup: cup.value, myCupTie: myCupTie.value, cupTitles: cupTitles.value, lastCupResult: lastCupResult.value,
@@ -1373,6 +1403,8 @@ function hydrate(o: ReturnType<typeof snapshot>) {
   schedules.value = divSchedules(division.value); results.value = o.results;
   balances.value = o.balances; ledger.value = o.ledger; titles.value = o.titles;
   myComp.value = o.myComp; myTactics.value = o.myTactics; myRoster.value = o.myRoster;
+  myPlays.value = (o as { myPlays?: Partial<Record<MapId, MapPlays>> }).myPlays ?? {};
+  migratePlays();   // an Ascent-era save carries plays inside myTactics — move them once
   freeAgentPool.value = o.freeAgentPool; listings.value = o.listings; myListed.value = new Set(o.myListed);
   patch.value = o.patch; metaChanges.value = o.metaChanges; playoffs.value = o.playoffs; myPromoPlayoff.value = o.myPromoPlayoff ?? null;
   cup.value = o.cup ?? null; myCupTie.value = o.myCupTie ?? null; cupTitles.value = o.cupTitles ?? clubs.value.map(() => 0); lastCupResult.value = o.lastCupResult ?? null;
@@ -1418,7 +1450,7 @@ ensureCup();     // open this season's ACE Cup if a fresh start / older save did
 // match-days) collapses into one write.
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
-  [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics,
+  [seasonSeed, clubs, division, lastMoves, results, dayIdx, myClub, season, balances, ledger, titles, myComp, myTactics, myPlays,
     myRoster, freeAgentPool, listings, myListed, patch, metaChanges, playoffs, myPromoPlayoff, cup, myCupTie, cupTitles, lastCupResult, forcedStart, forcedBench, customHandles, prevById, facilities, academy, staff, retirements, contractDepartures, marketWave, scouted, focuses, fatigue, injuries, morale, teamTalk, rivalId, derbyRecord, lastAwards, awardsHistory, boardConfidence, sacked, sponsor, lastSponsorPay, camp, captainId, tacticPresets, careerLog],
   () => { if (_saveTimer) clearTimeout(_saveTimer); _saveTimer = setTimeout(save, 200); },
 );
@@ -1426,7 +1458,7 @@ watch(
 export function useWorld() {
   return {
     N, DIV_SIZE, DIVS, PROMO, DIV_NAMES, MAP, MAP_POOL, fixtureMap, navOf, seasonSeed, clubs, schedules, results, dayIdx, myClub, season, prevById,
-    myComp, myTactics, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
+    myComp, myTactics, myPlays, setMapPlay, myRoster, balance, balances, ledger, market, myListed, patch, metaChanges,
     playoffs, myPromoPlayoff, titles, cup, myCupTie, cupTitles, lastCupResult, cupName: CUP_NAME, hasSave, clearSave, division, myDivision, lastMoves, tableOf,
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,

@@ -367,6 +367,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ace-editor .ed-author.edalt.set{border-color:rgba(230,198,106,.55);color:#e6c66a}
 .ace-editor .ed-author.edalt.on{background:#e6c66a;border-color:#e6c66a;color:var(--bg)}
 .ed-samesite{font-size:11px;color:#e6c66a}
+/* the per-map playbook picker */
+.ed-maps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)}
+.ed-maps label{font-family:var(--label);font-size:10px;letter-spacing:.08em;color:var(--muted-2)}
+.ed-map{background:transparent;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:10.5px;letter-spacing:.04em;padding:4px 9px;cursor:pointer;text-transform:uppercase;border-radius:4px;display:inline-flex;align-items:center;gap:4px}
+.ed-map:hover{color:var(--text);border-color:var(--brand)}
+.ed-map.on{color:var(--bg);background:var(--brand);border-color:var(--brand)}
+.ed-map.has:not(.on){border-color:rgba(34,211,238,.45)}
+.ed-mapdot{font-style:normal;font-size:7px;color:#3bd17f}
+.ed-map.on .ed-mapdot{color:var(--bg)}
+.ed-maphint{font-size:11px;color:var(--muted-2);margin-left:6px}
+.ed-mapname{text-transform:uppercase;color:var(--brand)}
 /* VIP supporter tier (convenience only — never pay-to-win) */
 .lv-vip{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:#e6c66a;border:1px solid rgba(230,198,106,.55);border-radius:4px;padding:2px 7px;background:linear-gradient(90deg,rgba(230,198,106,.14),rgba(230,198,106,.04));white-space:nowrap}
 .lv-vipbtn{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line-2);border-radius:4px;padding:2px 7px;background:transparent;cursor:pointer;white-space:nowrap}

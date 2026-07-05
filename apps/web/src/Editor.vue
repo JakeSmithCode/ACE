@@ -1,68 +1,105 @@
 <script setup lang="ts">
-// Tactics Editor — now grounded in YOUR club. Team 0 is your squad and its dials
-// + authored plays write straight back to the world store (myTactics), so what
-// you tune here is what your club runs in its real fixtures. Team 1 is your next
-// opponent, editable locally for testing (those edits don't persist). Re-sims
-// live in the browser, your comp included.
-import { onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
-import type { MatchInput, MatchTimeline, Tactics, Team, Play } from '@ace/shared';
+// Tactics Editor — grounded in YOUR club, one PLAYBOOK PER MAP. Team 0 is your
+// squad: its dials write to the store (myTactics, map-agnostic) and its authored
+// plays write to the PER-MAP playbook (myPlays[map]) — with the 8-map rotation,
+// the fixture map's plays are what your club actually fields, so you author a
+// setup for every pool map you care about. Team 1 is your next opponent, edited
+// locally for testing. Re-sims live in the browser on the selected map.
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
+import type { MapId, MatchInput, MatchTimeline, Tactics, Team, Play, Vec2 } from '@ace/shared';
 import { simulateMatch, PATCH } from '@ace/engine';
-import { ANCHORS } from '@ace/maps';
+import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
-import { useWorld, MAP } from './world';
+import { useWorld, MAP, MAP_POOL } from './world';
 
-// the active map's anchors drive the editor — spawn + the sites it fields (A/B,
-// or A/B/C on a three-site map), so the play editor is correct for whatever map.
-const A0 = ANCHORS[MAP]!;
-const ATK_SPAWN: [number, number] = A0.atkSpawn;
-const SITES = A0.sites;
 const FORKS = 50;
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
 const w = useWorld();
+// the selected map drives everything: anchors (spawn + the sites it fields),
+// navmesh, minimap, and WHICH playbook slot you're authoring into.
+const mapSel = ref<MapId>(MAP);
+const A0 = computed(() => ANCHORS[mapSel.value]!);
+const ATK_SPAWN = computed(() => A0.value.atkSpawn);
+const SITES = computed(() => A0.value.sites);
+function pickMap(m: MapId) { mapSel.value = m; authoring.value = null; bump.n++; schedule(); }
+
 // captured on mount (the editor remounts when you switch to this tab)
 const teams: [Team, Team] = [w.myTeam.value, w.clubs.value[w.nextOpponent.value].team];
 const oppTactics = reactive<Tactics>(clone(w.clubs.value[w.nextOpponent.value].tactics));
 const tac = (i: number): Tactics => (i === 0 ? w.myTactics.value : oppTactics);
 
+// ── generic starters, derived from the selected map's anchors (positions are
+// snapped to the nearest walkable cell, so they're sane on any pool map) ──────
+const walkableAt = (nav: Navmesh, p: Vec2) => {
+  const c = Math.floor(p[0] / nav.cell), r = Math.floor(p[1] / nav.cell);
+  return c >= 0 && c < nav.cols && r >= 0 && r < nav.rows && nav.walk[r * nav.cols + c] === 1;
+};
+function snapW(p: Vec2): Vec2 {
+  const nav = w.getNav(mapSel.value);
+  const cl = (v: number) => Math.max(8, Math.min(992, Math.round(v)));
+  const q: Vec2 = [cl(p[0]), cl(p[1])];
+  if (!nav || walkableAt(nav, q)) return q;
+  for (let R = 8; R <= 120; R += 8) for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    const c: Vec2 = [cl(q[0] + Math.cos(a) * R), cl(q[1] + Math.sin(a) * R)];
+    if (walkableAt(nav, c)) return c;
+  }
+  return q;
+}
 function starterDefense(t: Team): Play {
+  const A = A0.value;
   const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
-  const bait = p3;
+  const off = (b: Vec2, dx: number, dy: number): Vec2 => snapW([b[0] + dx, b[1] + dy]);
+  // the classic shape: a mid bait, two A bodies that collapse deeper when he
+  // falls (the kill point), an A anchor, a B watcher — then you tune.
   return { plans: [
-    { player: p3, pos: [500, 470] },
-    { player: p0, pos: [340, 300], rotate: { pos: [320, 160], trigger: { kind: 'death', player: bait } } },
-    { player: p1, pos: [300, 300], rotate: { pos: [296, 165], trigger: { kind: 'death', player: bait } } },
-    { player: p2, pos: [310, 150] },
-    { player: p4, pos: [270, 793] },
+    { player: p3, pos: snapW([A.mid[0], A.mid[1]]) },
+    { player: p0, pos: off(A.sites.A, 40, 55), rotate: { pos: off(A.sites.A, 15, -40), trigger: { kind: 'death', player: p3 } } },
+    { player: p1, pos: off(A.sites.A, -45, 40), rotate: { pos: off(A.sites.A, -20, -40), trigger: { kind: 'death', player: p3 } } },
+    { player: p2, pos: snapW([A.sites.A[0], A.sites.A[1]]) },
+    { player: p4, pos: snapW([A.sites.B[0], A.sites.B[1]]) },
   ] };
 }
 function starterAttack(t: Team): Play {
+  const A = A0.value;
   const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
+  const pA = A.sites.A;
+  const L = Math.hypot(pA[0] - A.atkSpawn[0], pA[1] - A.atkSpawn[1]) || 1;
+  const d: Vec2 = [(pA[0] - A.atkSpawn[0]) / L, (pA[1] - A.atkSpawn[1]) / L];   // push axis
+  const px = -d[1], py = d[0];                                                  // entry fan
+  const at = (back: number, side: number): Vec2 => snapW([pA[0] - d[0] * back + px * side, pA[1] - d[1] * back + py * side]);
   return { site: 'A', plans: [
-    { player: p0, pos: [310, 170] }, { player: p1, pos: [345, 210] }, { player: p2, pos: [305, 256] },
-    { player: p3, pos: [420, 330] }, { player: p4, pos: [500, 470] },
-  ], lineups: [ { player: p2, kind: 'smoke', at: [300, 120], t: 0.25 } ] };
+    { player: p0, pos: at(20, -45) }, { player: p1, pos: at(10, 10) }, { player: p2, pos: at(30, 60) },
+    { player: p3, pos: at(95, -20) },
+    { player: p4, pos: snapW([(pA[0] + A.mid[0]) / 2, (pA[1] + A.mid[1]) / 2]) },
+  ], lineups: [ { player: p2, kind: 'smoke', at: snapW([pA[0] + d[0] * 70, pA[1] + d[1] * 70]), t: 0.25 } ] };
 }
 const starterFor = (t: Team, side: Side): Play => (side === 'attack' ? starterAttack(t) : starterDefense(t));
-const playRef = (i: number, side: Side) => side === 'attack' ? tac(i).attack : tac(i).defense;
-// a play slot: the defense play, the primary attack execute, or the ALT execute
-// (attack.play2 — with two executes on different sites the engine ROLLS the site
-// per round and runs the matching play, so your authored attack isn't a tell)
-const playOf = (i: number, side: Side, alt = false): Play | undefined =>
-  side === 'attack' ? (alt ? tac(i).attack.play2 : tac(i).attack.play) : tac(i).defense.play;
+// a play slot: defense, the primary attack execute, or the ALT execute (play2 —
+// two executes on different sites make the engine ROLL the site per round).
+// YOUR club's plays live in the PER-MAP playbook; the opponent's live locally.
+type Slot = 'attack' | 'attack2' | 'defense';
+const slotOf = (side: Side, alt: boolean): Slot => side === 'attack' ? (alt ? 'attack2' : 'attack') : 'defense';
+const playOf = (i: number, side: Side, alt = false): Play | undefined => {
+  if (i === 0) return w.myPlays.value[mapSel.value]?.[slotOf(side, alt)];
+  return side === 'attack' ? (alt ? oppTactics.attack.play2 : oppTactics.attack.play) : oppTactics.defense.play;
+};
 function setPlayVal(i: number, side: Side, alt: boolean, p: Play | undefined) {
-  if (side === 'attack') { if (alt) tac(i).attack.play2 = p; else tac(i).attack.play = p; }
-  else tac(i).defense.play = p;
+  if (i === 0) { w.setMapPlay(mapSel.value, slotOf(side, alt), p); return; }
+  if (side === 'attack') { if (alt) oppTactics.attack.play2 = p; else oppTactics.attack.play = p; }
+  else oppTactics.defense.play = p;
 }
 // the alt starter TRANSPLANTS the primary execute to the next site (translate by
-// the site delta, flip the site) — a rough template the owner then tunes
+// the site delta, flip the site) — a rough starting template the owner then tunes
 function altStarter(i: number): Play {
-  const p1 = tac(i).attack.play!;
-  const list = (['A', 'B', 'C'] as const).filter(s => SITES[s]);
+  const p1 = playOf(i, 'attack')!;
+  const sites = SITES.value;
+  const list = (['A', 'B', 'C'] as const).filter(s => sites[s]);
   const s1 = (p1.site ?? 'A') as typeof list[number];
   const s2 = list[(list.indexOf(s1) + 1) % list.length];
-  const d = [SITES[s2]![0] - SITES[s1]![0], SITES[s2]![1] - SITES[s1]![1]];
+  const d = [sites[s2]![0] - sites[s1]![0], sites[s2]![1] - sites[s1]![1]];
   const cl = (v: number) => Math.max(0, Math.min(1000, Math.round(v)));
   const sh = (pt: [number, number]): [number, number] => [cl(pt[0] + d[0]), cl(pt[1] + d[1])];
   const c: Play = clone(p1);
@@ -129,13 +166,13 @@ function refreshGhosts() {
 
 function toggleAuthor(i: number, side: Side) {
   if (isOpen(i, side)) { authoring.value = null; return; }
-  if (!playRef(i, side).play) playRef(i, side).play = starterFor(teams[i], side);
+  if (!playOf(i, side)) { setPlayVal(i, side, false, starterFor(teams[i], side)); schedule(); }
   authoring.value = { team: i, side };
   refreshGhosts();
 }
 function toggleAuthorAlt(i: number) {
   if (isOpen(i, 'attack', true)) { authoring.value = null; return; }
-  if (!tac(i).attack.play2) { tac(i).attack.play2 = altStarter(i); schedule(); }
+  if (!playOf(i, 'attack', true)) { setPlayVal(i, 'attack', true, altStarter(i)); schedule(); }
   authoring.value = { team: i, side: 'attack', alt: true };
   refreshGhosts();
 }
@@ -147,18 +184,30 @@ function clearPlay(i: number, side: Side, alt = false) {
 function onPlay(i: number, side: Side, alt: boolean, play: Play) { setPlayVal(i, side, alt, play); bump.n++; schedule(); }
 // both executes on ONE site can't mix — the engine forces the primary's site then
 const sameSiteWarn = (i: number) =>
-  !!(tac(i).attack.play?.site && tac(i).attack.play2?.site && tac(i).attack.play!.site === tac(i).attack.play2!.site);
+  !!(playOf(i, 'attack')?.site && playOf(i, 'attack', true)?.site && playOf(i, 'attack')!.site === playOf(i, 'attack', true)!.site);
 
 let viewer: Viewer | null = null;
 let pending = 0;
+// team 0's engine tactics = the map-agnostic dials + the SELECTED MAP's playbook
+// (exactly what buildInput fields for a real fixture on this map)
+function tacticsFor(i: number): Tactics {
+  const t = clone(tac(i));
+  if (i === 0) {
+    const pb = w.myPlays.value[mapSel.value];
+    t.attack.play = pb?.attack ? clone(pb.attack) : undefined;
+    t.attack.play2 = pb?.attack2 ? clone(pb.attack2) : undefined;
+    t.defense.play = pb?.defense ? clone(pb.defense) : undefined;
+  }
+  return t;
+}
 function resim() {
-  const nav = w.getNav();
+  const nav = w.getNav(mapSel.value);
   if (!nav || !host.value) return;
   busy.value = true;
   requestAnimationFrame(() => {
     const input: MatchInput = {
-      seed: seed.value, map: MAP, teams, patch: PATCH,
-      tactics: [clone(tac(0)), clone(tac(1))],
+      seed: seed.value, map: mapSel.value, teams, patch: PATCH,
+      tactics: [tacticsFor(0), tacticsFor(1)],
       comp: [clone(w.myComp.value), {}],
     };
     const tl = simulateMatch(input, nav, FORKS);
@@ -180,7 +229,7 @@ function resim() {
     viewer?.destroy();
     // the preview mutes broadcast audio by default (a re-sim per edit would chirp
     // constantly); the 🔊 toggle still turns it on for a proper watch-through
-    viewer = new Viewer(host.value!, tl, `/${MAP}.png`, nav as any, { sfx: false });
+    viewer = new Viewer(host.value!, tl, `/${mapSel.value}.png`, nav as any, { sfx: false });
     busy.value = false;
   });
 }
@@ -212,6 +261,13 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
           {{ so.site }}<i v-if="so.atk != null" class="a">⚔{{ Math.round(so.atk * 100) }}</i><i v-if="so.def != null" class="d">🛡{{ Math.round(so.def * 100) }}</i>
         </span>
       </div>
+    </div>
+    <div class="ed-maps">
+      <label>MAP</label>
+      <button v-for="m in MAP_POOL" :key="m" class="ed-map" :class="{ on: mapSel === m, has: !!w.myPlays.value[m] }"
+              :title="w.myPlays.value[m] ? `you have authored plays on ${m}` : `no plays authored on ${m} yet — your dials still apply there`"
+              @click="pickMap(m)">{{ m }}<i v-if="w.myPlays.value[m]" class="ed-mapdot">●</i></button>
+      <span class="ed-maphint">plays are authored PER MAP — when a fixture lands on a map, your club fields THAT map's playbook</span>
     </div>
     <div class="ed-presets">
       <label>PLAYBOOK</label>
@@ -246,11 +302,11 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
           </select>
           <label>Plays</label>
           <div class="ed-play">
-            <button class="ed-author" :class="{ on: isOpen(i, 'attack'), set: tac(i).attack.play }" @click="toggleAuthor(i, 'attack')">✎ attack</button>
-            <button v-if="tac(i).attack.play" class="ed-author edalt" :class="{ on: isOpen(i, 'attack', true), set: tac(i).attack.play2 }"
+            <button class="ed-author" :class="{ on: isOpen(i, 'attack'), set: playOf(i, 'attack') }" @click="toggleAuthor(i, 'attack')">✎ attack</button>
+            <button v-if="playOf(i, 'attack')" class="ed-author edalt" :class="{ on: isOpen(i, 'attack', true), set: playOf(i, 'attack', true) }"
                     @click="toggleAuthorAlt(i)"
                     title="a SECOND execute on the other site — with two authored executes the engine rolls the site each round (your site bias) and runs the matching play, so your attack isn't a tell">⑂ alt</button>
-            <button class="ed-author" :class="{ on: isOpen(i, 'defense'), set: tac(i).defense.play }" @click="toggleAuthor(i, 'defense')">✎ defense</button>
+            <button class="ed-author" :class="{ on: isOpen(i, 'defense'), set: playOf(i, 'defense') }" @click="toggleAuthor(i, 'defense')">✎ defense</button>
           </div>
         </div>
       </div>
@@ -259,22 +315,22 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
     <div v-if="authoring" class="ed-canvas">
       <div class="ed-canvas-head">
         <span class="ed-tag" :class="authoring.team === 0 ? 'att' : 'def'">{{ teams[authoring.team].tag }}</span>
-        {{ authoring.side }}{{ authoring.alt ? ' (alt exec)' : '' }} play — drag to place · <b>{{ teams[authoring.team].name }}</b> {{ authoring.side === 'attack' ? 'attacking' : 'defending' }}
+        {{ authoring.side }}{{ authoring.alt ? ' (alt exec)' : '' }} play on <b class="ed-mapname">{{ mapSel }}</b> — drag to place · <b>{{ teams[authoring.team].name }}</b> {{ authoring.side === 'attack' ? 'attacking' : 'defending' }}
         <span v-if="authoring.side === 'attack' && sameSiteWarn(authoring.team)" class="ed-samesite"
               title="the per-round site roll needs the two executes on different sites — pick another site for one of them">⚠ both executes target the same site — the roll needs two</span>
         <button class="ed-clear" @click="clearPlay(authoring.team, authoring.side, authoring.alt)">clear play</button>
         <button class="ed-close" @click="authoring = null">done</button>
       </div>
       <PlayEditor
-        :key="`${authoring.team}-${authoring.side}-${authoring.alt ? 'alt' : 'main'}`"
+        :key="`${mapSel}-${authoring.team}-${authoring.side}-${authoring.alt ? 'alt' : 'main'}`"
         :team="teams[authoring.team]"
-        :map-url="`/${MAP}.png`"
+        :map-url="`/${mapSel}.png`"
         :side="authoring.team === 0 ? 'att' : 'def'"
         :mode="authoring.side"
         :play="playOf(authoring.team, authoring.side, authoring.alt)!"
         :atk-spawn="ATK_SPAWN"
         :sites="SITES"
-        :nav="w.getNav()!"
+        :nav="w.getNav(mapSel)!"
         :ghosts="ghosts"
         @update="(p) => onPlay(authoring!.team, authoring!.side, !!authoring!.alt, p)"
       />
