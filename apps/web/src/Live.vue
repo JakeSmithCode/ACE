@@ -13,7 +13,7 @@ import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView , TransferOffer } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -78,7 +78,7 @@ async function doAuth() {
     openEvents();   // re-key the event stream with the signed-in token (targeted notif/mail)
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
 }
-async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); await loadUpcoming(); } }
+async function refreshMe() { if (server.value && token.value) { myClub.value = await server.value.me(token.value).catch(() => null); syncTac(); await loadNotifs(); await loadMail(); await loadUpcoming(); await loadTransfers(); } }
 // VIP supporter tier (never pay-to-win): dev servers activate instantly; a
 // Stripe-configured server returns the hosted checkout and the webhook flips it.
 const vipBusy = ref(false);
@@ -206,6 +206,7 @@ let presenceTimer: ReturnType<typeof setInterval> | null = null;
 // a notification points somewhere — clicking it opens the right surface
 function notifGo(n: { text: string }) {
   if (n.text.includes('Playoffs')) { playoffsOpen.value = true; void loadPlayoffs(); }
+  else if (n.text.startsWith('⇄') || n.text.startsWith('✓')) { transfersOpen.value = true; void loadTransfers(); }
   else if (n.text.startsWith('⚔')) { friendliesOpen.value = true; void loadFriendlies(); }
   notifOpen.value = false;
 }
@@ -227,6 +228,39 @@ async function watchPlayoff(pseason: number, seed: number, hi: string, lo: strin
     const pov = mine(hi) ? 0 as const : mine(lo) ? 1 as const : undefined;
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${rep.snapshot.map}.png`, nav, { pov }); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
+}
+// ── HUMAN-TO-HUMAN TRANSFERS: bid for a player on another owner's roster ────
+const offerFor = ref<{ handle: string; amount: string } | null>(null);   // inline bid form on the club modal
+const offerBusy = ref(false);
+const offerMsg = ref('');
+const transfersIn = ref<TransferOffer[]>([]);
+const transfersOut = ref<TransferOffer[]>([]);
+const transfersOpen = ref(false);
+const pendingIn = computed(() => transfersIn.value.filter(o => o.status === 'pending').length);
+async function loadTransfers() { if (server.value && token.value) try { const r = await server.value.transfers(token.value); transfersIn.value = r.incoming; transfersOut.value = r.outgoing; } catch { /* transient */ } }
+async function toggleTransfers() { transfersOpen.value = !transfersOpen.value; if (transfersOpen.value) await loadTransfers(); }
+async function sendOffer(tag: string) {
+  if (!server.value || !token.value || !offerFor.value) return;
+  const amount = Math.round(Number(offerFor.value.amount));
+  if (!Number.isFinite(amount) || amount <= 0) { offerMsg.value = 'enter a real amount'; return; }
+  offerBusy.value = true; offerMsg.value = '';
+  try {
+    const r = await server.value.offerTransfer(token.value, tag, offerFor.value.handle, amount);
+    if (r.ok) { offerMsg.value = `✓ offer sent — ${offerFor.value.handle} for $${amount.toLocaleString()}; the owner decides`; offerFor.value = null; await loadTransfers(); }
+    else offerMsg.value = r.error ?? 'offer failed';
+  } catch (e) { offerMsg.value = (e as Error).message; } finally { offerBusy.value = false; }
+}
+async function answerOffer(o: TransferOffer, accept: boolean) {
+  if (!server.value || !token.value) return;
+  try {
+    const r = await server.value.respondTransfer(token.value, o.id, accept);
+    if (!r.ok && r.reason) errMsg.value = r.reason;
+    await loadTransfers(); await refreshMe();
+  } catch (e) { errMsg.value = (e as Error).message; }
+}
+async function pullOffer(o: TransferOffer) {
+  if (!server.value || !token.value) return;
+  try { await server.value.withdrawTransfer(token.value, o.id); await loadTransfers(); } catch { /* transient */ }
 }
 const friendliesOpen = ref(false);
 const friendlyRows = ref<FriendlyRow[]>([]);
@@ -976,6 +1010,7 @@ const clubModal = ref<ClubPage | null>(null);
 const clubBusy = ref(false);
 async function openClub(slug: string) {
   if (!server.value) return; clubBusy.value = true;
+  offerFor.value = null; offerMsg.value = '';
   try { clubModal.value = await server.value.club(slug, token.value ?? undefined); if (token.value && !Object.keys(friendlyH2h.value).length) void loadFriendlies(); }
   catch (e) { errMsg.value = (e as Error).message; } finally { clubBusy.value = false; }
 }
@@ -1760,6 +1795,30 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         </template>
       </div>
 
+      <!-- the offer desk — human-to-human transfer bids on YOUR players + your bids out -->
+      <div v-if="myClub" class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="toggleTransfers">⇄ Offer desk <i v-if="pendingIn" class="lv-baddge" style="background:#e8b03c;color:#141414;border-radius:8px;padding:0 6px;font-weight:700">{{ pendingIn }}</i> <i class="lv-disc" :class="{ open: transfersOpen }">▾</i></button>
+          <span class="lv-note">owner-to-owner deals — bid for a player on any human club's page; the seller decides</span>
+        </div>
+        <template v-if="transfersOpen">
+          <div v-for="o in transfersIn" :key="'in' + o.id" class="lv-frow">
+            <span class="lv-fscore"><b>{{ o.fromTag }}</b> bids <b class="pos">${{ o.amount.toLocaleString() }}</b> for your <b>{{ o.handle }}</b></span>
+            <template v-if="o.status === 'pending'">
+              <button class="lv-watch" @click="answerOffer(o, true)" title="sell — the fee lands in your bank, the player joins them ungelled">✓ accept</button>
+              <button class="lv-watch" style="opacity:.7" @click="answerOffer(o, false)">✕ decline</button>
+            </template>
+            <i v-else class="lv-note">{{ o.status }}</i>
+          </div>
+          <div v-for="o in transfersOut" :key="'out' + o.id" class="lv-frow">
+            <span class="lv-fscore">your bid: <b class="pos">${{ o.amount.toLocaleString() }}</b> for <b>{{ o.handle }}</b> ({{ o.toTag }})</span>
+            <button v-if="o.status === 'pending'" class="lv-watch" style="opacity:.7" @click="pullOffer(o)">withdraw</button>
+            <i v-else class="lv-note" :class="{ pos: o.status === 'accepted' }">{{ o.status === 'accepted' ? '✓ signed' : o.status }}</i>
+          </div>
+          <div v-if="!transfersIn.length && !transfersOut.length" class="lv-empty">no offers yet — open a human-owned club's page and bid on one of their five</div>
+        </template>
+      </div>
+
       <!-- friendlies — your on-demand human-vs-human matches (and AI scrims) -->
       <div v-if="myClub" class="lv-leaders">
         <div class="lv-tableh">
@@ -1920,7 +1979,17 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>
             <span v-if="p.solo" class="lv-ldsolo" :class="'rk-' + (p.soloTier || '').toLowerCase()">{{ p.solo }}</span>
             <span class="lv-fiveovr">{{ p.overall }} <i>OVR</i></span>
+            <button v-if="clubModal.owned && myClub && !mine(clubModal.tag)" class="lv-watch" style="padding:1px 7px"
+                    :title="`bid for ${p.handle} — an owner-to-owner deal; ${clubModal.tag}'s owner decides`"
+                    @click="offerFor = offerFor?.handle === p.handle ? null : { handle: p.handle, amount: '' }">⇄ bid</button>
           </div>
+          <div v-if="offerFor && clubModal.owned" class="lv-frow" style="gap:8px">
+            <span class="lv-fscore">offer for <b>{{ offerFor.handle }}</b>: $</span>
+            <input v-model="offerFor.amount" type="number" min="1" placeholder="amount" style="width:110px;background:#1c1f27;border:1px solid #3a3f4d;color:#e8e8ea;border-radius:6px;padding:3px 8px"
+                   @keyup.enter="sendOffer(clubModal.tag)" />
+            <button class="lv-watch" :disabled="offerBusy" @click="sendOffer(clubModal.tag)">{{ offerBusy ? 'sending…' : 'send offer' }}</button>
+          </div>
+          <div v-if="offerMsg && clubModal.owned" class="lv-note" style="padding:4px 10px">{{ offerMsg }}</div>
         </div>
       </div>
     </div>

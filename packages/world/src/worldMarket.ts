@@ -118,6 +118,23 @@ export function resolveSale(w: WorldState, sellerClubId: string, ref: string): S
   return { ok: true, fee: buyer.fee, buyer: w.clubs[buyer.club].tag, buyerIdx: buyer.club };
 }
 
+/** Validate a DIRECT transfer between two named clubs (the human-to-human deal):
+ *  the player must be on the seller's roster, the seller must keep a valid five
+ *  without him, and the buyer must be able to pay. The offer/accept flow around it
+ *  is the server's; `applySale` is the commit (buyer inherits the contract, tenure
+ *  resets — the same object move every other transfer path uses). */
+export function resolveDirect(w: WorldState, sellerClubId: string, buyerClubId: string, ref: string, fee: number):
+    { ok: boolean; reason?: string; sellerIdx?: number; buyerIdx?: number; handle?: string } {
+  const si = w.clubs.findIndex(c => c.id === sellerClubId);
+  const bi = w.clubs.findIndex(c => c.id === buyerClubId);
+  if (si < 0 || bi < 0) return { ok: false, reason: 'no such club' };
+  const player = w.clubs[si].roster.find(p => p.id === ref || p.handle === ref);
+  if (!player) return { ok: false, reason: 'no longer on that roster' };
+  if (!validFive(startingFive(w.clubs[si].roster.filter(p => p !== player)))) return { ok: false, reason: 'the sale would break the seller\'s valid five' };
+  if (w.clubs[bi].balance < fee) return { ok: false, reason: 'the buyer can no longer afford the fee' };
+  return { ok: true, sellerIdx: si, buyerIdx: bi, handle: player.handle };
+}
+
 /** Commit a sale: the player moves to the buyer (ungelled), the fee moves to the
  *  seller. A real transfer between two clubs — the exact resolution the server runs. */
 export function applySale(w: WorldState, sellerClubId: string, ref: string, buyerIdx: number, fee: number): WorldState {

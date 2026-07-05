@@ -46,6 +46,7 @@ export interface StatRow { rank: number; handle: string; club: string; role: str
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
+export interface TransferOffer { id: number; fromTag: string; toTag: string; handle: string; amount: number; status: 'pending' | 'accepted' | 'declined' | 'withdrawn'; season: number; day: number }
 export interface PlayoffGameView { seed: number; map: string; score: [number, number]; winner: string }
 export interface PlayoffSeriesView { label: string; need: number; hi: string; lo: string; wins: [number, number]; winner: string; veto: { team: string; action: string; map: string }[]; games: PlayoffGameView[] }
 export interface PlayoffView { season: number; qualified: string[]; rounds: PlayoffSeriesView[][]; champion: string }
@@ -263,6 +264,18 @@ export class AceServer {
   /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
    *  (your playbooks/fitness/morale all bite), watchable at once, standings
    *  untouched. Works vs another human's club or any AI club (a scrim). */
+  offerTransfer(token: string, tag: string, handle: string, amount: number): Promise<{ ok: boolean; offer?: TransferOffer; error?: string }> {
+    return this.post('/transfer/offer', { tag, handle, amount }, token);
+  }
+  respondTransfer(token: string, id: number, accept: boolean): Promise<{ ok: boolean; reason?: string; offer?: TransferOffer; error?: string }> {
+    return this.post('/transfer/respond', { id, accept }, token);
+  }
+  withdrawTransfer(token: string, id: number): Promise<{ ok: boolean; error?: string }> {
+    return this.post('/transfer/withdraw', { id }, token);
+  }
+  transfers(token: string): Promise<{ incoming: TransferOffer[]; outgoing: TransferOffer[] }> {
+    return fetch(`${this.base}/transfers`, { headers: { authorization: `Bearer ${token}` } }).then(r => j(r));
+  }
   challenge(token: string, tag: string): Promise<{ ok: boolean; id: number; map: string; score: [number, number]; home: ClubLabel; away: ClubLabel; human: boolean; error?: string }> {
     return this.post('/challenge', { tag }, token);
   }

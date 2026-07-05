@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -444,10 +444,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // durable blob store under a reserved key — a Pg-backed deployment keeps the
   // friendly history and every playoff bracket + snapshot across restarts.
   const SOCIAL_KEY = '__social__';
+  // human-to-human TRANSFER OFFERS (the direct PvP economy): a pending offer from
+  // one owner for a player on another owner's roster — accept moves player + fee
+  // through the same applySale commit every transfer path uses. Durable (social blob).
+  interface TransferOffer { id: number; from: string; fromTag: string; to: string; toTag: string; playerId: string; handle: string; amount: number; status: 'pending' | 'accepted' | 'declined' | 'withdrawn'; season: number; day: number; at: number }
+  const transferOffers: TransferOffer[] = [];
+  let transferSeq = 0;
   const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
     friendlies, friendlySeq,
     playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
     honors, worldCupHistory, cupHistory,
+    transferOffers, transferSeq,
   });
   {
     const social = await store.loadAccountData(id, SOCIAL_KEY);
@@ -459,6 +466,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (Array.isArray(social.honors)) honors.push(...(social.honors as typeof honors));
       if (Array.isArray(social.worldCupHistory)) worldCupHistory.push(...(social.worldCupHistory as typeof worldCupHistory));
       if (Array.isArray(social.cupHistory)) cupHistory.push(...(social.cupHistory as typeof cupHistory));
+      if (Array.isArray(social.transferOffers)) transferOffers.push(...(social.transferOffers as TransferOffer[]));
+      transferSeq = (social.transferSeq as number) ?? transferOffers.reduce((m, o) => Math.max(m, o.id), 0);
     }
   }
   // live chat — real-time channels (SSE fan-out), one ROOM per channel: 'global' (the
@@ -1053,6 +1062,85 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       return json(res, 200, { ok: true, id: f.id, map, score, home: f.home, away: f.away, human: !!target.owner });
     }
     // GET /friendlies  → your recent friendlies (either side), light rows
+    // ── human-to-human transfers (the direct PvP economy) ─────────────────
+    // POST /transfer/offer { tag, handle, amount } → bid for a player on another
+    // HUMAN owner's roster (AI clubs go through the normal market). The seller's
+    // owner is notified and accepts/declines; nothing moves until they do.
+    if (path[0] === 'transfer' && path[1] === 'offer' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { tag?: string; handle?: string; amount?: number };
+      const amount = Math.round(Number(b.amount ?? 0));
+      if (!Number.isFinite(amount) || amount <= 0) return json(res, 400, { error: 'a real offer needs a real number' });
+      const w = (await store.loadWorld(id))!;
+      const target = w.clubs.find(c => c.tag.toLowerCase() === (b.tag ?? '').toLowerCase());
+      if (!target) return json(res, 404, { error: 'no such club' });
+      if (target.id === mine.id) return json(res, 400, { error: 'that is your own club' });
+      if (target.owner == null) return json(res, 400, { error: 'an AI club — sign their players through the market' });
+      const player = target.roster.find(pp => pp.handle.toLowerCase() === (b.handle ?? '').toLowerCase());
+      if (!player) return json(res, 404, { error: 'no such player on that roster' });
+      const me = w.clubs.find(c => c.id === mine.id)!;
+      if (me.balance < amount) return json(res, 400, { error: 'you cannot afford that offer' });
+      // one live offer per (buyer, player): a new one replaces the old
+      for (const o of transferOffers) if (o.status === 'pending' && o.from === account && o.playerId === player.id) o.status = 'withdrawn';
+      const offer: TransferOffer = { id: ++transferSeq, from: account, fromTag: me.tag, to: target.owner, toTag: target.tag,
+        playerId: player.id, handle: player.handle, amount, status: 'pending', season: w.season, day: liveDay, at: clock() };
+      transferOffers.unshift(offer);
+      if (transferOffers.length > 200) transferOffers.length = 200;   // bounded history
+      await persistSocial();
+      notify(target.owner, 'system', `⇄ ${me.tag} bid $${amount.toLocaleString()} for ${player.handle} — accept or decline in the transfers panel`, w.season, liveDay);
+      return json(res, 200, { ok: true, offer });
+    }
+    // POST /transfer/respond { id, accept } → the seller's call. Accept re-validates
+    // (roster, valid five, buyer funds) and commits through applySale — player moves
+    // ungelled with his contract, the fee moves to the seller, the league reads it
+    // in the news. Decline just closes the offer.
+    if (path[0] === 'transfer' && path[1] === 'respond' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const b = (await readBody(req)) as { id?: number; accept?: boolean };
+      const offer = transferOffers.find(o => o.id === +(b.id ?? -1));
+      if (!offer) return json(res, 404, { error: 'no such offer' });
+      if (offer.to !== account) return json(res, 403, { error: 'not your offer to answer' });
+      if (offer.status !== 'pending') return json(res, 400, { error: 'that offer is closed' });
+      const w = (await store.loadWorld(id))!;
+      if (!b.accept) {
+        offer.status = 'declined';
+        await persistSocial();
+        notify(offer.from, 'system', `${offer.toTag} declined your $${offer.amount.toLocaleString()} bid for ${offer.handle}`, w.season, liveDay);
+        return json(res, 200, { ok: true, offer });
+      }
+      const seller = w.clubs.find(c => c.owner === account);
+      const buyer = w.clubs.find(c => c.owner === offer.from);
+      if (!seller || !buyer) { offer.status = 'withdrawn'; await persistSocial(); return json(res, 400, { error: 'a club changed hands — offer void' }); }
+      const deal = resolveDirect(w, seller.id, buyer.id, offer.playerId, offer.amount);
+      if (!deal.ok) return json(res, 200, { ok: false, reason: deal.reason, offer });
+      await store.saveWorld(id, applySale(w, seller.id, offer.playerId, deal.buyerIdx!, offer.amount));
+      offer.status = 'accepted';
+      await persistSocial();
+      notify(offer.from, 'system', `✓ ${seller.tag} accepted — ${offer.handle} joins you for $${offer.amount.toLocaleString()}`, w.season, liveDay);
+      pushNews('transfer', `⇄ ${offer.handle} moves ${seller.tag} → ${buyer.tag} for $${offer.amount.toLocaleString()} — an owner-to-owner deal`, w.season, liveDay);
+      emit('market', { sold: [] });   // rosters + banks moved — squad/market views refresh
+      return json(res, 200, { ok: true, offer });
+    }
+    // POST /transfer/withdraw { id } → the buyer pulls a pending offer
+    if (path[0] === 'transfer' && path[1] === 'withdraw' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const b = (await readBody(req)) as { id?: number };
+      const offer = transferOffers.find(o => o.id === +(b.id ?? -1));
+      if (!offer || offer.from !== account) return json(res, 404, { error: 'no such offer' });
+      if (offer.status !== 'pending') return json(res, 400, { error: 'that offer is closed' });
+      offer.status = 'withdrawn';
+      await persistSocial();
+      return json(res, 200, { ok: true, offer });
+    }
+    // GET /transfers → my offer desk (incoming + outgoing, pending first)
+    if (path[0] === 'transfers' && req.method === 'GET') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mineO = transferOffers.filter(o => o.from === account).slice(0, 20);
+      const inc = transferOffers.filter(o => o.to === account).slice(0, 20);
+      return json(res, 200, { incoming: inc, outgoing: mineO });
+    }
     if (path[0] === 'friendlies' && path.length === 1) {
       if (!account) return json(res, 401, { error: 'no account' });
       const minec = await myClub(store, id, account);
