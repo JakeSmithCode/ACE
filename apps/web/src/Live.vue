@@ -161,6 +161,17 @@ async function pbClear() { if (!pbSlot.value) return; await pbSave(null, pbSlot.
 // UPCOMING fixtures + their (seed-derived) maps — the published rotation you
 // prepare the playbook against: "day 7 vs SHS on BIND — no plays yet".
 const upcoming = ref<{ day: number; opp: string; map: string; home: boolean }[]>([]);
+// quick-nav: smooth-jump to a section, opening its accordion first where needed
+function jump(id: string) {
+  if (id === 'sec-playoffs' && !playoffsOpen.value) { playoffsOpen.value = true; void loadPlayoffs(); }
+  if (id === 'sec-offers' && !transfersOpen.value) { transfersOpen.value = true; void loadTransfers(); }
+  if (id === 'sec-friendlies' && !friendliesOpen.value) { friendliesOpen.value = true; void loadFriendlies(); }
+  // double-tap: async panels above the target can grow after the first scroll
+  // fires (anchor drift on a long page) — re-align once things settle
+  const go = () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  requestAnimationFrame(go);
+  setTimeout(go, 450);
+}
 async function loadUpcoming() {
   if (!server.value || !myClub.value) { upcoming.value = []; return; }
   try {
@@ -1637,8 +1648,34 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         </div>
       </div>
 
+      <!-- quick-nav: the Match Center is a long page — one sticky bar jumps anywhere -->
+      <div v-if="world" class="lv-quicknav">
+        <button @click="jump('sec-live')">▶ live</button>
+        <button @click="jump('sec-table')">standings</button>
+        <button @click="jump('sec-leaders')">players</button>
+        <button @click="jump('sec-stats')">stats</button>
+        <button @click="jump('sec-playoffs')">🏆 playoffs</button>
+        <template v-if="myClub">
+          <button @click="jump('sec-offers')">⇄ offers</button>
+          <button @click="jump('sec-friendlies')">⚔ friendlies</button>
+        </template>
+      </div>
+
+      <!-- NEXT MATCH — the owner's focal point: who, where, and whether you're ready -->
+      <div v-if="myClub && upcoming.length" class="lv-nextmatch">
+        <span class="lv-nmlabel">NEXT MATCH</span>
+        <span class="lv-nmcore">md {{ upcoming[0].day + 1 }} · {{ upcoming[0].home ? 'vs' : '@' }} <b class="lv-nmopp clk" title="open their club page — the scouting dossier" @click="openClub(upcoming[0].opp)">{{ upcoming[0].opp }}</b> on <b class="lv-nmmap">{{ upcoming[0].map }}</b></span>
+        <span class="lv-nmready" :class="pbBook[upcoming[0].map] ? 'ok' : 'warn'"
+              :title="pbBook[upcoming[0].map] ? 'you have authored plays on this map — they field in this fixture' : 'no plays authored on this map — your side runs on dials alone. Click to author.'"
+              @click="pbPick(upcoming[0].map as MapId)">▦ {{ pbBook[upcoming[0].map] ? 'playbook ready' : 'no plays on this map' }}</span>
+        <span class="lv-nmtalk" :class="myClub.teamTalk ? 'ok' : 'warn'"
+              :title="myClub.teamTalk ? `team talk set: ${myClub.teamTalk}` : 'no team talk set — the right tone gives a one-match edge'"
+              @click="showPanel('tactics')">◆ {{ myClub.teamTalk ? 'talk: ' + myClub.teamTalk : 'set a team talk' }}</span>
+        <span v-if="myClub.rival && upcoming[0].opp === myClub.rival.tag" class="lv-rival">⚔ DERBY</span>
+      </div>
+
       <!-- the day's live matches -->
-      <div class="lv-stage">
+      <div id="sec-live" class="lv-stage">
         <div class="lv-stageh">
           <span class="lv-kicker">{{ tableTier > 0 ? `Premier + ${tierName(tableTier)}` : 'Premier' }} · Match-day {{ DAY + 1 }}<template v-if="world"> / {{ world.lastDay + 1 }}</template></span>
           <span class="lv-livetag" :class="{ on: anyLive }">{{ anyLive ? '● LIVE' : allDone ? 'FINAL' : '—' }}</span>
@@ -1722,7 +1759,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
 
       <div class="lv-bottom">
         <!-- Premier standings (embargo-aware: only resolved games count) -->
-        <div class="lv-table">
+        <div id="sec-table" class="lv-table">
           <div class="lv-tableh"><span class="lv-kicker">{{ tierName(tableTier) }} standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
           <div class="lv-tierchips">
             <button v-for="(tn, ti) in RANK_TIERS.slice(0, world?.tiers ?? RANK_TIERS.length)" :key="ti" class="lv-tierchip"
@@ -1762,7 +1799,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- the world's best players — a cross-club prestige board (solo rank ≠ division) -->
-      <div class="lv-leaders">
+      <div id="sec-leaders" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="toggleLeaders">★ World top players <i class="lv-disc" :class="{ open: leadersOpen }">▾</i></button>
           <span class="lv-note">individual skill — a Radiant on a small club is a gem to scout</span>
@@ -1810,7 +1847,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- season stat leaders — top fraggers from the matches that have played -->
-      <div class="lv-leaders">
+      <div id="sec-stats" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="toggleStats">🎯 Season stat leaders <i class="lv-disc" :class="{ open: statsOpen }">▾</i></button>
           <span class="lv-note">top fraggers from Premier matches played so far this season</span>
@@ -1832,7 +1869,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- the Premier playoffs — the season climax, engine-simmed + watchable -->
-      <div class="lv-leaders">
+      <div id="sec-playoffs" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="togglePlayoffs">🏆 Playoffs <i class="lv-disc" :class="{ open: playoffsOpen }">▾</i></button>
           <span class="lv-note">top-4 bracket at each season's end — Bo3 semis, Bo5 final, real map veto, every game watchable</span>
@@ -1860,7 +1897,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- the offer desk — human-to-human transfer bids on YOUR players + your bids out -->
-      <div v-if="myClub" class="lv-leaders">
+      <div id="sec-offers" v-if="myClub" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="toggleTransfers">⇄ Offer desk <i v-if="pendingIn" class="lv-baddge" style="background:#e8b03c;color:#141414;border-radius:8px;padding:0 6px;font-weight:700">{{ pendingIn }}</i> <i class="lv-disc" :class="{ open: transfersOpen }">▾</i></button>
           <span class="lv-note">owner-to-owner deals — bid for a player on any human club's page; the seller decides</span>
@@ -1884,7 +1921,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- friendlies — your on-demand human-vs-human matches (and AI scrims) -->
-      <div v-if="myClub" class="lv-leaders">
+      <div id="sec-friendlies" v-if="myClub" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="toggleFriendlies">⚔ Friendlies <i class="lv-disc" :class="{ open: friendliesOpen }">▾</i></button>
           <span class="lv-note">challenge any club from its page — instant, engine-resolved, watchable; standings untouched</span>
