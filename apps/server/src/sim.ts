@@ -78,3 +78,20 @@ export function resolveFriendly(w: WorldState, homeIdx: number, awayIdx: number,
   const [hs, as] = simulateMatch(input, navOf(map), 0).finalScore;
   return { input, map, score: [hs, as] };
 }
+
+/** Full-sim resolver for the PREMIER PLAYOFFS (the season climax, watchable):
+ *  each game runs the real engine on its VETO-DECIDED map with the same
+ *  clubPlan the tick uses, capturing every game's snapshot (keyed by seed) so
+ *  the bracket replays byte-exact. */
+export function playoffGameResolver(w: WorldState, navOf: (m: MatchInput['map']) => Navmesh): { resolve: (home: number, away: number, seed: number, map: MapId) => MatchResult; snapshots: Map<number, MatchInput> } {
+  const snapshots = new Map<number, MatchInput>();
+  const resolve = (home: number, away: number, seed: number, map: MapId): MatchResult => {
+    const h = clubPlan(w.clubs[home], w.clubs[away], w.patch, map, w.fitness, w.morale);
+    const a = clubPlan(w.clubs[away], w.clubs[home], w.patch, map, w.fitness, w.morale);
+    const input = buildMatchInput({ seed, map, patch: w.patch, home: h.team, away: a.team, tactics: [h.tactics, a.tactics], comp: [h.comp, a.comp] });
+    snapshots.set(seed, input);
+    const [hs, as] = simulateMatch(input, navOf(map), 0).finalScore;
+    return { home, away, score: [hs, as], winner: hs > as ? home : away, seed };
+  };
+  return { resolve, snapshots };
+}

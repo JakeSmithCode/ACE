@@ -417,6 +417,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // shared live-broadcast frame hubs, one per (season, day) — see the /live route
   interface LiveHub { clients: Set<ServerResponse>; timer: ReturnType<typeof setInterval> | null; frame?: () => void }
   const liveHubs = new Map<string, LiveHub>();
+  // PREMIER PLAYOFFS — the season climax, engine-simmed at the rollover with the
+  // real map veto over the live pool: the bracket view + every game's snapshot
+  // (watchable) are kept per season. Bounded history.
+  interface PlayoffGameView { seed: number; map: string; score: [number, number]; winner: string }
+  interface PlayoffSeriesView { label: string; need: number; hi: string; lo: string; wins: [number, number]; winner: string; veto: { team: string; action: string; map: string }[]; games: PlayoffGameView[] }
+  interface PlayoffView { season: number; qualified: string[]; rounds: PlayoffSeriesView[][]; champion: string }
+  const playoffHistory: PlayoffView[] = [];
+  const playoffSnaps = new Map<string, MatchInput>();   // `${season}:${seed}` → input
+
   // FRIENDLY CHALLENGES — on-demand matches (human vs human, or a scrim vs an AI
   // club): resolved INSTANTLY with the real engine (playbooks/fitness/morale all
   // bite), no standings impact, no embargo — the snapshot is stored verbatim so
@@ -550,7 +559,22 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const cupChampClub = cupChampIdx != null ? w.clubs[cupChampIdx] : null;
     if (cupChampClub) cupHistory.push({ season: w.season, tag: cupChampClub.tag, name: cupChampClub.name, tier: cupChampClub.tier });
     // season's match-days exhausted → roll it over, then open the new season's day 0
-    const roll = await runTick(store, id);   // kind: 'rollover' (advanceWorld); world is now season+1, day 0
+    const roll = await runTick(store, id, { navOf });   // rollover — the Premier playoffs are ENGINE-SIMMED (watchable)
+    if (roll.bracket) {
+      const tag = (i: number) => w.clubs[i]?.tag ?? '?';
+      const view: PlayoffView = {
+        season: roll.season, qualified: roll.bracket.qualified.map(tag), champion: tag(roll.bracket.champion ?? roll.bracket.qualified[0]),
+        rounds: roll.bracket.rounds.map(rd => rd.map(sr => ({
+          label: sr.label, need: sr.need, hi: tag(sr.hi), lo: tag(sr.lo), wins: sr.wins, winner: tag(sr.winner ?? sr.hi),
+          veto: sr.veto.map(v => ({ team: v.team === 'hi' ? tag(sr.hi) : tag(sr.lo), action: v.action, map: v.map })),
+          games: sr.games.map(g => ({ seed: g.seed, map: (roll.playoffSnapshots?.get(g.seed)?.map ?? 'ascent') as string, score: g.score, winner: tag(g.winner) })),
+        }))),
+      };
+      playoffHistory.unshift(view);
+      if (playoffHistory.length > 10) playoffHistory.length = 10;
+      for (const [seed, input] of roll.playoffSnapshots ?? []) playoffSnaps.set(`${roll.season}:${seed}`, input);
+      pushNews('champion', `🏆 Playoffs: ${view.rounds.at(-1)![0].hi} vs ${view.rounds.at(-1)![0].lo} — ${view.champion} take the title`, roll.season, liveDay);
+    }
     // CONTRACTS tick down at the rollover (owner-scoped): a deal that hits 0 unrenewed WALKS
     // FREE — the player leaves, the club backfills from free agency to stay valid. AI clubs
     // float at the market wage (untouched), so a world with no owners is unaffected.
@@ -941,6 +965,16 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const f = friendlies.find(x => x.id === +path[1]);
       if (!f) return json(res, 404, { error: 'no such friendly' });
       return json(res, 200, { snapshot: f.snapshot, score: f.score, home: f.home, away: f.away, map: f.map });
+    }
+    // GET /playoffs  → the Premier playoff brackets (newest first), engine-simmed + watchable
+    if (path[0] === 'playoffs' && path.length === 1) {
+      return json(res, 200, { history: playoffHistory });
+    }
+    // GET /playoffs/:season/:seed/replay  → a playoff game's snapshot (re-sim to watch)
+    if (path[0] === 'playoffs' && path.length === 4 && path[3] === 'replay') {
+      const snap = playoffSnaps.get(`${path[1]}:${path[2]}`);
+      if (!snap) return json(res, 404, { error: 'no such playoff game' });
+      return json(res, 200, { snapshot: snap });
     }
     // GET /honors  → the Hall of Fame: season champions + all-time title leaders
     if (path[0] === 'honors' && path.length === 1) {

@@ -1970,3 +1970,21 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-chatsend .lv-mailin{flex:1}
 .lv-newsitem.season{color:var(--muted-2)}
 .lv-newsage{font-style:normal;font-family:var(--label);font-size:9px;color:var(--muted-2);opacity:.7}
+/* the Premier playoff bracket panel */
+.lv-pobracket{padding:10px 8px;border-bottom:1px solid var(--line)}
+.lv-pohead{font-size:13px;margin-bottom:8px}
+.lv-pochamp{color:#e6c66a}
+.lv-poq{color:var(--muted-2);font-size:11px;font-style:normal}
+.lv-porounds{display:flex;gap:18px;flex-wrap:wrap}
+.lv-poround{display:flex;flex-direction:column;gap:10px}
+.lv-poseries{background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:7px;padding:8px 10px;min-width:260px}
+.lv-posr{font-size:13px}
+.lv-posr b.win{color:#3bd17f}
+.lv-polabel{color:var(--muted-2);font-size:10px;font-style:normal;margin-left:8px}
+.lv-poveto{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0}
+.lv-povstep{font-size:9px;font-family:var(--label);letter-spacing:.03em;color:var(--muted-2);border:1px solid var(--line-2);border-radius:3px;padding:1px 5px;text-transform:uppercase}
+.lv-povstep.pick{color:#5fd38a;border-color:rgba(95,211,138,.4)}
+.lv-povstep.decider{color:#e6c66a;border-color:rgba(230,198,106,.4)}
+.lv-pogames{display:flex;gap:6px;flex-wrap:wrap}
+.lv-pogame{font-size:10.5px;font-family:var(--label);background:transparent;border:1px solid var(--line-2);color:var(--muted);border-radius:4px;padding:3px 8px;cursor:pointer;text-transform:uppercase}
+.lv-pogame:hover{color:var(--brand);border-color:var(--brand)}

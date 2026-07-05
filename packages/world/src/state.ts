@@ -10,7 +10,7 @@ import { makeLeague, ROLE_AGENTS } from './clubs.js';
 import { divisionSchedule, funnelPromoteRelegate, promoteRelegate, snakeGroup, type DivMove } from './divisions.js';
 import type { Fixture, Matchday } from './schedule.js';
 import { standings, fixtureSeed, type MatchResult } from './season.js';
-import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf } from './playoffs.js';
+import { runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf, type Bracket } from './playoffs.js';
 import { createCup, cupRoundDue, resolveCupRound, type CupState } from './cup.js';
 import type { Fitness } from './fitness.js';
 import type { Morale, Talk } from './morale.js';
@@ -303,18 +303,29 @@ export function simulateSeason(w: WorldState): WorldState {
   return { ...cur, results, day: total, cup };
 }
 
-export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[]; cupChampion: number | null }
+export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[]; cupChampion: number | null; bracket: Bracket }
+
+/** Injectable Premier-playoff resolution (additive): the server full-sims the
+ *  bracket with the real engine over the live pool + map affinity so the season
+ *  climax is WATCHABLE — omitted, the original quickResult on ['ascent'] runs
+ *  and the rollover is byte-identical. */
+export interface RolloverOpts {
+  playoffResolve?: (home: number, away: number, seed: number, map: MapId) => MatchResult;
+  playoffPool?: MapId[];
+  playoffAffinity?: (club: number, m: MapId) => number;
+}
 
 /** Roll the off-season: top-tier playoffs (a champion + a title), settle every
  *  club's books by division rank, develop every squad, shift the meta, then
  *  promote/relegate across all boundaries. Returns the new world + the events. */
-export function advanceWorld(w: WorldState): Rollover {
+export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
   const tableOf = divTables(w);
   const rankIn = (i: number) => { const c = w.clubs[i]; return tableOf(c.tier, c.group).findIndex(s => s.club === i) + 1; };
   // the Premier (tier 0, always one group) crowns a champion via the playoff
   // bracket (quick-resolved, so the map veto is trivial — strength is map-agnostic)
   const premier = tableOf(0, 0);
-  const bracket = runPlayoffs(premier, w.seed, w.season, ['ascent'], () => 0, (h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed));
+  const bracket = runPlayoffs(premier, w.seed, w.season, opts.playoffPool ?? ['ascent'], opts.playoffAffinity ?? (() => 0),
+    opts.playoffResolve ?? ((h, a, seed) => quickResult(h, a, w.clubs[h].strength, w.clubs[a].strength, seed)));
   const champion = bracket.champion ?? premier[0].club;
   const poPrize = (i: number) => w.clubs[i].tier === 0 ? playoffPrize(finishOf(bracket, i)) : 0;
   const devRng = new Rng((w.seed ^ (w.season * 0x9e3779b9)) >>> 0);
@@ -378,5 +389,5 @@ export function advanceWorld(w: WorldState): Rollover {
   // open a fresh cup for the new season (every club re-entered; club indices are stable)
   const cup = createCup(clubs.map((_, i) => i), w.season + 1);
   // the off-season heals everyone — fitness resets for the new campaign
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion };
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion , bracket };
 }

@@ -13,7 +13,7 @@ import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -183,6 +183,25 @@ async function doChallenge(tag: string) {
     if (r.ok) { challengeResult.value = r; await loadFriendlies(); }
     else errMsg.value = r.error ?? 'challenge failed';
   } catch (e) { errMsg.value = (e as Error).message; } finally { challengeBusy.value = false; }
+}
+// the Premier playoffs — the season climax, engine-simmed + watchable
+const playoffsOpen = ref(false);
+const playoffViews = ref<PlayoffView[]>([]);
+async function loadPlayoffs() { if (server.value) try { playoffViews.value = (await server.value.playoffs()).history; } catch { /* transient */ } }
+async function togglePlayoffs() { playoffsOpen.value = !playoffsOpen.value; if (playoffsOpen.value) await loadPlayoffs(); }
+async function watchPlayoff(pseason: number, seed: number, hi: string, lo: string, score: [number, number], map: string) {
+  if (!server.value) return;
+  loadingWatch.value = true;
+  try {
+    const rep = await server.value.playoffReplay(pseason, seed);
+    const nav = await ensureNav(rep.snapshot.map);
+    const out = simulateMatch(rep.snapshot, nav, 50);
+    watching.value = { home: { tag: hi, name: hi }, away: { tag: lo, name: lo }, final: score, map, season: pseason, day: -1, slot: -1, cup: true };
+    followed.value = null;
+    computeBox(out);
+    const pov = mine(hi) ? 0 as const : mine(lo) ? 1 as const : undefined;
+    requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${rep.snapshot.map}.png`, nav, { pov }); });
+  } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
 const friendliesOpen = ref(false);
 const friendlyRows = ref<FriendlyRow[]>([]);
@@ -598,6 +617,7 @@ function openEvents() {
     if (ev === 'season') {
       if (data.champion) champBanner.value = { season: (data.season as number) - 1, champion: data.champion as string };
       cupView.value = null;   // a new season → a fresh cup
+      if (playoffsOpen.value) await loadPlayoffs();   // the climax just resolved
       await fullRefresh();
       return;
     }
@@ -1668,6 +1688,34 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
             </div>
             <div v-if="!statRows.length" class="lv-empty">no matches resolved yet — advance a match-day</div>
           </div>
+        </template>
+      </div>
+
+      <!-- the Premier playoffs — the season climax, engine-simmed + watchable -->
+      <div class="lv-leaders">
+        <div class="lv-tableh">
+          <button class="lv-kicker btn" @click="togglePlayoffs">🏆 Playoffs <i class="lv-disc" :class="{ open: playoffsOpen }">▾</i></button>
+          <span class="lv-note">top-4 bracket at each season's end — Bo3 semis, Bo5 final, real map veto, every game watchable</span>
+        </div>
+        <template v-if="playoffsOpen">
+          <div v-for="pv in playoffViews" :key="pv.season" class="lv-pobracket">
+            <div class="lv-pohead">Season {{ pv.season }} — <b class="lv-pochamp">🏆 {{ pv.champion }}</b> <i class="lv-poq">({{ pv.qualified.join(' · ') }})</i></div>
+            <div class="lv-porounds">
+              <div v-for="(rd, ri) in pv.rounds" :key="ri" class="lv-poround">
+                <div v-for="sr in rd" :key="sr.hi + sr.lo" class="lv-poseries">
+                  <div class="lv-posr"><b :class="{ win: sr.winner === sr.hi }">{{ sr.hi }}</b> {{ sr.wins[0] }}–{{ sr.wins[1] }} <b :class="{ win: sr.winner === sr.lo }">{{ sr.lo }}</b> <i class="lv-polabel">{{ sr.label }} · Bo{{ sr.need * 2 - 1 }}</i></div>
+                  <div class="lv-poveto"><span v-for="(v, vi) in sr.veto" :key="vi" class="lv-povstep" :class="v.action">{{ v.team }} {{ v.action }} {{ v.map }}</span></div>
+                  <div class="lv-pogames">
+                    <button v-for="(g, gi) in sr.games" :key="gi" class="lv-pogame" :disabled="loadingWatch"
+                            :title="`game ${gi + 1} on ${g.map} — ▷ watch`" @click="watchPlayoff(pv.season, g.seed, sr.hi, sr.lo, g.score, g.map)">
+                      g{{ gi + 1 }} · {{ g.map }} · {{ g.score[0] }}–{{ g.score[1] }} ▷
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="!playoffViews.length" class="lv-empty">no playoffs yet — they run at each season's end (advance to the rollover)</div>
         </template>
       </div>
 

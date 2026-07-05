@@ -46,6 +46,9 @@ export interface StatRow { rank: number; handle: string; club: string; role: str
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
+export interface PlayoffGameView { seed: number; map: string; score: [number, number]; winner: string }
+export interface PlayoffSeriesView { label: string; need: number; hi: string; lo: string; wins: [number, number]; winner: string; veto: { team: string; action: string; map: string }[]; games: PlayoffGameView[] }
+export interface PlayoffView { season: number; qualified: string[]; rounds: PlayoffSeriesView[][]; champion: string }
 export interface FriendlyRow { id: number; at: number; season: number; day: number; map: string; home: ClubLabel; away: ClubLabel; score: [number, number] }
 export interface ScheduleRow { day: number; slot: number; map: MapId; home: string; away: string; status: string }
 
@@ -249,6 +252,12 @@ export class AceServer {
   /** Claim an AI club (by tag or id) for the bearer's account. */
   claim(clubTag: string, token: string): Promise<ClubPage> { return this.post(`/clubs/${clubTag}/claim`, {}, token); }
   /** The club this account owns (null if none). */
+  /** The Premier playoff brackets (engine-simmed at each rollover, watchable). */
+  playoffs(): Promise<{ history: PlayoffView[] }> { return fetch(`${this.base}/playoffs`).then(r => j(r)); }
+  playoffReplay(season: number, seed: number): Promise<{ snapshot: MatchInput }> {
+    return fetch(`${this.base}/playoffs/${season}/${seed}/replay`).then(r => j(r));
+  }
+
   /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
    *  (your playbooks/fitness/morale all bite), watchable at once, standings
    *  untouched. Works vs another human's club or any AI club (a scrim). */
