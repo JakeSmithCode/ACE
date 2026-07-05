@@ -2005,3 +2005,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-toast.mail{border-left-color:#e6c66a}
 .lv-toast.day{border-left-color:#3bd17f}
 @keyframes toast-in{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+/* the division browser — tier chips over the standings */
+.lv-tierchips{display:flex;gap:4px;flex-wrap:wrap;padding:6px 0}
+.lv-tierchip{font-family:var(--label);font-size:9px;letter-spacing:.04em;text-transform:uppercase;background:transparent;border:1px solid var(--line-2);color:var(--muted-2);border-radius:3px;padding:2px 7px;cursor:pointer}
+.lv-tierchip:hover{color:var(--text);border-color:var(--brand)}
+.lv-tierchip.on{color:var(--bg);background:var(--brand);border-color:var(--brand)}
+.lv-tierchip.mine:not(.on){border-color:rgba(230,198,106,.5);color:#e6c66a}

@@ -672,10 +672,13 @@ function openEvents() {
   pollTimer = setInterval(() => { refreshTable(); if (!notifOpen.value) loadNotifs(); if (!mailOpen.value) loadMail(); }, 60000);
 }
 
-// the standings follow YOUR division — a relegated/promoted owner sees their own table
-// (an unowned/visitor view defaults to the Premier).
-const tableTier = computed(() => myClub.value?.tier ?? 0);
-const tableGroup = computed(() => (myClub.value as { group?: number } | null)?.group ?? 0);
+// the standings follow YOUR division by default — but the whole pyramid is
+// browsable: tier chips swap the table to any division (scout the league above,
+// watch the relegation scrap below). `viewTier` null = my division / Premier.
+const viewTier = ref<number | null>(null);
+const tableTier = computed(() => viewTier.value ?? myClub.value?.tier ?? 0);
+const tableGroup = computed(() => tableTier.value === (myClub.value?.tier ?? -1) ? ((myClub.value as { group?: number } | null)?.group ?? 0) : 0);
+function pickTier(t: number) { viewTier.value = t === (myClub.value?.tier ?? 0) ? null : t; void refreshTable(); }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
@@ -1622,6 +1625,12 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         <!-- Premier standings (embargo-aware: only resolved games count) -->
         <div class="lv-table">
           <div class="lv-tableh"><span class="lv-kicker">{{ tierName(tableTier) }} standings</span><span class="lv-note">moves only when a broadcast ends</span></div>
+          <div class="lv-tierchips">
+            <button v-for="(tn, ti) in RANK_TIERS.slice(0, world?.tiers ?? RANK_TIERS.length)" :key="ti" class="lv-tierchip"
+                    :class="{ on: tableTier === ti, mine: ti === (myClub?.tier ?? -1) }"
+                    :title="ti === (myClub?.tier ?? -1) ? `${tn} — your division` : `browse the ${tn} table`"
+                    @click="pickTier(ti)">{{ tn }}</button>
+          </div>
           <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
           <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
             <span class="r">{{ rank + 1 }}</span>
