@@ -309,6 +309,14 @@ const pct = (v: number) => Math.round(v * 100) + '%';
 // --- the transfer market — bid on free agents (a real bidding war) ------------
 const marketOpen = ref(false);
 const board = ref<MarketEntry[]>([]);
+// the instant buy-read: how does this free agent compare to YOUR weakest
+// same-role starter? Positive = an upgrade to the fielded five right now.
+const vsMine = (e: MarketEntry): { d: number; vs: string } | null => {
+  const starters = (myClub.value?.squad ?? []).filter(p => p.starter && p.role === e.role && !p.loan);
+  if (!starters.length) return null;
+  const weakest = starters.reduce((a, b) => a.overall <= b.overall ? a : b);
+  return { d: e.overall - weakest.overall, vs: weakest.handle };
+};
 const bidAmt = ref<Record<string, number>>({});
 const bidMsg = ref<Record<string, string>>({});
 const marketBusy = ref(false);
@@ -1203,6 +1211,31 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         </template>
       </div>
 
+      <!-- getting started — the guided path for a fresh visitor (connected, no club yet).
+           Each step lights as it's done; the whole card disappears once you're rolling. -->
+      <div v-if="!myClub" class="lv-onboard">
+        <div class="lv-obhead">◢ WELCOME TO ACE <span>an always-on VALORANT world — every match resolves on the server, you run a club inside it</span></div>
+        <div class="lv-obsteps">
+          <div class="lv-obstep" :class="{ done: authed, next: !authed }">
+            <i>{{ authed ? '✓' : '1' }}</i><b>Create an account</b>
+            <span>register above — your club, plans and career persist on the server</span>
+          </div>
+          <div class="lv-obstep" :class="{ next: authed }">
+            <i>2</i><b>Claim a club</b>
+            <span>pick a Premier club from the dropdown (or click any tag in the standings) — it's yours: roster, bank, board and all</span>
+          </div>
+          <div class="lv-obstep">
+            <i>3</i><b>Author your plan</b>
+            <span>✎ tactics sets your site read + tempo; the ▦ playbook lets you draw real set-pieces per map — the engine resolves exactly what you author</span>
+          </div>
+          <div class="lv-obstep">
+            <i>4</i><b>Advance &amp; watch</b>
+            <span>▶ advance ticks the next match-day live (scores sealed until the broadcast ends) — then ▷ watch replays YOUR match on the 2D broadcast, byte-exact</span>
+          </div>
+        </div>
+        <div class="lv-obfoot">meanwhile the world is fully alive without you — scout the standings, club pages and leaderboards below</div>
+      </div>
+
       <!-- author your tactics — saved to the server, drives your matches on the next tick -->
       <div v-if="myClub && planOpen && tac" class="lv-planpanel">
         <div class="lv-plangrid">
@@ -1312,7 +1345,11 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <span class="rs-role" :class="e.role">{{ e.role.slice(0, 3).toUpperCase() }}</span>
             <b class="lv-mkthandle clk" :class="{ open: expanded.has('m:'+e.handle) }" title="per-skill scouting" @click="toggleExpand('m:'+e.handle)">{{ e.handle }}<i class="lv-disc">▾</i></b>
             <span class="lv-mktage">age {{ e.age }}</span>
-            <span class="lv-mktovr">{{ e.overall }} <i>OVR</i></span>
+            <span class="lv-mktovr">{{ e.overall }} <i>OVR</i>
+              <span v-if="vsMine(e)" class="lv-vschip" :class="vsMine(e)!.d > 0 ? 'up' : vsMine(e)!.d < 0 ? 'down' : ''"
+                    :title="`vs ${vsMine(e)!.vs}, your weakest starting ${e.role}: ${vsMine(e)!.d > 0 ? `+${vsMine(e)!.d} OVR — an immediate upgrade to your fielded five` : vsMine(e)!.d < 0 ? `${vsMine(e)!.d} OVR — below your current starter (depth / a development bet)` : 'level with your starter'}`">
+                {{ vsMine(e)!.d > 0 ? '▲+' + vsMine(e)!.d : vsMine(e)!.d < 0 ? '▽' + Math.abs(vsMine(e)!.d) : '=' }}</span>
+            </span>
             <span class="lv-ceilcell">
               <span class="lv-mktceil" :class="{ wide: e.ceiling[1] - e.ceiling[0] >= 8 }" :title="`scouted potential ceiling — wider band = more upside but more risk. Scout to tighten it (private knowledge).`">↗ {{ e.ceiling[0] }}–{{ e.ceiling[1] }}</span>
               <span class="lv-scoutpips" :title="`scouting reports: ${e.scoutLevel}/${SCOUT_MAX}`"><i v-for="n in SCOUT_MAX" :key="n" :class="{ on: n <= e.scoutLevel }">•</i></span>

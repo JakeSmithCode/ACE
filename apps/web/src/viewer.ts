@@ -306,7 +306,8 @@ export class Viewer {
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  destroy() { cancelAnimationFrame(this.raf); this.clearAdvance(); if (this.bannerTimer) clearTimeout(this.bannerTimer); }
+  private onKey: ((e: KeyboardEvent) => void) | null = null;
+  destroy() { cancelAnimationFrame(this.raf); this.clearAdvance(); if (this.bannerTimer) clearTimeout(this.bannerTimer); if (this.onKey) window.removeEventListener('keydown', this.onKey); }
 
   private build() {
     const t = this.tl;
@@ -402,6 +403,7 @@ export class Viewer {
         <button class="speed cam on" id="ace-cam" title="Director camera — auto-frames the action like a broadcast observer; off = full map">🎥 Director</button>
         <button class="speed snd on" id="ace-snd" title="Broadcast audio — kills, plants, the spike countdown">🔊 Sound</button>
         <button class="speed pov" id="ace-pov" title="Team POV — fog of war: see only what YOUR five see (off = observer view)">⬢ Team POV</button>
+        <button class="speed help" id="ace-help" title="what everything on the map means + keyboard shortcuts (H)">?</button>
       </div>
       <div class="strip" id="ace-strip"></div>`;
     left.appendChild(ctl);
@@ -487,6 +489,62 @@ export class Viewer {
     };
     (ctl.querySelector('#ace-prev') as HTMLElement).onclick = () => this.loadRound(Math.max(0, this.roundIdx - 1));
     (ctl.querySelector('#ace-next') as HTMLElement).onclick = () => this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
+
+    // ── the broadcast legend (?) — the viewer speaks a dense visual language;
+    // this is where a new viewer learns it. Pure overlay, no state.
+    const help = el('div', 'ace-help-overlay');
+    help.innerHTML = `
+      <div class="ace-help-card">
+        <button class="hx">✕</button>
+        <h3>READING THE BROADCAST</h3>
+        <div class="hcols">
+          <div>
+            <h4>ON THE MAP</h4>
+            <p><i class="sw att"></i>/<i class="sw def"></i> attacker / defender — the wedge is their <b>vision cone</b> (walls clip it; fights need sight)</p>
+            <p><i>◍</i> a <b>smoke</b> fills its room (team-tinted rim — its own side sees through it); a long capsule is a <b>Viper/Harbor wall</b> cutting the lane</p>
+            <p><i>✳</i> a bright burst is a <b>flash/recon window</b> — first shot inside it; a dashed ring is a <b>sentinel trap</b> watching a lane</p>
+            <p><i>◔</i> the <b>ring arc</b> is live HP — green hurt, amber low, red critical; an <b>amber pulse</b> = tripped a trap (hitching)</p>
+            <p><i>?</i> in <b>Team POV</b>, a fading ? is an enemy's last-known spot — you see only what your five see</p>
+          </div>
+          <div>
+            <h4>THE PANELS</h4>
+            <p><b>True Odds</b> — the engine re-ran this round 120× before it played out; the bar is the attack's real win chance</p>
+            <p><b>kill feed</b> — click any kill's ⌕ for the duel <b>x-ray</b> (every factor that decided it); ⇄ = traded, ⊙ = headshot, ✦ = a dash escape</p>
+            <p><b>scoreboard</b> — click a name (or a box-score row) to lock the <b>follow-cam</b> on that player</p>
+            <p><b>seek strip</b> — kill ticks + the ◆ plant; drag to scrub, everything replays exactly (same match, byte for byte)</p>
+          </div>
+          <div>
+            <h4>KEYS</h4>
+            <p><b>space</b> play/pause · <b>←/→</b> round · <b>1-3</b> speed</p>
+            <p><b>V</b> vision · <b>U</b> utility · <b>C</b> director cam</p>
+            <p><b>P</b> team POV · <b>M</b> sound · <b>H</b> this card</p>
+          </div>
+        </div>
+      </div>`;
+    wrap.appendChild(help);
+    const helpBtn = ctl.querySelector('#ace-help') as HTMLElement;
+    const toggleHelp = () => help.classList.toggle('open');
+    helpBtn.onclick = toggleHelp;
+    (help.querySelector('.hx') as HTMLElement).onclick = toggleHelp;
+    help.onclick = (e) => { if (e.target === help) toggleHelp(); };
+
+    // ── keyboard shortcuts (broadcast-standard): ignored while typing in a field
+    this.onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === ' ') { e.preventDefault(); this.playBtn.click(); }
+      else if (k === 'arrowleft') this.loadRound(Math.max(0, this.roundIdx - 1));
+      else if (k === 'arrowright') this.loadRound(Math.min(this.tl.rounds.length - 1, this.roundIdx + 1));
+      else if (k === 'v') this.coneBtn.click();
+      else if (k === 'u') this.utilBtn.click();
+      else if (k === 'c') this.camBtn.click();
+      else if (k === 'm') this.sndBtn.click();
+      else if (k === 'p' && this.pov != null) this.povBtn!.click();
+      else if (k === 'h' || k === '?') toggleHelp();
+      else if (k === '1' || k === '2' || k === '3') { this.speed = k === '1' ? 1 : k === '2' ? 2 : 4; (ctl.querySelector('#ace-speed') as HTMLElement).textContent = this.speed + '×'; }
+    };
+    window.addEventListener('keydown', this.onKey);
     const seekTo = (clientX: number) => { const r = this.seek.getBoundingClientRect(); this.scrubTo(Math.max(0, Math.min(1, (clientX - r.left) / r.width))); };
     let drag = false;
     this.seek.addEventListener('mousedown', e => { drag = true; this.playing = false; this.playBtn.textContent = '▶'; seekTo(e.clientX); });

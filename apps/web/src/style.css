@@ -2011,3 +2011,38 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-tierchip:hover{color:var(--text);border-color:var(--brand)}
 .lv-tierchip.on{color:var(--bg);background:var(--brand);border-color:var(--brand)}
 .lv-tierchip.mine:not(.on){border-color:rgba(230,198,106,.5);color:#e6c66a}
+
+/* the broadcast legend (?) + keyboard shortcuts card */
+.ace-controls .speed.help{min-width:26px;font-weight:800}
+.ace-help-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(8,10,14,.72);z-index:60;backdrop-filter:blur(2px)}
+.ace-help-overlay.open{display:flex}
+.ace-help-card{position:relative;max-width:860px;width:92%;max-height:86%;overflow:auto;background:#12151c;border:1px solid #2b3140;border-radius:12px;padding:18px 22px;box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.ace-help-card h3{margin:0 0 10px;font-size:13px;letter-spacing:.14em;color:#8fd3e8}
+.ace-help-card h4{margin:0 0 6px;font-size:10px;letter-spacing:.12em;color:#7d8496}
+.ace-help-card .hcols{display:grid;grid-template-columns:1.2fr 1.2fr .8fr;gap:18px}
+.ace-help-card p{margin:0 0 8px;font-size:11.5px;line-height:1.5;color:#c7ccd8}
+.ace-help-card p b{color:#e8eaf0}
+.ace-help-card p i{font-style:normal;color:#8fd3e8}
+.ace-help-card .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 1px}
+.ace-help-card .sw.att{background:var(--att)}.ace-help-card .sw.def{background:var(--def)}
+.ace-help-card .hx{position:absolute;top:8px;right:10px;background:none;border:none;color:#7d8496;font-size:14px;cursor:pointer}
+.ace-help-card .hx:hover{color:#e8eaf0}
+@media (max-width:760px){.ace-help-card .hcols{grid-template-columns:1fr}}
+/* market: instant compare vs your weakest same-role starter */
+.lv-vschip{display:inline-block;margin-left:5px;font-size:9px;letter-spacing:.02em;padding:0 4px;border-radius:7px;border:1px solid #3a3f4d;color:#9aa1b2;white-space:nowrap;vertical-align:1px;font-weight:700}
+.lv-vschip.up{color:#5fd38f;border-color:#2d5a41;background:rgba(60,180,110,.08)}
+.lv-vschip.down{color:#8a90a0;border-color:#33384a}
+/* getting-started card (fresh visitor, no club yet) */
+.lv-onboard{margin:10px 0 4px;padding:12px 16px;background:linear-gradient(160deg,#141924,#10131b);border:1px solid #273046;border-radius:12px}
+.lv-obhead{font-size:12px;letter-spacing:.12em;color:#8fd3e8;font-weight:700;margin-bottom:10px}
+.lv-obhead span{margin-left:10px;font-size:11px;letter-spacing:.02em;color:#8a90a0;font-weight:400}
+.lv-obsteps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.lv-obstep{position:relative;padding:9px 12px 9px 34px;background:#0f1219;border:1px solid #232a3a;border-radius:9px}
+.lv-obstep i{position:absolute;left:10px;top:9px;width:17px;height:17px;border-radius:50%;border:1px solid #3a4258;color:#9aa1b2;font-size:10px;font-style:normal;display:flex;align-items:center;justify-content:center}
+.lv-obstep b{display:block;font-size:11.5px;color:#dfe3ec;margin-bottom:2px}
+.lv-obstep span{font-size:10.5px;line-height:1.45;color:#8a90a0}
+.lv-obstep.done{opacity:.66}
+.lv-obstep.done i{background:#1d4030;border-color:#2d5a41;color:#5fd38f}
+.lv-obstep.next{border-color:#2f6c7e;box-shadow:0 0 0 1px rgba(90,190,220,.12) inset}
+.lv-obstep.next i{border-color:#5abedc;color:#8fd3e8}
+.lv-obfoot{margin-top:9px;font-size:10.5px;color:#6d7488}
