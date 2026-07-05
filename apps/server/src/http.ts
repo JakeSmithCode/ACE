@@ -381,6 +381,40 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   }
   for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
   for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
+  // PREMIER PLAYOFFS — the season climax, engine-simmed at the rollover with the
+  // real map veto over the live pool: the bracket view + every game's snapshot
+  // (watchable) are kept per season. Bounded history.
+  interface PlayoffGameView { seed: number; map: string; score: [number, number]; winner: string }
+  interface PlayoffSeriesView { label: string; need: number; hi: string; lo: string; wins: [number, number]; winner: string; veto: { team: string; action: string; map: string }[]; games: PlayoffGameView[] }
+  interface PlayoffView { season: number; qualified: string[]; rounds: PlayoffSeriesView[][]; champion: string }
+  const playoffHistory: PlayoffView[] = [];
+  const playoffSnaps = new Map<string, MatchInput>();   // `${season}:${seed}` → input
+
+  // FRIENDLY CHALLENGES — on-demand matches (human vs human, or a scrim vs an AI
+  // club): resolved INSTANTLY with the real engine (playbooks/fitness/morale all
+  // bite), no standings impact, no embargo — the snapshot is stored verbatim so
+  // the replay reproduces byte-for-byte. Bounded list, newest first.
+  interface Friendly { id: number; at: number; season: number; day: number; map: string; home: { tag: string; name: string }; away: { tag: string; name: string }; score: [number, number]; snapshot: MatchInput; accounts: string[] }
+  const friendlies: Friendly[] = [];
+  let friendlySeq = 0;
+
+  // WORLD-SCOPED social state (friendlies + playoff brackets) rides the same
+  // durable blob store under a reserved key — a Pg-backed deployment keeps the
+  // friendly history and every playoff bracket + snapshot across restarts.
+  const SOCIAL_KEY = '__social__';
+  const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
+    friendlies, friendlySeq,
+    playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
+  });
+  {
+    const social = await store.loadAccountData(id, SOCIAL_KEY);
+    if (social) {
+      if (Array.isArray(social.friendlies)) friendlies.push(...(social.friendlies as Friendly[]));
+      friendlySeq = (social.friendlySeq as number) ?? friendlies.reduce((m, f) => Math.max(m, f.id), 0);
+      if (Array.isArray(social.playoffHistory)) playoffHistory.push(...(social.playoffHistory as PlayoffView[]));
+      for (const [k, v] of Object.entries((social.playoffSnaps as Record<string, MatchInput>) ?? {})) playoffSnaps.set(k, v);
+    }
+  }
   // live chat — real-time channels (SSE fan-out), one ROOM per channel: 'global' (the
   // whole league) + a per-division room `div:<tier>:<group>`, so owners get a community
   // alongside the league-wide chat. Each room has a bounded backlog + its own subscriber
@@ -417,23 +451,6 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // shared live-broadcast frame hubs, one per (season, day) — see the /live route
   interface LiveHub { clients: Set<ServerResponse>; timer: ReturnType<typeof setInterval> | null; frame?: () => void }
   const liveHubs = new Map<string, LiveHub>();
-  // PREMIER PLAYOFFS — the season climax, engine-simmed at the rollover with the
-  // real map veto over the live pool: the bracket view + every game's snapshot
-  // (watchable) are kept per season. Bounded history.
-  interface PlayoffGameView { seed: number; map: string; score: [number, number]; winner: string }
-  interface PlayoffSeriesView { label: string; need: number; hi: string; lo: string; wins: [number, number]; winner: string; veto: { team: string; action: string; map: string }[]; games: PlayoffGameView[] }
-  interface PlayoffView { season: number; qualified: string[]; rounds: PlayoffSeriesView[][]; champion: string }
-  const playoffHistory: PlayoffView[] = [];
-  const playoffSnaps = new Map<string, MatchInput>();   // `${season}:${seed}` → input
-
-  // FRIENDLY CHALLENGES — on-demand matches (human vs human, or a scrim vs an AI
-  // club): resolved INSTANTLY with the real engine (playbooks/fitness/morale all
-  // bite), no standings impact, no embargo — the snapshot is stored verbatim so
-  // the replay reproduces byte-for-byte. Bounded list, newest first.
-  interface Friendly { id: number; at: number; season: number; day: number; map: string; home: { tag: string; name: string }; away: { tag: string; name: string }; score: [number, number]; snapshot: MatchInput; accounts: string[] }
-  const friendlies: Friendly[] = [];
-  let friendlySeq = 0;
-
   // season stat-leaders memo (recomputed only when a new reveal lands)
   let statsMemo: { key: string; body: unknown } | null = null;
   // leaderboard/power-rankings memos, keyed by (season, day[, role]) — bounded
@@ -573,6 +590,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       playoffHistory.unshift(view);
       if (playoffHistory.length > 10) playoffHistory.length = 10;
       for (const [seed, input] of roll.playoffSnapshots ?? []) playoffSnaps.set(`${roll.season}:${seed}`, input);
+      // prune snapshots for brackets that fell out of the bounded history, then persist
+      const kept = new Set(playoffHistory.map(v => v.season));
+      for (const k of playoffSnaps.keys()) if (!kept.has(+k.split(':')[0])) playoffSnaps.delete(k);
+      await persistSocial();
+      // notify the four qualified owners — their climax is up (seed + how it ended)
+      for (const q of roll.bracket.qualified) {
+        const qc = w.clubs[q];
+        if (!qc?.owner) continue;
+        const fin = view.champion === qc.tag ? 'CHAMPIONS 🏆' : view.rounds[1][0].hi === qc.tag || view.rounds[1][0].lo === qc.tag ? 'runners-up' : 'out in the semis';
+        notify(qc.owner, 'season', `🏆 Playoffs: ${qc.tag} qualified seed ${roll.bracket.qualified.indexOf(q) + 1} — ${fin} (watch the bracket in 🏆 Playoffs)`, roll.season, liveDay);
+        await persistAccount(qc.owner);
+      }
       pushNews('champion', `🏆 Playoffs: ${view.rounds.at(-1)![0].hi} vs ${view.rounds.at(-1)![0].lo} — ${view.champion} take the title`, roll.season, liveDay);
     }
     // CONTRACTS tick down at the rollover (owner-scoped): a deal that hits 0 unrenewed WALKS
@@ -950,6 +979,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         score, snapshot: input, accounts: [account, target.owner ?? ''].filter(Boolean) };
       friendlies.unshift(f);
       if (friendlies.length > 200) friendlies.length = 200;
+      await persistSocial();
       const won = score[0] > score[1];
       notify(account, 'result', `⚔ Friendly: ${won ? 'WON' : 'lost'} ${score[0]}–${score[1]} vs ${target.tag} on ${map}`, w.season, liveDay);
       if (target.owner) notify(target.owner, 'result', `⚔ ${mine.tag} challenged you to a friendly — you ${score[1] > score[0] ? 'WON' : 'lost'} ${score[1]}–${score[0]} on ${map} (watch it under ⚔ friendlies)`, w.season, liveDay);
@@ -958,7 +988,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // GET /friendlies  → your recent friendlies (either side), light rows
     if (path[0] === 'friendlies' && path.length === 1) {
       if (!account) return json(res, 401, { error: 'no account' });
-      return json(res, 200, { friendlies: friendlies.filter(f => f.accounts.includes(account)).slice(0, 20).map(({ snapshot: _s, accounts: _a, ...rest }) => rest) });
+      const minec = await myClub(store, id, account);
+      const rows = friendlies.filter(f => f.accounts.includes(account));
+      // the friendly HEAD-TO-HEAD ledger: your record vs each opponent (bragging rights)
+      const h2h: Record<string, { w: number; l: number }> = {};
+      if (minec) for (const f of rows) {
+        const meHome = f.home.tag === minec.tag;
+        const opp = meHome ? f.away.tag : f.home.tag;
+        const won = meHome ? f.score[0] > f.score[1] : f.score[1] > f.score[0];
+        (h2h[opp] ??= { w: 0, l: 0 })[won ? 'w' : 'l']++;
+      }
+      return json(res, 200, { friendlies: rows.slice(0, 20).map(({ snapshot: _s, accounts: _a, ...rest }) => rest), h2h });
     }
     // GET /friendlies/:id/replay  → the stored snapshot (no embargo — already resolved)
     if (path[0] === 'friendlies' && path.length === 3 && path[2] === 'replay') {

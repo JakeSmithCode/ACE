@@ -1988,3 +1988,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-pogames{display:flex;gap:6px;flex-wrap:wrap}
 .lv-pogame{font-size:10.5px;font-family:var(--label);background:transparent;border:1px solid var(--line-2);color:var(--muted);border-radius:4px;padding:3px 8px;cursor:pointer;text-transform:uppercase}
 .lv-pogame:hover{color:var(--brand);border-color:var(--brand)}
+/* friendly head-to-head ledger */
+.lv-fh2h{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px}
+.lv-fh2hchip{font-size:11px;font-family:var(--label);border:1px solid var(--line-2);border-radius:4px;padding:2px 8px;color:var(--muted)}
+.lv-fh2hchip.up{color:#3bd17f;border-color:rgba(59,209,127,.4)}
+.lv-fh2hchip.down{color:#e2768a;border-color:rgba(226,118,138,.4)}

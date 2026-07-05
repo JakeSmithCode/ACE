@@ -205,7 +205,8 @@ async function watchPlayoff(pseason: number, seed: number, hi: string, lo: strin
 }
 const friendliesOpen = ref(false);
 const friendlyRows = ref<FriendlyRow[]>([]);
-async function loadFriendlies() { if (server.value && token.value) try { friendlyRows.value = (await server.value.friendlies(token.value)).friendlies; } catch { /* transient */ } }
+const friendlyH2h = ref<Record<string, { w: number; l: number }>>({});
+async function loadFriendlies() { if (server.value && token.value) try { const r = await server.value.friendlies(token.value); friendlyRows.value = r.friendlies; friendlyH2h.value = r.h2h ?? {}; } catch { /* transient */ } }
 async function toggleFriendlies() { friendliesOpen.value = !friendliesOpen.value; if (friendliesOpen.value) await loadFriendlies(); }
 async function watchFriendly(fid: number) {
   if (!server.value) return;
@@ -943,7 +944,7 @@ const clubModal = ref<ClubPage | null>(null);
 const clubBusy = ref(false);
 async function openClub(slug: string) {
   if (!server.value) return; clubBusy.value = true;
-  try { clubModal.value = await server.value.club(slug, token.value ?? undefined); }
+  try { clubModal.value = await server.value.club(slug, token.value ?? undefined); if (token.value && !Object.keys(friendlyH2h.value).length) void loadFriendlies(); }
   catch (e) { errMsg.value = (e as Error).message; } finally { clubBusy.value = false; }
 }
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
@@ -1733,6 +1734,10 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
               <span class="lv-fmeta">s{{ f.season }} · day {{ f.day + 1 }}</span>
               <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(f.id)">▷ watch</button>
             </div>
+            <div v-if="Object.keys(friendlyH2h).length" class="lv-fh2h">
+              <span class="lv-upclabel">H2H</span>
+              <span v-for="(r, tag) in friendlyH2h" :key="tag" class="lv-fh2hchip" :class="r.w >= r.l ? 'up' : 'down'">{{ tag }} {{ r.w }}–{{ r.l }}</span>
+            </div>
             <div v-if="!friendlyRows.length" class="lv-empty">no friendlies yet — open any club's page and hit ⚔ challenge</div>
           </div>
         </template>
@@ -1806,6 +1811,9 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
           on <i class="hq-rmap">{{ challengeResult.map }}</i>
           <span :class="challengeResult.score[0] > challengeResult.score[1] ? 'pos' : 'neg'">{{ challengeResult.score[0] > challengeResult.score[1] ? 'you won the friendly' : 'they took it' }}</span>
           <button class="lv-watch" :disabled="loadingWatch" @click="watchFriendly(challengeResult.id)">▷ watch it</button>
+        </div>
+        <div v-if="friendlyH2h[clubModal.tag]" class="lv-pbscout" title="your friendly head-to-head vs this club">
+          ⚔ friendly record vs {{ clubModal.tag }}: <b :class="friendlyH2h[clubModal.tag].w >= friendlyH2h[clubModal.tag].l ? 'pos' : 'neg'">{{ friendlyH2h[clubModal.tag].w }}–{{ friendlyH2h[clubModal.tag].l }}</b>
         </div>
         <div v-if="clubModal.owned && clubModal.playbookMaps?.length" class="lv-pbscout"
              title="which maps this owner has AUTHORED plays on (coverage only — the plays themselves stay private). Expect set pieces there; the uncovered maps run on dials alone.">

@@ -264,7 +264,7 @@ export class AceServer {
   challenge(token: string, tag: string): Promise<{ ok: boolean; id: number; map: string; score: [number, number]; home: ClubLabel; away: ClubLabel; human: boolean; error?: string }> {
     return this.post('/challenge', { tag }, token);
   }
-  friendlies(token: string): Promise<{ friendlies: FriendlyRow[] }> {
+  friendlies(token: string): Promise<{ friendlies: FriendlyRow[]; h2h: Record<string, { w: number; l: number }> }> {
     return fetch(`${this.base}/friendlies`, { headers: { authorization: `Bearer ${token}` } }).then(r => j(r));
   }
   friendlyReplay(fid: number): Promise<{ snapshot: MatchInput; score: [number, number]; home: ClubLabel; away: ClubLabel; map: string }> {
