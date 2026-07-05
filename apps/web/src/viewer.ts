@@ -1176,10 +1176,24 @@ export class Viewer {
       this.boardDirty = true;
     } else if (e.kind === 'dmg') {
       // a non-lethal exchange: shots fired, nobody drops — a THIN tracer + a hit flash
-      // on the target (live only; the feed stays kills-only so it doesn't spam)
+      // on the target (live only; the feed stays kills-only so it doesn't spam).
+      // EXCEPT the dash escape — a duelist blinking out at the brink is a story
+      // the broadcast tells: a feed line + a beat, the one dmg event that earns it.
       if (!live) return;
       const from = this.agents.find(a => a.handle === e.from);
       const to = this.agents.find(a => a.handle === e.to);
+      if (e.dash && to) {
+        if (this.feedItems.length === 0) this.feed.innerHTML = '';
+        const tc = this.teamOf.get(e.to) === this.tl.rounds[this.roundIdx].attacker ? 'att' : 'def';
+        const d = el('div', 'kill event');
+        d.innerHTML = `✦ <span class="kr ${tc}">${e.to}</span> blinked out at the brink — ${e.hp}hp, ${e.from} denied the kill`;
+        this.feed.appendChild(d); this.feedItems.push(d);
+        while (this.feedItems.length > 7) this.feedItems.shift()!.remove();
+        to.node.classList.add('tripped');                       // the amber ring pulse the trap hitch uses
+        setTimeout(() => to.node.classList.remove('tripped'), 900);
+        this.sfx.graze();
+        return;
+      }
       if (from && to) {
         const fp = posLegs(from, from.legs, e.t, from.hitch);
         const tp = posLegs(to, to.legs, e.t, to.hitch);

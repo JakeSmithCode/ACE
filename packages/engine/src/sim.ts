@@ -746,7 +746,7 @@ function resolveRound(
           if (midTravel(winnerAg, t)) winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) });
           winnerAg.fightFace = { from: t, until: t + FIGHT_FACE, dir: dist(wPos0, lPos) > 1e-6 ? unit(wPos0, lPos) : facingAt(winnerAg, t) };
           resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
-          events.push({ t, kind: 'dmg', from: winnerAg.handle, to: loser.handle, dmg: dashDmg, hp: loser.hp });
+          events.push({ t, kind: 'dmg', from: winnerAg.handle, to: loser.handle, dmg: dashDmg, hp: loser.hp, dash: true });
           break;
         }
         loser.alive = false; loser.deathT = t; loser.deathPos = lPos;

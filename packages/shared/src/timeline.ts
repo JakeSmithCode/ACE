@@ -45,7 +45,7 @@ export type MatchEvent =
   // a non-lethal EXCHANGE (additive kind): a close duel that broke off without a kill —
   // `from` hit `to` for `dmg`, leaving them at `hp`. Emitted per direction (a graze wounds
   // both). Consumers that only know kills simply skip it.
-  | { t: number; kind: 'dmg'; from: string; to: string; dmg: number; hp: number }
+  | { t: number; kind: 'dmg'; from: string; to: string; dmg: number; hp: number; dash?: boolean }
   // `face` (additive kind): the agent TURNED — an explicit facing override the
   // viewer can't derive from the path (a head-turn window `t..until`). The viewer
   // replays it into its fight-face windows; consumers that don't know it simply
