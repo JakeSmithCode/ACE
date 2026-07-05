@@ -104,6 +104,36 @@ const CONCUSS_AGENTS = new Set(['Breach', 'Skye', 'KAY/O']);
 // pre-identity trap, so it's the neutral default. Same rng draws in every branch
 // (one jitter + one range; the wire's second zone is a deterministic offset).
 const WIRE_AGENTS = new Set(['Cypher', 'Deadlock', 'Vyse']);
+// DUELIST kit identity: a DASH duelist (Jett/Neon — the movement kits) survives
+// his FIRST lost duel off-site — he blinks out at the brink (heavy chip, floor
+// 6hp) and breaks to cover watching the shooter, instead of dying. Site fights
+// stay committed (the nearSite discipline), and the escape burns once a round.
+// A NADE duelist (Raze) brings DAMAGE: her entry pulse DETONATES at bloom —
+// flat chip to every enemy caught in it (armor absorbs; wounds compound via
+// WOUND_PEN into every later fight). Everyone else keeps the pure entry flash.
+const DASH_AGENTS = new Set(['Jett', 'Neon']);
+const NADE_AGENTS = new Set(['Raze']);
+const DASH_CHIP = 78;         // what the escape costs (× the escaper's armor)
+const DASH_ESCAPE_Q = 0.55;   // no escape from a DOMINATED loss (winner's duel
+                              // probability ≥ this): an ambush one-tap kills a
+                              // Jett like anyone — only a contested fight can
+                              // be blinked out of. Deterministic (no rng).
+const DASH_RECOVER = 0.035;    // the scramble: a long recovery pause after the
+                              // blink (rides inPause — RELOAD_PEN, no set bonus,
+                              // journey frozen), so the escapee is a wounded,
+                              // reloading, exposed body through the refight.
+const DASH_SMOKE_R = 18;      // the cloudburst: a SMALL own-side entry cloud
+const DASH_SMOKE_DUR = 0.05;  // ...and a BRIEF one — cover for the peek, not a wall
+const DASH_SMOKE_BACK = 55;   // cloud sits this far back up her own approach
+const DASH_COMMIT_PEN = 4;    // an escape-first player never FULL-COMMITS while
+                              // the exit is open: a dash duelist fights at this
+                              // edge deficit UNTIL the blink is burned — then
+                              // she's a complete fighter. The honest price of
+                              // the second life (post-draw scalar, no rng).
+const NADE_DMG = 24;          // detonation chip (× each victim's armor)
+const NADE_TAG = 0.02;       // the blast TAGS: a brief first-shot window right
+                              // at detonation (you know where the people you
+                              // just chunked are) — vs a flash's full window
 const SLOWFIELD_AGENTS = new Set(['Sage']);
 const WIRE_R_MUL = 0.62;      // each wire's reach vs the classic zone
 const WIRE_FLANK_F = 0.4;     // wire A: the flank lane at the lurk's own hold mark
@@ -287,7 +317,9 @@ interface Ag {
   form: number;          // match-night form: a duel edge constant for the whole match
   chem: number;          // team chemistry: a duel edge from the five's shared tenure (whole match)
   holdBonus: number;     // this agent's held-angle edge (0 unless anchoring; scaled by aggression)
-  agentRole: Role;       // role of the fielded agent — decides the kit
+  agentRole: Role;
+  agentName: string;            // the FIELDED agent (kit identity: dash/nade/wire/wall…)
+  dashUsed: boolean;            // a dash duelist's once-a-round escape (reset in fork clones)       // role of the fielded agent — decides the kit
   compEdge: number;      // duel edge from the agent's tier + the player's mastery
   utilFactor: number;    // utility multiplier from agent mastery
   exposedUntil: number;  // round-time until which this agent is trade-vulnerable after a kill
@@ -332,7 +364,7 @@ const mapScale = (a: MapAnchors): number => charDist(a) / ASCENT_CHAR;
 /** A smoke cloud. `c2` (optional) makes it a WALL — a capsule from c to c2 of
  *  radius r (the Viper/Harbor kit identity) instead of a sphere at c. */
 interface Smoke { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; c2?: Vec2; }
-interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; concuss?: boolean }
+interface Pulse { side: 0 | 1; c: Vec2; r: number; t0: number; t1: number; concuss?: boolean; nade?: boolean; by?: string }
 
 function unit(from: Vec2, to: Vec2): Vec2 {
   const dx = to[0] - from[0], dy = to[1] - from[1];
@@ -503,8 +535,10 @@ function resolveRound(
     (s.c2 ? segSegDist(p1, p2, s.c, s.c2) : segDist(p1, p2, s.c)) <= s.r;
   const blindedThrough = (viewer: 0 | 1, p1: Vec2, p2: Vec2, t: number): boolean =>
     smokes.some(s => s.side !== viewer && t >= s.t0 && t <= s.t1 && sightHits(s, p1, p2));
+  // a nade pulse is DAMAGE first: it grants the first shot only in the brief
+  // TAG beat right at detonation (NADE_TAG), never the flash's full window
   const pulseAt = (s: 0 | 1, p: Vec2, t: number, conc: boolean): boolean =>
-    pulses.some(u => u.side === s && !!u.concuss === conc && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
+    pulses.some(u => u.side === s && (!u.nade || t <= u.t0 + NADE_TAG) && !!u.concuss === conc && t >= u.t0 && t <= u.t1 && dist(p, u.c) <= u.r);
   const atk = () => agents.filter(a => a.side === attacker && a.alive);
   const def = () => agents.filter(a => a.side === defender && a.alive);
 
@@ -537,7 +571,24 @@ function resolveRound(
   const midTravel = (ag: Ag, t: number) => ag.departT !== Infinity && t > ag.departT && t - ag.departT - pausedTime(ag.pauses, t) < ag.arrive;
 
   const resolvedThisStep = new Set<string>();
+  const nadesDone = new Set<number>();   // per-RUN (pulses are shared across forks — never mutate them)
   for (let t = 0; t <= 1 + 1e-9; t += STEP) {
+    // NADE detonation (Raze-class entry): the pulse EXPLODES at bloom — flat chip
+    // to every enemy caught inside (armor absorbs; the wound compounds via
+    // WOUND_PEN into every later fight). Zero rng draws; one detonation per run.
+    for (let i = 0; i < pulses.length; i++) {
+      const pu = pulses[i];
+      if (!pu.nade || t < pu.t0 || nadesDone.has(i)) continue;
+      nadesDone.add(i);
+      for (const ag of agents) {
+        if (!ag.alive || ag.side === pu.side) continue;
+        const pg = posAt(ag, t);
+        if (dist(pg, pu.c) > pu.r) continue;
+        const dmg = Math.round(NADE_DMG * ag.armor);
+        ag.hp = Math.max(1, ag.hp - dmg);
+        events.push({ t, kind: 'dmg', from: pu.by ?? '', to: ag.handle, dmg, hp: ag.hp });
+      }
+    }
     resolvedThisStep.clear();
 
     // contact: the defense learns the hit on the first kill or the first attacker
@@ -600,7 +651,10 @@ function resolveRound(
         const aSet = isSet(a, t) && !aConc, dSet = isSet(d, t) && !dConc;   // a concussed fighter is never "set"
         const aCov = aSet ? coverOf(nav, pd, pa) : 0;
         const dCov = dSet ? coverOf(nav, pa, pd) : 0;
-        const { atkWins, p } = duel(rng, a, d, surprise, holdEdge, range, aSet && !aReload, dSet && !dReload, aReload, dReload, aCov, dCov);
+        // an escape-first kit fights a touch less committed while the exit is
+        // still open (DASH_COMMIT_PEN) — burned dash = full fighter
+        const dashPen = (g: Ag) => !g.dashUsed && DASH_AGENTS.has(g.agentName) ? DASH_COMMIT_PEN : 0;
+        const { atkWins, p } = duel(rng, a, d, surprise - dashPen(a) + dashPen(d), holdEdge, range, aSet && !aReload, dSet && !dReload, aReload, dReload, aCov, dCov);
         // a CLOSE duel can break off without a kill: both trade shots, take damage, and
         // disengage for a beat, watching each other. The wounds make the NEXT exchange
         // deadlier (WOUND_PEN), so firefights escalate: poke → poke → kill. URGENCY:
@@ -648,6 +702,42 @@ function resolveRound(
         // once deathT is set, so the old order left deathPos null forever (latent; never
         // read until the fight-facing below needed it)
         const lPos = posAt(loser, t);
+        // DASH: a movement duelist's kit IS the escape — his first lost duel
+        // OFF-SITE doesn't kill him: he blinks out at the brink (heavy chip)
+        // and breaks to cover watching the shooter, like a deep-graze survivor.
+        // Site fights stay committed; the escape burns once a round. The winner
+        // still pays the fight (exposed + recovery + tunnel vision): he FIRED.
+        // the escape needs MOMENTUM: you blink out of a peek you took moving,
+        // never out of a hold you lost (a set Jett who loses her angle is dead
+        // like anyone) — this is what keeps the dash an ENTRY tool, not a
+        // free second life on every angle she ever plays.
+        if (!loser.dashUsed && DASH_AGENTS.has(loser.agentName) && !nearSite
+            && midTravel(loser, t) && (atkWins ? p : 1 - p) < DASH_ESCAPE_Q) {
+          loser.dashUsed = true;
+          const wPos0 = posAt(winnerAg, t);
+          const dashDmg = Math.round(DASH_CHIP * loser.armor);
+          loser.hp = Math.max(6, loser.hp - dashDmg);
+          // she scrambles to cover, hitches through the recovery, then REJOINS —
+          // the leg continues to her ORIGINAL goal (a parked escapee starved
+          // rounds into time-outs: breeze/lotus stall +4 when she never came
+          // back). The detour + pause are the cost; the round still resolves.
+          const goal = loser.path[loser.path.length - 1];
+          const spot = seekCover(nav, lPos, wPos0, 34);
+          const legPath = spot !== lPos && dist(spot, goal) > 12 ? [lPos, spot, goal] : [lPos, spot !== lPos ? spot : goal];
+          beginLeg(loser, legPath, t, scale, unit(goal, wPos0));
+          loser.pauses.push({ t, dur: DASH_RECOVER });
+          // a dash is LOUD — the escapee is EXPOSED through the trade window
+          // (everyone saw where she blinked; enemies who can see her collect
+          // the trade edge), the structural cost that keeps the escape a kit
+          // identity instead of a free canceled kill.
+          loser.exposedUntil = t + TRADE_WINDOW;
+          winnerAg.exposedUntil = t + TRADE_WINDOW;
+          if (midTravel(winnerAg, t)) winnerAg.pauses.push({ t, dur: FIGHT_PAUSE * (W_HANDLING[winnerAg.weapon] ?? 1) });
+          winnerAg.fightFace = { from: t, until: t + FIGHT_FACE, dir: dist(wPos0, lPos) > 1e-6 ? unit(wPos0, lPos) : facingAt(winnerAg, t) };
+          resolvedThisStep.add(a.handle); resolvedThisStep.add(d.handle);
+          events.push({ t, kind: 'dmg', from: winnerAg.handle, to: loser.handle, dmg: dashDmg, hp: loser.hp });
+          break;
+        }
         loser.alive = false; loser.deathT = t; loser.deathPos = lPos;
         winnerAg.exposedUntil = t + TRADE_WINDOW;      // the killer is now tradeable
         // the fight COSTS the winner (actual players, not a coin toss):
@@ -866,7 +956,7 @@ function simulateRound(
         exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         rotatePlan: rotChain,
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
-        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        agentRole: lo.role, agentName: lo.agent, dashUsed: false, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
     });
   } else {
@@ -915,7 +1005,7 @@ function simulateRound(
         holdDir: isLurk ? unit(goal, sitePt) : unit(spawn, goal),
         exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(attacker) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         form: form.get(p.handle) ?? 0, chem: chemEdge[attacker], holdBonus: 0,
-        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        agentRole: lo.role, agentName: lo.agent, dashUsed: false, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
       });
     });
   }
@@ -945,7 +1035,7 @@ function simulateRound(
         holdDir: plan?.face ? unit(pos, plan.face) : unit(pos, A.atkSpawn),
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: HOLD_BONUS * (1 - dAgg * 0.6),
-        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        agentRole: lo.role, agentName: lo.agent, dashUsed: false, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
         rotatePlan: rotChain,
       });
@@ -1021,7 +1111,7 @@ function simulateRound(
         holdDir: unit(anchor ? goal : st.from, A.atkSpawn),  // hold toward the entry from where they sit
         form: form.get(p.handle) ?? 0, chem: chemEdge[defender],
         holdBonus: anchor ? HOLD_BONUS * (1 - dAgg * 0.6) : 0,
-        agentRole: lo.role, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
+        agentRole: lo.role, agentName: lo.agent, dashUsed: false, compEdge: lo.compEdge, utilFactor: lo.utilFactor,
         exposedUntil: -1, rotatePlan: null, hp: 100, armor: ARMOR_MUL[buy[String(defender) as '0' | '1']], pauses: [], fightFace: null, grazed: {}, doneLegs: [],
       });
     });
@@ -1112,15 +1202,45 @@ function simulateRound(
       }
     } else if (ag.agentRole === 'initiator' || (isAtk && ag.agentRole === 'duelist')) {
       const c = jitter(rng, sitePt, 22);
-      // attackers time the execute to their tempo (fast hits flash earlier)
-      const t0 = (isAtk ? 0.44 - atkTac.attack.tempo * 0.20 : 0.16) + rng.range(0, 0.10);
+      // attackers time the execute to their tempo (fast hits flash earlier).
+      // A duelist's entry window is anchored to HIS OWN ARRIVAL — it covers the
+      // peek he actually takes (the recast lesson: a fixed-time window sits in
+      // dead air on slow maps; arrival-anchoring rides mapScale + tempo for free).
+      const t0 = (isAtk ? (ag.agentRole === 'duelist' ? Math.max(0.10, ag.arrive - 0.06) : 0.44 - atkTac.attack.tempo * 0.20) : 0.16) + rng.range(0, 0.10);
       const r = PULSE_R + PULSE_R_UTIL * u, t1 = t0 + PULSE_DUR + PULSE_DUR_UTIL * u;
-      // the fielded initiator decides the ARCHETYPE: recon reveals, concuss denies
-      // (same draws — only the pulse kind differs). A duelist entry flash stays a
-      // first-shot tool (his job is winning the peek he takes himself).
-      const conc = ag.agentRole === 'initiator' && CONCUSS_AGENTS.has(loadouts.get(ag.handle)?.agent ?? '');
-      pulses.push({ side: ag.side, c, r, t0, t1, concuss: conc || undefined });
-      events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole !== 'initiator' || conc ? 'flash' : 'recon', side: ag.side, at: c, r, until: t1 });
+      // the fielded agent decides the ARCHETYPE (same draws — only what's fielded
+      // differs). Initiators: recon reveals, concuss denies. Duelists are a TRADE,
+      // never a bonus: a FLASH duelist (Phoenix/Yoru/Reyna) throws the first-shot
+      // entry window; a NADE duelist (Raze) trades the info for detonation damage
+      // (the pulse hurts but reveals nothing); a DASH duelist (Jett/Neon) throws
+      // NOTHING — his whole kit budget is the once-a-round escape in the kill loop.
+      const dAgent = loadouts.get(ag.handle)?.agent ?? '';
+      const conc = ag.agentRole === 'initiator' && CONCUSS_AGENTS.has(dAgent);
+      const nade = ag.agentRole === 'duelist' && NADE_AGENTS.has(dAgent);
+      const dash = ag.agentRole === 'duelist' && DASH_AGENTS.has(dAgent);
+      if (dash) {
+        // a movement duelist doesn't flash — she SMOKES HERSELF IN (the
+        // cloudburst): a small, brief OWN-SIDE cloud on her entry point that
+        // cuts the defenders' sightline onto the peek she takes (blindedThrough
+        // is one-way — her own team sees through it). Same draws as the flash
+        // cast; only the object fielded differs.
+        const rs = DASH_SMOKE_R + SMOKE_R_UTIL * u * 0.5;
+        const t1s = t0 + DASH_SMOKE_DUR + PULSE_DUR_UTIL * u;
+        // anchored on HER APPROACH (pulled back along her own path), never the
+        // site point — it covers the crossing she takes, not the plant zone
+        // (a site-point cloud shielded the plant and tipped lotus ATK-SIDED)
+        let cs: Vec2 = ag.path[0]; let rem = DASH_SMOKE_BACK;
+        for (let i = ag.path.length - 1; i > 0; i--) {
+          const seg = dist(ag.path[i], ag.path[i - 1]);
+          if (seg >= rem) { const f = rem / seg; cs = [ag.path[i][0] + (ag.path[i - 1][0] - ag.path[i][0]) * f, ag.path[i][1] + (ag.path[i - 1][1] - ag.path[i][1]) * f]; break; }
+          rem -= seg;
+        }
+        smokes.push({ side: ag.side, c: cs, r: rs, t0, t1: t1s });
+        events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: 'smoke', side: ag.side, at: cs, r: rs, until: t1s });
+      } else {
+        pulses.push({ side: ag.side, c, r, t0, t1, concuss: conc || undefined, nade: nade || undefined, by: nade ? ag.handle : undefined });
+        events.push({ t: t0, kind: 'ability', agent: ag.handle, ability: ag.agentRole !== 'initiator' || conc ? 'flash' : 'recon', side: ag.side, at: c, r, until: t1 });
+      }
     } else if (ag.agentRole === 'sentinel') {
       // a sentinel LOCKS THE FLANK: a trap on the off-site lane that catches an enemy
       // crossing it — granting the sentinel's side the first shot there for the whole
@@ -1202,7 +1322,7 @@ function simulateRound(
   for (let i = 0; i < forks; i++) {
     // fresh hp/pauses/fightFace per clone — `pauses` MUST be a new array (a shared ref
     // would leak fork fight-halts into the canonical pass and break byte-identity)
-    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {}, doneLegs: [] }));
+    const clones = agents.map(a => ({ ...a, alive: true, deathT: null, deathPos: null, exposedUntil: -1, hp: 100, pauses: [], fightFace: null, grazed: {}, doneLegs: [], dashUsed: false }));
     const fr = resolveRound(clones, smokes, pulses, nav, sitePt, site, attacker, defender, scale, new Rng(forkSeed(input.seed, n, i)));
     if (fr.winner === attacker) atkForkWins++;
   }
