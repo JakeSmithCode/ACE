@@ -6,11 +6,12 @@
 // setup for every pool map you care about. Team 1 is your next opponent, edited
 // locally for testing. Re-sims live in the browser on the selected map.
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
-import type { MapId, MatchInput, MatchTimeline, Tactics, Team, Play, Vec2 } from '@ace/shared';
+import type { MapId, MatchInput, MatchTimeline, Tactics, Team, Play } from '@ace/shared';
 import { simulateMatch, PATCH } from '@ace/engine';
-import { ANCHORS, type Navmesh } from '@ace/maps';
+import { ANCHORS } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
+import { starterAttack, starterDefense, altExecFrom } from './playbook';
 import { useWorld, MAP, MAP_POOL } from './world';
 
 const FORKS = 50;
@@ -30,53 +31,10 @@ const teams: [Team, Team] = [w.myTeam.value, w.clubs.value[w.nextOpponent.value]
 const oppTactics = reactive<Tactics>(clone(w.clubs.value[w.nextOpponent.value].tactics));
 const tac = (i: number): Tactics => (i === 0 ? w.myTactics.value : oppTactics);
 
-// ── generic starters, derived from the selected map's anchors (positions are
-// snapped to the nearest walkable cell, so they're sane on any pool map) ──────
-const walkableAt = (nav: Navmesh, p: Vec2) => {
-  const c = Math.floor(p[0] / nav.cell), r = Math.floor(p[1] / nav.cell);
-  return c >= 0 && c < nav.cols && r >= 0 && r < nav.rows && nav.walk[r * nav.cols + c] === 1;
-};
-function snapW(p: Vec2): Vec2 {
-  const nav = w.getNav(mapSel.value);
-  const cl = (v: number) => Math.max(8, Math.min(992, Math.round(v)));
-  const q: Vec2 = [cl(p[0]), cl(p[1])];
-  if (!nav || walkableAt(nav, q)) return q;
-  for (let R = 8; R <= 120; R += 8) for (let k = 0; k < 16; k++) {
-    const a = (k / 16) * Math.PI * 2;
-    const c: Vec2 = [cl(q[0] + Math.cos(a) * R), cl(q[1] + Math.sin(a) * R)];
-    if (walkableAt(nav, c)) return c;
-  }
-  return q;
-}
-function starterDefense(t: Team): Play {
-  const A = A0.value;
-  const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
-  const off = (b: Vec2, dx: number, dy: number): Vec2 => snapW([b[0] + dx, b[1] + dy]);
-  // the classic shape: a mid bait, two A bodies that collapse deeper when he
-  // falls (the kill point), an A anchor, a B watcher — then you tune.
-  return { plans: [
-    { player: p3, pos: snapW([A.mid[0], A.mid[1]]) },
-    { player: p0, pos: off(A.sites.A, 40, 55), rotate: { pos: off(A.sites.A, 15, -40), trigger: { kind: 'death', player: p3 } } },
-    { player: p1, pos: off(A.sites.A, -45, 40), rotate: { pos: off(A.sites.A, -20, -40), trigger: { kind: 'death', player: p3 } } },
-    { player: p2, pos: snapW([A.sites.A[0], A.sites.A[1]]) },
-    { player: p4, pos: snapW([A.sites.B[0], A.sites.B[1]]) },
-  ] };
-}
-function starterAttack(t: Team): Play {
-  const A = A0.value;
-  const [p0, p1, p2, p3, p4] = t.players.map(p => p.id);
-  const pA = A.sites.A;
-  const L = Math.hypot(pA[0] - A.atkSpawn[0], pA[1] - A.atkSpawn[1]) || 1;
-  const d: Vec2 = [(pA[0] - A.atkSpawn[0]) / L, (pA[1] - A.atkSpawn[1]) / L];   // push axis
-  const px = -d[1], py = d[0];                                                  // entry fan
-  const at = (back: number, side: number): Vec2 => snapW([pA[0] - d[0] * back + px * side, pA[1] - d[1] * back + py * side]);
-  return { site: 'A', plans: [
-    { player: p0, pos: at(20, -45) }, { player: p1, pos: at(10, 10) }, { player: p2, pos: at(30, 60) },
-    { player: p3, pos: at(95, -20) },
-    { player: p4, pos: snapW([(pA[0] + A.mid[0]) / 2, (pA[1] + A.mid[1]) / 2]) },
-  ], lineups: [ { player: p2, kind: 'smoke', at: snapW([pA[0] + d[0] * 70, pA[1] + d[1] * 70]), t: 0.25 } ] };
-}
-const starterFor = (t: Team, side: Side): Play => (side === 'attack' ? starterAttack(t) : starterDefense(t));
+// starters + the alt transplant live in the shared playbook module (the Match
+// Center's PvP playbook panel uses the exact same templates)
+const starterFor = (t: Team, side: Side): Play =>
+  side === 'attack' ? starterAttack(t, A0.value, w.getNav(mapSel.value)) : starterDefense(t, A0.value, w.getNav(mapSel.value));
 // a play slot: defense, the primary attack execute, or the ALT execute (play2 —
 // two executes on different sites make the engine ROLL the site per round).
 // YOUR club's plays live in the PER-MAP playbook; the opponent's live locally.
@@ -91,29 +49,8 @@ function setPlayVal(i: number, side: Side, alt: boolean, p: Play | undefined) {
   if (side === 'attack') { if (alt) oppTactics.attack.play2 = p; else oppTactics.attack.play = p; }
   else oppTactics.defense.play = p;
 }
-// the alt starter TRANSPLANTS the primary execute to the next site (translate by
-// the site delta, flip the site) — a rough starting template the owner then tunes
-function altStarter(i: number): Play {
-  const p1 = playOf(i, 'attack')!;
-  const sites = SITES.value;
-  const list = (['A', 'B', 'C'] as const).filter(s => sites[s]);
-  const s1 = (p1.site ?? 'A') as typeof list[number];
-  const s2 = list[(list.indexOf(s1) + 1) % list.length];
-  const d = [sites[s2]![0] - sites[s1]![0], sites[s2]![1] - sites[s1]![1]];
-  const cl = (v: number) => Math.max(0, Math.min(1000, Math.round(v)));
-  const sh = (pt: [number, number]): [number, number] => [cl(pt[0] + d[0]), cl(pt[1] + d[1])];
-  const c: Play = clone(p1);
-  c.site = s2;
-  for (const pl of c.plans) {
-    pl.pos = sh(pl.pos);
-    if (pl.face) pl.face = sh(pl.face);
-    if (pl.route) pl.route = pl.route.map(sh);
-    let st = pl.rotate;
-    while (st) { st.pos = sh(st.pos); if (st.route) st.route = st.route.map(sh); st = st.then; }
-  }
-  for (const ln of c.lineups ?? []) { ln.at = sh(ln.at); if (ln.at2) ln.at2 = sh(ln.at2); }
-  return c;
-}
+// the alt starter TRANSPLANTS the primary execute to the next site — shared helper
+const altStarter = (i: number): Play => altExecFrom(playOf(i, 'attack')!, A0.value);
 
 type Side = 'attack' | 'defense';
 const host = ref<HTMLElement | null>(null);
@@ -267,7 +204,12 @@ onUnmounted(() => { viewer?.destroy(); clearTimeout(pending); });
       <button v-for="m in MAP_POOL" :key="m" class="ed-map" :class="{ on: mapSel === m, has: !!w.myPlays.value[m] }"
               :title="w.myPlays.value[m] ? `you have authored plays on ${m}` : `no plays authored on ${m} yet — your dials still apply there`"
               @click="pickMap(m)">{{ m }}<i v-if="w.myPlays.value[m]" class="ed-mapdot">●</i></button>
-      <span class="ed-maphint">plays are authored PER MAP — when a fixture lands on a map, your club fields THAT map's playbook</span>
+      <span v-if="w.nextMap.value" class="ed-nextmap" :class="{ ready: !!w.myPlays.value[w.nextMap.value] }"
+            :title="w.myPlays.value[w.nextMap.value] ? 'your next fixture is on this map and your playbook is ready' : 'your next fixture is on this map and you have NO plays authored there — click to author'"
+            @click="pickMap(w.nextMap.value!)">
+        next match: <b>{{ w.nextMap.value }}</b> {{ w.myPlays.value[w.nextMap.value] ? '✓ playbook ready' : '⚠ no plays authored' }}
+      </span>
+      <span v-else class="ed-maphint">plays are authored PER MAP — when a fixture lands on a map, your club fields THAT map's playbook</span>
     </div>
     <div class="ed-presets">
       <label>PLAYBOOK</label>

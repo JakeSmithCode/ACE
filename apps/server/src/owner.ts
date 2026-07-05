@@ -4,7 +4,8 @@
 // exact same transforms inside a transaction (a row UPDATE of `club.owner_account_id`
 // / `club.plan`). Auth — *which* account may call these — is the HTTP layer's job;
 // here we enforce the world-level invariants (one owner per club, a valid plan).
-import { claimClub, revertClub, setClubPlan, clubOf, planOf, seedContracts, computeObjective, strengthRankIn, pickRival, CONF_START, type ClubPlan, type WorldClub } from '@ace/world';
+import { claimClub, revertClub, setClubPlan, setClubPlay, clubOf, planOf, seedContracts, computeObjective, strengthRankIn, pickRival, CONF_START, type ClubPlan, type ClubPlaybook, type WorldClub } from '@ace/world';
+import type { MapId, Play } from '@ace/shared';
 import type { WorldStore } from './store.js';
 
 const load = async (store: WorldStore, id: string) => {
@@ -49,4 +50,10 @@ export async function clubPlan(store: WorldStore, id: string, clubId: string): P
   const c = w.clubs.find(x => x.id === clubId);
   if (!c) throw new Error(`no such club ${clubId}`);
   return planOf(c);
+}
+
+/** Set/clear one slot of an owner's per-map playbook (POST /me/play). Sanitized
+ *  + capped by the pure `setClubPlay` transform at the write boundary. */
+export async function savePlay(store: WorldStore, id: string, clubId: string, map: MapId, slot: keyof ClubPlaybook, play: Play | null): Promise<void> {
+  await store.saveWorld(id, setClubPlay(await load(store, id), clubId, map, slot, play));
 }

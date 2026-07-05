@@ -5,11 +5,14 @@
 // spoilers until it's over); once revealed we pull the snapshot and re-sim it in the
 // viewer (the engine runs client-side, so watching costs the server nothing). This is
 // the seam between the deep persistence backend and the broadcast-grade viewer.
-import { onMounted, onUnmounted, ref, computed, nextTick, watch as vueWatch } from 'vue';
-import type { MapId, Tactics } from '@ace/shared';
+import { onMounted, onUnmounted, ref, computed, nextTick, shallowRef, watch as vueWatch } from 'vue';
+import type { MapId, Play, Tactics, Team } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
+import { RANK_TIERS, MAP_POOL, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
+import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
+import PlayEditor from './PlayEditor.vue';
+import { starterAttack, starterDefense, altExecFrom } from './playbook';
 import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView } from './serverApi';
 const SCOUT_MAX = 3;
 
@@ -101,6 +104,60 @@ const planOpen = ref(false);
 const tac = ref<Tactics | null>(null);
 const planSaved = ref(false);
 function syncTac() { const t = myClub.value?.plan?.tactics; tac.value = t ? JSON.parse(JSON.stringify(t)) as Tactics : null; }
+// ── the PER-MAP PLAYBOOK (PvP): author real plays per pool map; the server
+// sanitizes at the write boundary and the tick fields the FIXTURE map's slots.
+// Same PlayEditor + anchor-derived starters as the single-player editor.
+type PbSlot = 'attack' | 'attack2' | 'defense';
+const pbMap = ref<MapId>('ascent');
+const pbSlot = ref<PbSlot | null>(null);
+const pbNav = shallowRef<Navmesh | null>(null);
+const pbSaved = ref(false);
+const pbBook = computed(() => (myClub.value?.plays ?? {}) as Partial<Record<string, { attack?: Play; attack2?: Play; defense?: Play }>>);
+const pbPlay = computed<Play | null>(() => (pbSlot.value ? pbBook.value[pbMap.value]?.[pbSlot.value] ?? null : null));
+const pbTeam = computed<Team | null>(() => {
+  const five = myClub.value?.planFive;
+  if (!five?.length || !myClub.value) return null;
+  // PlayEditor only reads players' id/handle/attr.utility — a plan-five shaped Team is enough
+  return { id: 'me', tag: myClub.value.tag, name: myClub.value.name,
+    players: five.map(p => ({ id: p.id, handle: p.handle, role: p.role, attr: { utility: p.utility } })) } as unknown as Team;
+});
+function pbPick(m: MapId) { pbMap.value = m; pbSlot.value = null; void ensureNav(m).then(n => (pbNav.value = n)); }
+async function pbOpen(slot: PbSlot) {
+  pbNav.value = await ensureNav(pbMap.value);
+  if (pbSlot.value === slot) { pbSlot.value = null; return; }
+  if (!pbBook.value[pbMap.value]?.[slot] && pbTeam.value) {
+    const A = ANCHORS[pbMap.value]!;
+    const primary = pbBook.value[pbMap.value]?.attack;
+    const play = slot === 'defense' ? starterDefense(pbTeam.value, A, pbNav.value)
+      : slot === 'attack2' && primary ? altExecFrom(primary, A)
+      : starterAttack(pbTeam.value, A, pbNav.value);
+    await pbSave(play, slot);
+  }
+  pbSlot.value = slot;
+}
+let pbTimer: ReturnType<typeof setTimeout> | null = null;
+function pbUpdate(play: Play) {
+  if (!pbSlot.value) return;
+  const slot = pbSlot.value;
+  if (myClub.value) {   // optimistic — dragging feels live; the save is debounced
+    const plays = { ...(myClub.value.plays ?? {}) } as Record<string, Record<string, unknown>>;
+    plays[pbMap.value] = { ...(plays[pbMap.value] ?? {}), [slot]: play };
+    myClub.value = { ...myClub.value, plays };
+  }
+  if (pbTimer) clearTimeout(pbTimer);
+  pbTimer = setTimeout(() => void pbSave(play, slot), 400);
+}
+async function pbSave(play: Play | null, slot: PbSlot) {
+  if (!server.value || !token.value) return;
+  try {
+    const r = await server.value.setPlay(token.value, pbMap.value, slot, play);
+    if (r.ok && myClub.value) {
+      myClub.value = { ...myClub.value, plays: r.plays as ClubPage['plays'] };
+      pbSaved.value = true; setTimeout(() => (pbSaved.value = false), 1800);
+    }
+  } catch (e) { errMsg.value = (e as Error).message; }
+}
+async function pbClear() { if (!pbSlot.value) return; await pbSave(null, pbSlot.value); pbSlot.value = null; }
 async function savePlan() {
   if (!server.value || !token.value || !tac.value) return; busy.value = true; authErr.value = '';
   try { await server.value.setPlan(tac.value, token.value); planSaved.value = true; setTimeout(() => (planSaved.value = false), 2200); await refreshMe(); }
@@ -1048,6 +1105,35 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (pollTimer)
             </button>
           </div>
           <span class="lv-plannote">one focus for the whole campaign — it plugs into fitness, chemistry, or the room. Reset each season.</span>
+        </div>
+        <!-- the PER-MAP PLAYBOOK: author real plays per pool map; the tick fields
+             the fixture map's book, so what you draw here runs in your matches -->
+        <div class="lv-pbook">
+          <div class="lv-talkhd">
+            <span class="lv-planh">▦ Playbook</span>
+            <span class="lv-talkctx">authored plays PER MAP — when a fixture lands on a map, your club fields that map's setups</span>
+            <span v-if="pbSaved" class="lv-savedok">✓ saved</span>
+          </div>
+          <div class="lv-pbmaps">
+            <button v-for="m in MAP_POOL" :key="m" class="ed-map" :class="{ on: pbMap === m, has: !!pbBook[m] }"
+                    :title="pbBook[m] ? `you have authored plays on ${m}` : `no plays on ${m} yet`" @click="pbPick(m)">{{ m }}<i v-if="pbBook[m]" class="ed-mapdot">●</i></button>
+          </div>
+          <div class="lv-pbslots">
+            <button class="ed-author" :class="{ on: pbSlot === 'attack', set: pbBook[pbMap]?.attack }" @click="pbOpen('attack')">✎ attack</button>
+            <button v-if="pbBook[pbMap]?.attack" class="ed-author edalt" :class="{ on: pbSlot === 'attack2', set: pbBook[pbMap]?.attack2 }"
+                    title="a SECOND execute on the other site — the engine rolls the site each round and runs the matching play, so your attack isn't a tell" @click="pbOpen('attack2')">⑂ alt</button>
+            <button class="ed-author" :class="{ on: pbSlot === 'defense', set: pbBook[pbMap]?.defense }" @click="pbOpen('defense')">✎ defense</button>
+            <button v-if="pbSlot && pbPlay" class="ed-clear" @click="pbClear">clear this play</button>
+            <span class="lv-plannote">drag to place · saves live · rehearse setups against a full sim in the Tactics Editor tab</span>
+          </div>
+          <div v-if="pbSlot && pbPlay && pbTeam && pbNav" class="lv-pbcanvas">
+            <PlayEditor
+              :key="`pvp-${pbMap}-${pbSlot}`"
+              :team="pbTeam" :map-url="`/${pbMap}.png`" side="att"
+              :mode="pbSlot === 'defense' ? 'defense' : 'attack'"
+              :play="pbPlay" :atk-spawn="ANCHORS[pbMap]!.atkSpawn" :sites="ANCHORS[pbMap]!.sites"
+              :nav="pbNav" @update="pbUpdate" />
+          </div>
         </div>
       </div>
 

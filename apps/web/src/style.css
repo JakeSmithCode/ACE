@@ -377,6 +377,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .ed-mapdot{font-style:normal;font-size:7px;color:#3bd17f}
 .ed-map.on .ed-mapdot{color:var(--bg)}
 .ed-maphint{font-size:11px;color:var(--muted-2);margin-left:6px}
+.ed-nextmap{font-size:11px;color:#e6c66a;margin-left:6px;cursor:pointer;border:1px solid rgba(230,198,106,.4);border-radius:4px;padding:3px 8px}
+/* the PvP per-map playbook panel (Match Center tactics) */
+.lv-pbook{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.lv-pbmaps{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.lv-pbslots{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.lv-pbcanvas{max-width:640px;background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:8px;padding:8px}
+.ed-nextmap b{text-transform:uppercase}
+.ed-nextmap.ready{color:#3bd17f;border-color:rgba(59,209,127,.4)}
 .ed-mapname{text-transform:uppercase;color:var(--brand)}
 /* VIP supporter tier (convenience only — never pay-to-win) */
 .lv-vip{font-family:var(--label);font-size:10px;letter-spacing:.06em;color:#e6c66a;border:1px solid rgba(230,198,106,.55);border-radius:4px;padding:2px 7px;background:linear-gradient(90deg,rgba(230,198,106,.14),rgba(230,198,106,.04));white-space:nowrap}

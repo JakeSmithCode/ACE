@@ -6,17 +6,17 @@
 // sees the same wall-clock moment). The result + snapshot stay sealed until the
 // broadcast plays out.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { MatchTimeline, Tactics, MatchInput } from '@ace/shared';
+import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { standings, planFive, MAP_POOL, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
 import { runTick, seasonLength } from './tick.js';
 import { navOf } from './nav.js';
 import { publicView, liveMatchState, fixtureStatus, liveFrac } from './live.js';
-import { claim, savePlan, myClub } from './owner.js';
+import { claim, savePlan, savePlay, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
 import { verifyStripeSig, vipFromEvent, vipActive, VIP_DAYS } from './billing.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
@@ -1239,7 +1239,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const rivalClub = c.rival ? wm.clubs.find(x => x.id === c.rival) : null;
       const rival = rivalClub ? { tag: rivalClub.tag, name: rivalClub.name } : null;
       const nextDerby = oppIdx >= 0 && c.rival === wm.clubs[oppIdx].id;
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null });
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null, plays: c.plays ?? {}, planFive: planFive(c).map(p => ({ id: p.id, handle: p.handle, role: p.role, utility: p.attr.utility })) });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.
@@ -1396,6 +1396,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       try { await savePlan(store, id, mine.id, { tactics: body.tactics ?? cur.tactics, comp: body.comp ?? cur.comp, lineup: body.lineup ?? cur.lineup }); }
       catch (e) { return json(res, 422, { error: (e as Error).message }); }
       return json(res, 200, planOf((await myClub(store, id, account))!));
+    }
+    // POST /me/play  { map, slot, play|null }  → set/clear one slot of your PER-MAP
+    // playbook (attack | attack2 | defense). The pure setClubPlay transform sanitizes
+    // + caps the authored play at the write boundary; the tick overlays the fixture
+    // map's slots at resolution time, so what you author here is what your club
+    // actually runs when the rotation lands on that map.
+    if (path[0] === 'me' && path[1] === 'play' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const mine = await myClub(store, id, account);
+      if (!mine) return json(res, 404, { error: 'you own no club' });
+      const b = (await readBody(req)) as { map?: string; slot?: string; play?: unknown };
+      if (!MAP_POOL.includes(b.map as MapId)) return json(res, 400, { error: 'not a pool map' });
+      if (!['attack', 'attack2', 'defense'].includes(b.slot ?? '')) return json(res, 400, { error: 'slot must be attack | attack2 | defense' });
+      try { await savePlay(store, id, mine.id, b.map as MapId, b.slot as 'attack' | 'attack2' | 'defense', (b.play ?? null) as never); }
+      catch (e) { return json(res, 422, { error: (e as Error).message }); }
+      const after = (await myClub(store, id, account))!;
+      return json(res, 200, { ok: true, plays: after.plays ?? {} });
     }
     // POST /me/renew  { playerId }  → re-sign one of your players to a fresh deal at his
     // current market wage (a raise for a risen youngster, a cut for a faded vet). Free — it

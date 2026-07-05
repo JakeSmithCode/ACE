@@ -4,7 +4,7 @@
 // (playoffs → settle → develop → patch → promote/relegate). The single-player
 // store will consolidate onto this shape; the server persists it to rows and runs
 // the exact same functions on the tick. No Vue, no I/O.
-import type { Player, Tactics, Comp, Team, PatchState, Attributes } from '@ace/shared';
+import type { Player, Tactics, Comp, Team, PatchState, Attributes, MapId, Play } from '@ace/shared';
 import { Rng, PATCH } from '@ace/engine';
 import { makeLeague, ROLE_AGENTS } from './clubs.js';
 import { divisionSchedule, funnelPromoteRelegate, promoteRelegate, snakeGroup, type DivMove } from './divisions.js';
@@ -61,7 +61,18 @@ export interface WorldClub {
   rival?: string;       // the owner's derby rival (club id — nearest strength at claim; spans leagues if either moves)
   derby?: { w: number; l: number };   // head-to-head record vs the rival (builds over the career)
   camp?: Camp;          // the owner's pre-season training camp (fitness/chemistry/sharpness); reset each rollover
+  /** An owner's PER-MAP playbook: authored plays keyed by the pool map they were
+   *  drawn on (coordinates are map-space). The tick overlays the FIXTURE map's
+   *  slots into the club's tactics at resolution time — so an authored bind
+   *  setup fields exactly when the rotation lands on bind. Additive/optional:
+   *  undefined = no plays = byte-identical worlds. */
+  plays?: Partial<Record<MapId, ClubPlaybook>>;
 }
+
+/** One map's authored plays: the primary execute, the optional ALT execute (two
+ *  executes on different sites make the engine roll the site per round), and the
+ *  defensive setup. */
+export interface ClubPlaybook { attack?: Play; attack2?: Play; defense?: Play }
 
 /** A club's strength rank within its own (tier, group) division — 1 = strongest. Used to set
  *  the board objective (a favourite gets a harder brief). */

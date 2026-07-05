@@ -14,7 +14,7 @@ import {
   ROLE_AGENTS, fullPatch, patchMeta, runPlayoffs, runPromotionPlayoff, PLAYOFF_SLOTS, finishOf, playoffPrize,
   createCup, drawCup, cupByes, cupRoundName, CUP_DAYS, CUP_PRIZE, CUP_NAME, type CupState, type CupTie,
   membersOf, divisionSchedule, promoteRelegate,
-  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity, MAP_POOL, fixtureMap,
+  buildMatchInput, quickResult as quickResultPure, resolveWorldDay, settleClub, squadWageBill, mapAffinity, MAP_POOL, fixtureMap, fixtureSeed,
   contractWage, demandWage, newContract, CONTRACT_YEARS,
   defaultFacilities, facilityBoost, facilityCost, facilityUpkeep, FACILITY_MAX,
   clubInfra, infraBoost, INFRA_MAX, NO_BOOST,
@@ -661,6 +661,16 @@ const nextOpponent = computed(() => {
 });
 // is your next match a derby (vs your rival)?
 const nextIsDerby = computed(() => nextFixture.value != null && isRival(nextOpponent.value));
+// the NEXT league fixture's map — same seed convention resolveWorldDay uses
+// (fixtureSeed(seasonSeed, day, slot + division·1000)), so the editor can nudge
+// you to author a playbook where you'll actually play next
+const nextMap = computed<MapId | null>(() => {
+  const fx = nextFixture.value;
+  if (!fx) return null;
+  const slot = mySchedule.value[dayIdx.value].indexOf(fx);
+  if (slot < 0) return null;
+  return fixtureMap(fixtureSeed(seasonSeed.value, dayIdx.value, slot + myDivision.value * 1000));
+});
 // the always-open board: free agents + every AI club's listed player (resolved
 // live so it reflects development; stale listings are filtered out)
 const market = computed<MarketEntry[]>(() => [
@@ -1463,7 +1473,7 @@ export function useWorld() {
     facilities, facBoost, facCost, canUpgradeFacility, upgradeFacility,
     academy, acadCost, canUpgradeAcademy, upgradeAcademy, acadIntakeSize, promoteProspect, releaseProspect,
     infraLevel, INFRA_MAX, retirements, powerOf, powerRanking, hqRanking, rankInList,
-    table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent,
+    table, total, done, myTeam, rankOf, myStanding, myResults, nextFixture, nextOpponent, nextMap,
     today, todayLabel, seasonDays, dayNo, lastBirthdays,
     objective, objectiveMet, objectiveRank, objectiveOutcome,
     buildInput, simFixture, resolveDay, simSeason, enterPlayoffs, advanceSeason, selectClub, newWorld, ensureNav, getNav,
