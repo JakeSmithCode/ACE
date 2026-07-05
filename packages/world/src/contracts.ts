@@ -4,7 +4,7 @@
 // the server runs these owner-scoped (a human's squad), so AI clubs + no-owner worlds are
 // byte-identical (they float at the market wage, no lifecycle). Mirrors the single-player store.
 import type { Player, PatchState } from '@ace/shared';
-import { newContract, CONTRACT_YEARS } from './finance.js';
+import { newContract, negotiatedContract, CONTRACT_YEARS } from './finance.js';
 import { freeAgents } from './market.js';
 
 const ROLE_NEED = { duelist: 2, initiator: 1, controller: 1, sentinel: 1 } as const;
@@ -16,10 +16,13 @@ export function seedContracts(roster: Player[], patch?: PatchState): Player[] {
   return roster.map((p, i) => p.contract ? p : { ...p, contract: newContract(p, patch, 2 + (i % 3)) });
 }
 
-/** Re-sign one player to a fresh `CONTRACT_YEARS` deal at his CURRENT market wage (a raise for
- *  an improved youngster, a cut for a faded vet — either way you keep him and re-lock it). */
-export function renewContract(roster: Player[], id: string, patch?: PatchState): Player[] {
-  return roster.map(p => p.id === id ? { ...p, contract: newContract(p, patch, CONTRACT_YEARS) } : p);
+/** Re-sign one player to a fresh deal at his CURRENT market wage (a raise for an improved
+ *  youngster, a cut for a faded vet — either way you keep him and re-lock it). `years` is
+ *  the NEGOTIATED term: short pays a premium, long earns a discount but locks the wage
+ *  (`negotiatedContract`); omitted → the neutral `CONTRACT_YEARS` market deal, byte-identical. */
+export function renewContract(roster: Player[], id: string, patch?: PatchState, years?: number): Player[] {
+  const deal = (p: Player) => years == null ? newContract(p, patch, CONTRACT_YEARS) : negotiatedContract(p, years, patch);
+  return roster.map(p => p.id === id ? { ...p, contract: deal(p) } : p);
 }
 
 /** Off-season: tick every deal down a year; a player who hits 0 unrenewed WALKS FREE (leaves

@@ -493,12 +493,14 @@ const squadSummary = computed(() => {
 // the player profile card (a full dossier on one of your squad)
 const playerCard = ref<SquadPlayer | null>(null);
 // re-sign a player to a fresh deal (re-locks his wage so he can't walk free)
+const renewYears = ref<Record<string, number>>({});   // per-player negotiated term (default 3y market)
 async function renew(sp: SquadPlayer) {
   if (!server.value || !token.value) return;
   marketBusy.value = true;
-  try { const r = await server.value.renew(sp.id, token.value); if (r.ok) await refreshMe(); }
+  try { const r = await server.value.renew(sp.id, token.value, renewYears.value[sp.id] ?? 3); if (r.ok) await refreshMe(); }
   catch (e) { errMsg.value = (e as Error).message; } finally { marketBusy.value = false; }
 }
+const renewWageFor = (sp: SquadPlayer) => sp.renewTerms?.find(t => t.years === (renewYears.value[sp.id] ?? 3))?.wage ?? sp.renew;
 // training focus — direct a player's reps at one skill (click the attr to toggle; a tradeoff:
 // that skill grows faster, the rest a touch slower). Clicking the focused skill clears it.
 async function setFocus(sp: SquadPlayer, attr: string) {
@@ -1382,7 +1384,12 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               </span>
               <span class="lv-squadacts">
                 <button class="lv-scoutbtn ghost" title="per-skill breakdown" @click="toggleExpand('s:'+sp.id)">{{ expanded.has('s:'+sp.id) ? '▾' : '▸' }}</button>
-                <button v-if="sp.contractYears > 0 && sp.contractYears <= 1" class="lv-scoutbtn renew" :disabled="marketBusy" :title="`re-sign at his current wage (${kfmt(sp.renew)}/yr) — or he walks free at season's end`" @click="renew(sp)">renew</button>
+                <template v-if="sp.contractYears > 0 && sp.contractYears <= 1">
+                  <select v-if="sp.renewTerms" class="lv-renewsel" :value="renewYears[sp.id] ?? 3" title="negotiate the TERM: a short deal costs a premium (he wants security), a long one earns a discount but locks the wage across his trajectory" @change="renewYears = { ...renewYears, [sp.id]: +($event.target as HTMLSelectElement).value }">
+                    <option v-for="t in sp.renewTerms" :key="t.years" :value="t.years">{{ t.years }}y · {{ kfmt(t.wage) }}/y</option>
+                  </select>
+                  <button class="lv-scoutbtn renew" :disabled="marketBusy" :title="`re-sign for ${renewYears[sp.id] ?? 3} year(s) at ${kfmt(renewWageFor(sp))}/yr — or he walks free at season's end`" @click="renew(sp)">renew</button>
+                </template>
                 <button v-if="sp.loan" class="lv-scoutbtn" :disabled="marketBusy" title="recall him from the loan — back in your fielding pool (and back to bench reps unless you start him)" @click="doRecall(sp)">⇆ recall</button>
                 <template v-else>
                   <button v-if="canStart(sp)" class="lv-scoutbtn start" :disabled="marketBusy" title="field him — starters get reps and develop" @click="startReserve(sp)">▶ start</button>

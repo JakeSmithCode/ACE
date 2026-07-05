@@ -1736,10 +1736,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (!account) return json(res, 401, { error: 'no account' });
       const mine = await myClub(store, id, account);
       if (!mine) return json(res, 404, { error: 'you own no club' });
-      const b = (await readBody(req)) as { playerId?: string };
+      const b = (await readBody(req)) as { playerId?: string; years?: number };
       if (!mine.roster.some(p => p.id === b.playerId)) return json(res, 404, { error: 'not on your roster' });
       const w = (await store.loadWorld(id))!;
-      const clubs = w.clubs.map(c => c.id === mine.id ? { ...c, roster: renewContract(c.roster, b.playerId!, w.patch) } : c);
+      const clubs = w.clubs.map(c => c.id === mine.id ? { ...c, roster: renewContract(c.roster, b.playerId!, w.patch, b.years) } : c);
       await store.saveWorld(id, { ...w, clubs });
       const after = (await store.loadWorld(id))!;
       return json(res, 200, { ok: true, squad: squadView(after, after.clubs.find(c => c.id === mine.id)!) });

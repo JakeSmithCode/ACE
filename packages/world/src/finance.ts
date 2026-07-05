@@ -35,6 +35,16 @@ export const demandWage = (p: Player, patch?: PatchState): number => playerWage(
 export const newContract = (p: Player, patch?: PatchState, years = CONTRACT_YEARS): { wage: number; years: number } =>
   ({ wage: playerWage(p, patch), years });
 
+/** Term negotiation (the CS-manager salary-negotiation staple): a SHORT deal costs a
+ *  premium (the player wants security), a LONG one earns a yearly discount but locks the
+ *  wage across his trajectory — a bargain if he blooms, a burden if he fades. 3y is the
+ *  neutral market deal (×1.0, exactly `newContract`), so existing flows are byte-identical. */
+export const TERM_MUL: Record<number, number> = { 1: 1.12, 2: 1.05, 3: 1.0, 4: 0.94, 5: 0.9 };
+export const negotiatedContract = (p: Player, years: number, patch?: PatchState): { wage: number; years: number } => {
+  const y = Math.max(1, Math.min(5, Math.round(years)));
+  return { wage: Math.round(playerWage(p, patch) * (TERM_MUL[y] ?? 1)), years: y };
+};
+
 /** Income for finishing the season at `rank` (1 = champion) in an `n`-club league:
  *  a base sponsor cheque plus placement prize money. */
 export function seasonIncome(rank: number, n: number): { sponsor: number; prize: number } {
