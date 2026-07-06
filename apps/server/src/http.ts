@@ -454,11 +454,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   interface TransferOffer { id: number; from: string; fromTag: string; to: string; toTag: string; playerId: string; handle: string; amount: number; status: 'pending' | 'accepted' | 'declined' | 'withdrawn'; season: number; day: number; at: number }
   const transferOffers: TransferOffer[] = [];
   let transferSeq = 0;
+  // season individual honours (MVP + Young Gun), crowned at each rollover from
+  // the real stat tallies — the Hall of Fame remembers people, not just clubs
+  interface SeasonAward { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }
+  const seasonAwards: SeasonAward[] = [];
   const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
     friendlies, friendlySeq,
     playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
     honors, worldCupHistory, cupHistory,
-    transferOffers, transferSeq,
+    transferOffers, transferSeq, seasonAwards,
   });
   {
     const social = await store.loadAccountData(id, SOCIAL_KEY);
@@ -471,6 +475,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (Array.isArray(social.worldCupHistory)) worldCupHistory.push(...(social.worldCupHistory as typeof worldCupHistory));
       if (Array.isArray(social.cupHistory)) cupHistory.push(...(social.cupHistory as typeof cupHistory));
       if (Array.isArray(social.transferOffers)) transferOffers.push(...(social.transferOffers as TransferOffer[]));
+      if (Array.isArray(social.seasonAwards)) seasonAwards.push(...(social.seasonAwards as SeasonAward[]));
       transferSeq = (social.transferSeq as number) ?? transferOffers.reduce((m, o) => Math.max(m, o.id), 0);
     }
   }
@@ -638,6 +643,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     const mvpAcc = new Map<string, PlayerStat>();
     for (const f of await store.fixtures(id, w.season)) { if (fixtureStatus(f, clock()) !== 'resolved') continue; const tl = timelines.get(key(f)); if (tl) tallyTimeline(tl, mvpAcc); }
     const mvp = [...mvpAcc.values()].sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
+    // the YOUNG GUN: the best U22 in the watched division — the development model's
+    // poster child (handles are globally unique, so the roster lookup is exact)
+    const ageOf = (handle: string) => { for (const c of w.clubs) { const pp = c.roster.find(x => x.handle === handle); if (pp) return pp.age; } return 99; };
+    const yg = [...mvpAcc.values()].filter(r2 => ageOf(r2.handle) <= 21)
+      .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths))[0];
     // World Cup: crown the finishing season's champion NATION + its elected MANAGER (the
     // trophy is theirs) from the pre-rollover world, and record it into the legacy.
     const wcv = ensureWorldCup(w);
@@ -700,6 +710,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     }
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); await persistSocial(); }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
+    if (yg && yg.handle !== mvp?.handle) pushNews('award', `Season ${roll.season} Young Gun: ${yg.handle} (${yg.club}), ${ageOf(yg.handle)} — ${yg.kills} kills. A star is forming.`, roll.season, liveDay);
+    seasonAwards.push({ season: roll.season,
+      mvp: mvp ? { handle: mvp.handle, club: mvp.club, kills: mvp.kills } : null,
+      youngGun: yg ? { handle: yg.handle, club: yg.club, kills: yg.kills, age: ageOf(yg.handle) } : null });
+    await persistSocial();
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
     if (cupChampClub) {
       pushNews('champion', `🏆 ${cupChampClub.tag} lift the Season ${roll.season} ACE Cup`, roll.season, liveDay);
@@ -719,6 +734,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (pos) notify(c.owner, 'season', `Season ${roll.season}: ${c.tag} finished ${ord(pos)} in ${tierName(c.tier)}`, roll.season, liveDay);
         if (roll.champion === c.tag) notify(c.owner, 'award', `🏆 ${c.tag} are Season ${roll.season} champions!`, roll.season, liveDay);
         if (mvp && c.roster.some(p => p.handle === mvp.handle)) notify(c.owner, 'award', `★ Your player ${mvp.handle} won Season ${roll.season} MVP (${mvp.kills} kills)`, roll.season, liveDay);
+        if (yg && yg.handle !== mvp?.handle && c.roster.some(p => p.handle === yg.handle)) notify(c.owner, 'award', `★ Your player ${yg.handle} is the Season ${roll.season} Young Gun — the development is paying off`, roll.season, liveDay);
         // career log: one record for the season just finished (the Trophy Room aggregates these).
         const post = postWorld.clubs.find(x => x.id === c.id);
         const promoted = !!post && post.tier < c.tier, relegated = !!post && post.tier > c.tier;
@@ -1215,7 +1231,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'honors' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       const allTime = w.clubs.filter(c => c.titles > 0).map(c => ({ tag: c.tag, name: c.name, titles: c.titles })).sort((a, b) => b.titles - a.titles || a.tag.localeCompare(b.tag));
-      return json(res, 200, { honors: [...honors].reverse(), allTime });
+      return json(res, 200, { honors: [...honors].reverse(), allTime, awards: [...seasonAwards].reverse().slice(0, 10) });
     }
     // GET /leaderboard  → the world's best players (cross-club prestige board), optional ?role=
     if (path[0] === 'leaderboard' && path.length === 1) {

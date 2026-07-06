@@ -766,7 +766,7 @@ const tableGroup = computed(() => tableTier.value === (myClub.value?.tier ?? -1)
 function pickTier(t: number) { viewTier.value = t === (myClub.value?.tier ?? 0) ? null : t; void refreshTable(); }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
-const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>({ honors: [], allTime: [] });
+const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
 
 // the world news feed — a live ticker of transfers + champions (the world feels alive)
@@ -1809,6 +1809,14 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div v-for="h in hof.honors.slice(0, 6)" :key="h.season" class="lv-hofseason">
               <span class="lv-hofsno">S{{ h.season }}</span><span>🏆</span><b class="lv-cname clickable" @click="openClub(h.champion)">{{ h.champion }}</b>
             </div>
+            <template v-if="hof.awards?.length">
+              <div class="lv-hofsec">Individual honours</div>
+              <div v-for="a in hof.awards.slice(0, 5)" :key="'aw' + a.season" class="lv-hofseason">
+                <span class="lv-hofsno">S{{ a.season }}</span>
+                <span v-if="a.mvp" :title="`${a.mvp.kills} kills across the season`">★ MVP <b>{{ a.mvp.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.mvp.club)">{{ a.mvp.club }}</i></span>
+                <span v-if="a.youngGun && a.youngGun.handle !== a.mvp?.handle" :title="`the best under-22 — ${a.youngGun.kills} kills at ${a.youngGun.age}`">☄ Young Gun <b>{{ a.youngGun.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.youngGun.club)">{{ a.youngGun.club }}</i></span>
+              </div>
+            </template>
           </template>
           <div v-else class="lv-hofempty">No champions crowned yet.<br />Advance a full season to make history.</div>
         </div>
