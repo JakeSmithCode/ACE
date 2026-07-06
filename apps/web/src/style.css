@@ -2096,3 +2096,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
   /* standings + hall-of-fame tables: contain their own width */
   .lv-table,.lv-hof{overflow-x:auto;-webkit-overflow-scrolling:touch}
 }
+/* the server-owned world clock: countdown to the scheduled tick */
+.lv-nexttick{font-size:11px;letter-spacing:.05em;color:#8fd3e8;border:1px solid #2f6c7e;border-radius:10px;padding:3px 11px;white-space:nowrap}
+.lv-nexttick b{font-variant-numeric:tabular-nums}

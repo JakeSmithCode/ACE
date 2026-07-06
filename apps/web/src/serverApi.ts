@@ -6,7 +6,7 @@
 // ownership write-path (claim/plan) rides the same base.
 import type { MatchInput, MapId, Tactics, MatchTimeline } from '@ace/shared';
 
-export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number; broadcastDay: number; lastDay: number; kickoffAt: number; revealAt: number; now: number }
+export interface WorldSummary { id: string; region: string; season: number; day: number; tiers: number; layout: number[]; divisions: number; clubs: number; broadcastDay: number; lastDay: number; kickoffAt: number; revealAt: number; now: number; autoAdvanceSecs?: number; nextTickAt?: number | null; manualAdvance?: boolean }
 export interface StandingRow { club: string; played: number; won: number; lost: number; diff: number; points: number }
 export interface ClubLabel { tag: string; name: string }
 export interface LiveFixture {

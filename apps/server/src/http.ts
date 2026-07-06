@@ -31,8 +31,12 @@ export interface LiveServerOpts {
   clock?: () => number;   // seconds; default real wall-clock
   /** If set, a Scheduler auto-advances the world a match-day every N seconds — the
    *  production "matches resolve on a schedule" behaviour (BullMQ in prod; an in-process
-   *  IntervalScheduler here). Unset → manual /advance only. */
+   *  IntervalScheduler here). The tick is the ONLY thing that owns the world clock. */
   autoAdvanceSecs?: number;
+  /** DEV/DEMO ONLY: allow `POST /advance` to tick the shared world's clock from a
+   *  client. Default FALSE — in the product no user action may advance a match-day
+   *  (one player must never move time for everyone); the scheduled tick owns it. */
+  allowManualAdvance?: boolean;
   /** Event-bus replay backlog size (tests shrink it to exercise the resync path). */
   eventBacklogMax?: number;
   /** DEPLOYMENT SEAM — inject durable stores and the server RESUMES the world they
@@ -534,6 +538,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
    *  At the season boundary it rolls the season over (playoffs → settle → develop →
    *  patch → promote/relegate) and puts the NEW season's day 0 on air — so the season
    *  cycle completes: a champion is crowned and a fresh season begins. */
+  let nextTickAt: number | null = null;   // when the scheduled tick next fires (the client countdown)
   const advance = async (): Promise<{ broadcastDay: number; done: boolean; rollover?: boolean; season?: number; champion?: string; rivalSignings?: number }> => {
     const tickDay = async (w: WorldState) => {
       liveKickoff = clock();
@@ -1501,11 +1506,16 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // live broadcast cursor so the client streams the right match-day)
     if (path[0] === 'world' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
-      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs, lastDay: seasonLength(w) - 1, now });
+      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs, lastDay: seasonLength(w) - 1, now,
+        // the world-clock contract: who advances time and when the next tick lands
+        autoAdvanceSecs: opts.autoAdvanceSecs ?? 0, nextTickAt, manualAdvance: !!opts.allowManualAdvance });
     }
-    // POST /advance  → tick the next match-day onto the air (owner action; the
-    // scheduler does this in production). The day reveals, the standings move.
+    // POST /advance — DEV/DEMO ONLY. The world clock is SERVER-OWNED: match-days
+    // resolve on the scheduled tick, never on a user's click (one player must not
+    // move time for everyone). A server booted without the explicit dev opt-in
+    // refuses this outright.
     if (path[0] === 'advance' && req.method === 'POST') {
+      if (!opts.allowManualAdvance) return json(res, 403, { error: 'the world clock is server-owned — match-days resolve on the scheduled tick' });
       if (!account) return json(res, 401, { error: 'no account' });
       return json(res, 200, await advance());
     }
@@ -1818,7 +1828,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   let scheduler: Scheduler | null = null;
   if (opts.autoAdvanceSecs) {
     scheduler = new IntervalScheduler(opts.autoAdvanceSecs * 1000);
-    scheduler.start(() => advance());
+    nextTickAt = clock() + opts.autoAdvanceSecs;
+    scheduler.start(async () => { await advance(); nextTickAt = clock() + opts.autoAdvanceSecs!; });
   }
 
   return new Promise(resolve => {

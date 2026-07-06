@@ -668,6 +668,21 @@ function openStream() {
 // advance the season a match-day — your authored tactics drive your next fixtures.
 // at the season boundary it rolls over (playoffs → champion → new season).
 const champBanner = ref<{ season: number; champion: string } | null>(null);
+// the world clock is SERVER-OWNED: when manual advance is off (the product), the
+// UI shows a countdown to the scheduled tick instead of a button. Offset-corrected
+// against the server's own `now` so a skewed client clock can't lie.
+const clockTick = ref(0);
+setInterval(() => clockTick.value++, 1000);
+const nextTickIn = computed(() => {
+  void clockTick.value;
+  if (!world.value?.nextTickAt) return null;
+  const offset = world.value.now - connectedAtLocal;   // server now vs our clock at fetch
+  const left = Math.round(world.value.nextTickAt - offset - Date.now() / 1000);
+  return left > 0 ? left : 0;
+});
+let connectedAtLocal = Date.now() / 1000;
+vueWatch(world, w => { if (w) connectedAtLocal = Date.now() / 1000; });
+const mmss = (s2: number) => `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`;
 const wireNote = ref('');
 async function advance() {
   if (!server.value || !token.value) return;
@@ -1681,7 +1696,8 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span class="lv-livetag" :class="{ on: anyLive }">{{ anyLive ? '● LIVE' : allDone ? 'FINAL' : '—' }}</span>
           <span class="lv-embargo" v-if="anyLive">results sealed until each broadcast ends — no spoilers</span>
           <button v-if="myClub && allDone && world && DAY < world.lastDay && !myClub.teamTalk" class="lv-talknudge" title="you haven't set a team talk for the next match — the right tone gives an edge" @click="showPanel('tactics')">◆ set a team talk</button>
-          <button v-if="myClub && allDone && world && DAY < world.lastDay" class="lv-advance" :disabled="advancing" @click="advance">▶ advance match-day</button>
+          <button v-if="myClub && allDone && world && world.manualAdvance && DAY < world.lastDay" class="lv-advance" :disabled="advancing" title="DEV world — production clocks are server-owned" @click="advance">▶ advance match-day</button>
+          <span v-else-if="world && !world.manualAdvance && nextTickIn != null" class="lv-nexttick" :title="`the world clock is server-owned — a match-day resolves every ${Math.round((world.autoAdvanceSecs ?? 0) / 60)} min on the scheduled tick, for everyone at once`">⏱ next match-day in <b>{{ mmss(nextTickIn) }}</b></span>
           <span v-else-if="myClub && allDone && world && DAY >= world.lastDay" class="lv-seasondone">season complete · playoffs next</span>
         </div>
         <div class="lv-cards">

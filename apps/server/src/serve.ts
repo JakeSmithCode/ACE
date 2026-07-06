@@ -21,14 +21,24 @@ const argv = process.argv.slice(2);
 const flag = (n: string, d: number) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? parseInt(argv[i + 1], 10) : d; };
 const env = (n: string) => process.env[n];
 
+// THE WORLD CLOCK IS SERVER-OWNED: match-days resolve on the scheduled tick,
+// never on a user's click. Default cadence 900s (a match-day every 15 min);
+// `--auto 0` freezes the clock, which only makes sense with the dev opt-in
+// below. `POST /advance` is refused unless ACE_DEV_ADVANCE=1 / --dev-advance
+// (local development + the verification suites), so no deployment can ship a
+// user-advanceable shared world by accident.
+const devAdvance = argv.includes('--dev-advance') || env('ACE_DEV_ADVANCE') === '1';
+const auto = flag('auto', Number(env('ACE_AUTO') ?? (devAdvance ? 0 : 900)));
 const opts: LiveServerOpts = {
   seed: flag('seed', Number(env('ACE_SEED') ?? 7)),
   broadcastSecs: flag('broadcast', Number(env('ACE_BROADCAST') ?? 600)),
   port: flag('port', Number(env('PORT') ?? 8787)),
-  autoAdvanceSecs: flag('auto', Number(env('ACE_AUTO') ?? 0)),
+  autoAdvanceSecs: auto,
+  allowManualAdvance: devAdvance,
   jwtSecret: env('ACE_JWT_SECRET'),
   stripeWebhookSecret: env('STRIPE_WEBHOOK_SECRET'),
 };
+if (!auto && !devAdvance) console.warn('  ⚠ world clock FROZEN: no scheduler (--auto 0) and no --dev-advance — nothing can advance a match-day.');
 
 // DATABASE_URL → the durable Pg stores. `pg` is deliberately NOT a dependency of
 // this zero-dep slice (PgStore takes an injected Queryable); a deployment that
@@ -56,7 +66,8 @@ console.log(`\n  ACE live server · ${srv.url} · world ${srv.id}`);
 console.log(revealIn > 0
   ? `  match-day ${health.broadcastDay + 1} live now — reveals in ~${revealIn}s. Point the web Match Center here.`
   : `  resumed at match-day ${health.broadcastDay + 1} (history revealed). Point the web Match Center here.`);
-if (opts.autoAdvanceSecs) console.log(`  ⏱ scheduled tick worker ON — auto-advancing a match-day every ${opts.autoAdvanceSecs}s (the BullMQ job's contract).`);
+if (opts.autoAdvanceSecs) console.log(`  ⏱ scheduled tick worker ON — a match-day every ${opts.autoAdvanceSecs}s (the server owns the clock; the BullMQ job's contract).`);
+if (devAdvance) console.log('  ⚠ DEV MODE: manual POST /advance enabled — never run production with this flag.');
 console.log('');
 console.log(`  GET /world · /standings/1/0/0 · /schedule/0/0 · /live/1/0 (SSE) · /fixtures/1/0/:slot[/replay]\n`);
 

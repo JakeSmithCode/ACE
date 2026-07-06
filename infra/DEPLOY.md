@@ -30,8 +30,11 @@ pnpm run server:serve
 
 - `ACE_JWT_SECRET` **must** be stable — with the Pg account store it keeps every
   issued session valid across restarts/deploys.
-- `ACE_AUTO` is the scheduled tick worker (seconds between match-days). Omit for
-  a manually-advanced world.
+- `ACE_AUTO` is the scheduled tick worker (seconds between match-days). **The
+  world clock is server-owned**: this tick is the only thing that advances a
+  match-day. Omitted → defaults to 900s. `POST /advance` is always refused
+  (403) unless `ACE_DEV_ADVANCE=1` / `--dev-advance` — a dev/demo flag that must
+  never ship: one player must not move time for everyone.
 - `STRIPE_WEBHOOK_SECRET` arms `POST /billing/webhook` with Stripe's exact
   signature scheme — point a real Stripe endpoint at it and VIP flows with no
   code change (the hosted-checkout session creation is the one remaining SDK call).
