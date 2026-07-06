@@ -458,11 +458,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // the real stat tallies — the Hall of Fame remembers people, not just clubs
   interface SeasonAward { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }
   const seasonAwards: SeasonAward[] = [];
+  // ALL-TIME player careers: each rollover folds the finishing season's stat tally
+  // into this ledger, so legends accumulate across seasons (handles are globally
+  // unique; `club` tracks the latest). Durable — legends survive restarts.
+  const careerStats: Record<string, PlayerStat & { seasons: number }> = {};
   const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
     friendlies, friendlySeq,
     playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
     honors, worldCupHistory, cupHistory,
-    transferOffers, transferSeq, seasonAwards,
+    transferOffers, transferSeq, seasonAwards, careerStats,
   });
   {
     const social = await store.loadAccountData(id, SOCIAL_KEY);
@@ -476,6 +480,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (Array.isArray(social.cupHistory)) cupHistory.push(...(social.cupHistory as typeof cupHistory));
       if (Array.isArray(social.transferOffers)) transferOffers.push(...(social.transferOffers as TransferOffer[]));
       if (Array.isArray(social.seasonAwards)) seasonAwards.push(...(social.seasonAwards as SeasonAward[]));
+      if (social.careerStats && typeof social.careerStats === 'object') Object.assign(careerStats, social.careerStats as typeof careerStats);
       transferSeq = (social.transferSeq as number) ?? transferOffers.reduce((m, o) => Math.max(m, o.id), 0);
     }
   }
@@ -714,6 +719,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     seasonAwards.push({ season: roll.season,
       mvp: mvp ? { handle: mvp.handle, club: mvp.club, kills: mvp.kills } : null,
       youngGun: yg ? { handle: yg.handle, club: yg.club, kills: yg.kills, age: ageOf(yg.handle) } : null });
+    for (const r2 of mvpAcc.values()) {
+      const c2 = careerStats[r2.handle] ?? { handle: r2.handle, club: r2.club, role: r2.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0, clutch: 0, seasons: 0 };
+      careerStats[r2.handle] = { ...c2, club: r2.club, role: r2.role, kills: c2.kills + r2.kills, deaths: c2.deaths + r2.deaths, matches: c2.matches + r2.matches, fb: c2.fb + r2.fb, mvp: c2.mvp + r2.mvp, hs: c2.hs + r2.hs, clutch: c2.clutch + r2.clutch, seasons: c2.seasons + 1 };
+    }
     await persistSocial();
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
     if (cupChampClub) {
@@ -1270,6 +1279,25 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         statsMemo = { key: memoKey, body: { season: w.season, players } };
       }
       return json(res, 200, statsMemo.body);
+    }
+    // GET /stats/career  → the ALL-TIME ledger (folded at each rollover + the live
+    // season on top, so a career never looks frozen mid-season)
+    if (path[0] === 'stats' && path[1] === 'career') {
+      const w = (await store.loadWorld(id))!;
+      const rows = await store.fixtures(id, w.season);
+      const acc = new Map<string, PlayerStat>();
+      for (const f of rows) if (fixtureStatus(f, now) === 'resolved' && timelines.has(key(f))) tallyTimeline(timelines.get(key(f))!, acc);
+      const merged = new Map<string, PlayerStat & { seasons: number }>();
+      for (const c2 of Object.values(careerStats)) merged.set(c2.handle, { ...c2 });
+      for (const r2 of acc.values()) {
+        const c2 = merged.get(r2.handle) ?? { handle: r2.handle, club: r2.club, role: r2.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0, clutch: 0, seasons: 0 };
+        merged.set(r2.handle, { ...c2, club: r2.club, role: r2.role, kills: c2.kills + r2.kills, deaths: c2.deaths + r2.deaths, matches: c2.matches + r2.matches, fb: c2.fb + r2.fb, mvp: c2.mvp + r2.mvp, hs: c2.hs + r2.hs, clutch: c2.clutch + r2.clutch, seasons: c2.seasons + (r2.matches ? 1 : 0) });
+      }
+      const players = [...merged.values()]
+        .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
+        .slice(0, 25)
+        .map((s2, i) => ({ rank: i + 1, ...s2, kd: s2.deaths ? Math.round((s2.kills / s2.deaths) * 100) / 100 : s2.kills, hsPct: s2.kills ? Math.round((s2.hs / s2.kills) * 100) : 0 }));
+      return json(res, 200, { players });
     }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
     if (path[0] === 'notifications' && path.length === 1 && (req.method ?? 'GET') === 'GET') {

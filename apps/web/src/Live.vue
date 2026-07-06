@@ -924,7 +924,16 @@ async function watchCupTie(t: CupTieView) {
 // season stat leaders — top fraggers from the watched (Premier) matches that have played
 const statRows = ref<StatRow[]>([]);
 const statsOpen = ref(false);
-async function loadStats() { if (server.value) try { statRows.value = (await server.value.stats()).players; } catch { /* transient */ } }
+const statScope = ref<'season' | 'career'>('season');
+async function loadStats() {
+  if (!server.value) return;
+  try {
+    statRows.value = statScope.value === 'career'
+      ? (await server.value.careerStats()).players
+      : (await server.value.stats()).players;
+  } catch { /* transient */ }
+}
+async function setStatScope(sc: 'season' | 'career') { statScope.value = sc; await loadStats(); }
 async function toggleStats() { statsOpen.value = !statsOpen.value; if (statsOpen.value) await loadStats(); }
 
 // --- watch a revealed fixture back in the viewer (live or via a shared link) ---
@@ -1873,8 +1882,12 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       <!-- season stat leaders — top fraggers from the matches that have played -->
       <div id="sec-stats" class="lv-leaders">
         <div class="lv-tableh">
-          <button class="lv-kicker btn" @click="toggleStats">🎯 Season stat leaders <i class="lv-disc" :class="{ open: statsOpen }">▾</i></button>
-          <span class="lv-note">top fraggers from Premier matches played so far this season</span>
+          <button class="lv-kicker btn" @click="toggleStats">🎯 Stat leaders <i class="lv-disc" :class="{ open: statsOpen }">▾</i></button>
+          <template v-if="statsOpen">
+            <button class="lv-tierchip" :class="{ on: statScope === 'season' }" @click="setStatScope('season')">this season</button>
+            <button class="lv-tierchip" :class="{ on: statScope === 'career' }" title="all-time — folded into the ledger at every rollover, plus the live season" @click="setStatScope('career')">all-time</button>
+          </template>
+          <span class="lv-note">{{ statScope === 'career' ? 'career numbers across every season (the legends board)' : 'top fraggers from Premier matches played so far this season' }}</span>
         </div>
         <template v-if="statsOpen">
           <div class="lv-ldboard">
