@@ -2095,6 +2095,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
   .lv-ident{padding:9px 10px;gap:8px}
   /* standings + hall-of-fame tables: contain their own width */
   .lv-table,.lv-hof{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* thumb-sized touch targets on the primary actions (44px is the floor) */
+  .lv-planbtn,.lv-go,.lv-watch,.lv-advance,.lv-signin,.lv-tierchip{min-height:38px;padding-top:8px;padding-bottom:8px}
+  .lv-scoutbtn,.lv-sellbtn,.lv-mktbid,.lv-capb{min-height:34px;min-width:34px}
+  .ace-controls .play,.ace-controls .nav,.ace-controls .speed{min-height:40px}
+  .lv-quicknav button{min-height:34px}
 }
 /* the server-owned world clock: countdown to the scheduled tick */
 .lv-nexttick{font-size:11px;letter-spacing:.05em;color:#8fd3e8;border:1px solid #2f6c7e;border-radius:10px;padding:3px 11px;white-space:nowrap}
