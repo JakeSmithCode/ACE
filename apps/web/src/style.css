@@ -2059,3 +2059,40 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-nmready,.lv-nmtalk{font-size:10.5px;padding:2px 10px;border-radius:10px;border:1px solid;cursor:pointer;white-space:nowrap}
 .lv-nmready.ok,.lv-nmtalk.ok{color:#5fd38f;border-color:#2d5a41;background:rgba(60,180,110,.07)}
 .lv-nmready.warn,.lv-nmtalk.warn{color:#e8b03c;border-color:#5a4a24;background:rgba(230,170,60,.07)}
+
+/* ── mobile sweep (≤700px): wide content scrolls in its own container, chrome wraps ── */
+@media (max-width: 700px) {
+  /* app header: tabs wrap, the dev crumb goes (it pushed the shell to 631px) */
+  .ace-top{flex-wrap:wrap;height:auto;padding:8px 10px;gap:6px 10px}
+  .ace-top .crumb-r{display:none}
+  .ace-top .ace-nav{margin-left:0;flex-wrap:wrap;gap:4px}
+  .ace-top .ace-nav button{padding:5px 8px;font-size:10.5px}
+  .ace-stage{padding:12px 10px 26px;gap:14px}
+
+  /* quick-nav: one swipeable row, never two clipped ones */
+  .lv-quicknav{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .lv-quicknav::-webkit-scrollbar{display:none}
+  .lv-quicknav button{flex:none}
+
+  /* wide boards (market / squad / offer rows): the row keeps its grid and the
+     BOARD scrolls sideways — value + bid stay reachable instead of clipped */
+  .lv-mktboard{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .lv-mktrow{min-width:640px}
+  .lv-attrs{min-width:640px}
+  .lv-porounds{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .lv-frow{flex-wrap:wrap}
+
+  /* the broadcast controls wrap instead of spilling off-screen */
+  .ace-controls .row{flex-wrap:wrap}
+  .ace-controls .timer{font-size:18px;min-width:48px}
+  .ace-help-card .hcols{grid-template-columns:1fr}
+
+  /* hero + identity chips already wrap; tighten paddings a touch */
+  .lv-nextmatch{padding:8px 10px;gap:8px}
+  .lv-mktpanel{padding:10px 10px}
+  /* the club-management button group was the last fixed-width strip (442px) */
+  .lv-btngroup{flex-wrap:wrap}
+  .lv-ident{padding:9px 10px;gap:8px}
+  /* standings + hall-of-fame tables: contain their own width */
+  .lv-table,.lv-hof{overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
