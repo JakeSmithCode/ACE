@@ -945,7 +945,7 @@ export class Viewer {
     // reset the moment layer for the fresh round, then call the round in like a broadcast
     this.killsInRound.clear(); this.firstBloodDone = false; this.lastClutch = null; this.clearBanner();
     const atkCls = r.attacker === 0 ? 'att' : 'def';
-    this.announce('roundstart', `<i>ROUND ${r.n}</i><b class="${atkCls}">${this.tl.teams[r.attacker].tag}</b><s>attack ${r.site}</s>`, 1500);
+    this.announce('roundstart', `<i>${r.n > 24 ? `OVERTIME · R${r.n}` : `ROUND ${r.n}`}</i><b class="${atkCls}">${this.tl.teams[r.attacker].tag}</b><s>attack ${r.site}</s>`, 1500);
     this.lastSpikeTick = -1;
     if (this.playing) this.sfx.roundStart();
 
@@ -1060,7 +1060,7 @@ export class Viewer {
       if (planter) { this.spikePlantT = plant.t; this.spikePos = posLegs(planter, planter.legs, plant.t, planter.hitch); }
     }
 
-    this.roundLabel.innerHTML = `<b>ROUND ${r.n}</b> · <span class="${r.attacker === 0 ? 'att' : 'def'}">${this.tl.teams[r.attacker].tag}</span> attacking site ${r.site}`;
+    this.roundLabel.innerHTML = `<b>${r.n > 24 ? `⚡ OT · ROUND ${r.n}` : `ROUND ${r.n}`}</b> · <span class="${r.attacker === 0 ? 'att' : 'def'}">${this.tl.teams[r.attacker].tag}</span> attacking site ${r.site}`;
     // per-team ATK/DEF this round (the attacker alternates; the team colours don't)
     ([0, 1] as const).forEach(ti => { const atk = ti === r.attacker; this.sideTags[ti].textContent = atk ? 'ATTACK' : 'DEFENSE'; this.sideTags[ti].className = 'tside ' + (atk ? 'atk' : 'def'); });
     Array.from(this.strip.children).forEach((c, idx) => c.classList.toggle('cur', idx === i));

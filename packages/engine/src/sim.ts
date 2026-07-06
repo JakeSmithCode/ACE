@@ -1415,8 +1415,17 @@ export function simulateMatch(input: MatchInput, nav: Navmesh, forks = FORKS): M
   const loadouts = new Map<string, Loadout>();
   input.teams.forEach((team, ti) => addLoadouts(loadouts, team, input.comp?.[ti], input.patch));
 
+  // OVERTIME (the real rule): 12–12 doesn't end at 13–12 — OT plays on with sides
+  // alternating each round until someone LEADS BY TWO (14–12, 15–13, …). A hard cap
+  // keeps the sim finite: past round 33 the next decided round wins outright
+  // (sudden death). Matches that never reach 12–12 are BYTE-IDENTICAL (the end
+  // condition only differs once both sides hold 12).
+  const ended = () => {
+    const hi = Math.max(score[0], score[1]), diff = Math.abs(score[0] - score[1]);
+    return (hi >= 13 && diff >= 2) || (idx >= 33 && diff >= 1);
+  };
   let idx = 0;
-  while (score[0] < 13 && score[1] < 13 && idx < 30) {
+  while (!ended() && idx < 34) {
     const attacker: 0 | 1 = idx < 12 ? 0 : idx < 24 ? 1 : (idx % 2 === 0 ? 0 : 1);
     const defender: 0 | 1 = attacker === 0 ? 1 : 0;
     const round = simulateRound(rng, input, nav, idx + 1, attacker, { ...creds }, { ...lossStreak }, form, loadouts, tactics[attacker], tactics[defender], forks);
