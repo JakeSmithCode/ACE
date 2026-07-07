@@ -265,6 +265,8 @@ export class AceServer {
   /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
    *  (your playbooks/fitness/morale all bite), watchable at once, standings
    *  untouched. Works vs another human's club or any AI club (a scrim). */
+  forgot(email: string): Promise<{ sent: boolean; devResetToken?: string }> { return this.post('/auth/forgot', { email }); }
+  resetPassword(rtoken: string, password: string): Promise<{ reset?: boolean; error?: string }> { return this.post('/auth/reset', { token: rtoken, password }); }
   authProviders(): Promise<{ providers: { id: string; label: string }[] }> {
     return fetch(`${this.base}/auth/providers`).then(r => j(r));
   }

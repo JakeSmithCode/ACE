@@ -38,6 +38,11 @@ pnpm run server:serve
 - `STRIPE_WEBHOOK_SECRET` arms `POST /billing/webhook` with Stripe's exact
   signature scheme — point a real Stripe endpoint at it and VIP flows with no
   code change (the hosted-checkout session creation is the one remaining SDK call).
+- **Password recovery**: `POST /auth/forgot` + `/auth/reset` (migration
+  `0007_reset.sql`). Wire `LiveServerOpts.mailer` (any `(to, subject, text)`
+  sender — SES/Resend/SMTP) and reset+verification tokens are mailed, never
+  surfaced in responses; without a mailer the dev flow returns them inline.
+  A consumed reset revokes every live session for the account.
 - **Social sign-in (Google / Discord)**: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
   and/or `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` and the buttons light up.
   Register the callback `${ACE_PUBLIC_URL}/auth/oauth/<provider>/callback` with the

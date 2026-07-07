@@ -37,6 +37,13 @@ export interface AccountStore {
   /** Create a PASSWORDLESS, already-verified account (an OAuth sign-up: the
    *  provider vouched for the email). passwordHash '' can never pass login. */
   createVerified(email: string, now: number): Promise<Account>;
+  /** Password-reset tokens: stored HASHED (like refresh tokens), single-use, TTL'd. */
+  saveReset(accountId: string, hash: string, expiresAt: number): Promise<void>;
+  resetRow(hash: string): Promise<{ accountId: string; expiresAt: number; used: boolean } | undefined>;
+  consumeReset(hash: string): Promise<void>;
+  setPassword(accountId: string, passwordHash: string): Promise<void>;
+  /** Revoke EVERY live refresh token for an account (a reset logs out all sessions). */
+  revokeAllRefresh(accountId: string): Promise<void>;
 }
 
 export class MemoryAccountStore implements AccountStore {
@@ -77,6 +84,12 @@ export class MemoryAccountStore implements AccountStore {
     this.byEmailIdx.set(norm, acc.id);
     return acc;
   }
+  private resets = new Map<string, { accountId: string; expiresAt: number; used: boolean }>();
+  async saveReset(accountId: string, hash: string, expiresAt: number): Promise<void> { this.resets.set(hash, { accountId, expiresAt, used: false }); }
+  async resetRow(hash: string): Promise<{ accountId: string; expiresAt: number; used: boolean } | undefined> { return this.resets.get(hash); }
+  async consumeReset(hash: string): Promise<void> { const r = this.resets.get(hash); if (r) this.resets.set(hash, { ...r, used: true }); }
+  async setPassword(accountId: string, passwordHash: string): Promise<void> { const a = this.accounts.get(accountId); if (a) this.accounts.set(accountId, { ...a, passwordHash }); }
+  async revokeAllRefresh(accountId: string): Promise<void> { for (const [k, r] of this.refreshes) if (r.accountId === accountId) this.refreshes.set(k, { ...r, revoked: true }); }
 }
 
 export const ACCESS_TTL = 15 * 60;            // 15 min access token
@@ -121,6 +134,29 @@ export class AuthService {
     // a passwordless (OAuth-born) account can never log in with a password
     if (!acc || !acc.passwordHash || !verifyPassword(password ?? '', acc.passwordHash)) throw new Error('invalid email or password');
     return this.issue(acc.id);
+  }
+  /** Account recovery step 1: mint a single-use reset token (15 min TTL). Returns
+   *  it to the CALLER (the route mails it when a mailer is configured, or surfaces
+   *  it in dev) — and returns null for an unknown email WITHOUT signaling which
+   *  (the route always answers 200: no account enumeration). */
+  async forgot(email: string): Promise<string | null> {
+    const acc = await this.store.byEmail(email ?? '');
+    if (!acc) return null;
+    const tok = newRefreshToken();
+    await this.store.saveReset(acc.id, tokenHash(tok), Math.floor(this.clock()) + 15 * 60);
+    return tok;
+  }
+  /** Account recovery step 2: consume the token, set the new password, and revoke
+   *  EVERY live session (a reset means the old credential may be compromised). */
+  async reset(token: string, newPassword: string): Promise<boolean> {
+    if (!newPassword || newPassword.length < 8) throw new Error('an 8+ char password is required');
+    const hash = tokenHash(token ?? '');
+    const row = await this.store.resetRow(hash);
+    if (!row || row.used || Math.floor(this.clock()) > row.expiresAt) return false;
+    await this.store.consumeReset(hash);
+    await this.store.setPassword(row.accountId, hashPassword(newPassword));
+    await this.store.revokeAllRefresh(row.accountId);
+    return true;
   }
   /** Social sign-in: the provider proved the identity; we own the session. Order:
    *  a linked identity signs straight in; else a PROVIDER-VERIFIED email that

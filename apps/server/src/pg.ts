@@ -143,4 +143,20 @@ export class PgAccountStore implements AccountStore {
     } catch { throw new Error('email already registered'); }
     return { id, email: norm, passwordHash: '', createdAt: now, verified: true, verifyToken: null, vipUntil: null };
   }
+  async saveReset(accountId: string, hash: string, expiresAt: number): Promise<void> {
+    await this.db.query('insert into ace_reset (token_hash, account_id, expires_at, used) values ($1, $2, $3, false)', [hash, accountId, expiresAt]);
+  }
+  async resetRow(hash: string): Promise<{ accountId: string; expiresAt: number; used: boolean } | undefined> {
+    const r = await this.db.query('select account_id, expires_at, used from ace_reset where token_hash = $1', [hash]);
+    return r.rows[0] ? { accountId: r.rows[0].account_id as string, expiresAt: Number(r.rows[0].expires_at), used: !!r.rows[0].used } : undefined;
+  }
+  async consumeReset(hash: string): Promise<void> {
+    await this.db.query('update ace_reset set used = true where token_hash = $1', [hash]);
+  }
+  async setPassword(accountId: string, passwordHash: string): Promise<void> {
+    await this.db.query('update ace_account set password_hash = $1 where id = $2', [passwordHash, accountId]);
+  }
+  async revokeAllRefresh(accountId: string): Promise<void> {
+    await this.db.query('update ace_refresh set revoked = true where account_id = $1', [accountId]);
+  }
 }

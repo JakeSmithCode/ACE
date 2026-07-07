@@ -43,6 +43,26 @@ const myClub = ref<ClubPage | null>(null);
 const authOpen = ref(false);
 const authMode = ref<'register' | 'login'>('register');
 const oauthProviders = ref<{ id: string; label: string }[]>([]);
+// account recovery: forgot → (mailed or dev-surfaced) token → reset
+const forgotMode = ref(false);
+const resetToken = ref('');
+const resetNote = ref('');
+async function doForgot() {
+  if (!server.value) return; busy.value = true; authErr.value = '';
+  try {
+    const r = await server.value.forgot(email.value);
+    resetNote.value = r.devResetToken ? 'dev token filled below — set a new password' : 'if that email exists, a reset link is on its way';
+    if (r.devResetToken) resetToken.value = r.devResetToken;
+  } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
+async function doReset() {
+  if (!server.value) return; busy.value = true; authErr.value = '';
+  try {
+    const r = await server.value.resetPassword(resetToken.value, password.value);
+    if (r.reset) { resetNote.value = '✓ password reset — log in with it'; forgotMode.value = false; resetToken.value = ''; authMode.value = 'login'; }
+    else authErr.value = r.error ?? 'reset failed';
+  } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
 function oauthGo(pid: string) {
   if (!server.value) return;
   const back = new URL(location.href); back.searchParams.delete('oauthCode');
@@ -1275,7 +1295,16 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             </div>
             <input v-model="email" placeholder="email" class="lv-authin" spellcheck="false" />
             <input v-model="password" type="password" placeholder="password (8+ chars)" class="lv-authin" @keyup.enter="doAuth" />
-            <button class="lv-go sm" :disabled="busy" @click="doAuth">{{ authMode === 'register' ? 'Create account' : 'Log in' }}</button>
+            <button v-if="!forgotMode" class="lv-go sm" :disabled="busy" @click="doAuth">{{ authMode === 'register' ? 'Create account' : 'Log in' }}</button>
+            <template v-if="authMode === 'login'">
+              <button class="lv-forgot" @click="forgotMode = !forgotMode">{{ forgotMode ? '← back to log in' : 'forgot password?' }}</button>
+              <template v-if="forgotMode">
+                <button class="lv-go sm" :disabled="busy || !email" @click="doForgot">Send reset token</button>
+                <input v-model="resetToken" placeholder="reset token" class="lv-authin" spellcheck="false" />
+                <button class="lv-go sm" :disabled="busy || !resetToken || !password" title="uses the password field above as the NEW password" @click="doReset">Set new password</button>
+              </template>
+            </template>
+            <span v-if="resetNote" class="lv-verifynote">{{ resetNote }}</span>
             <button v-for="p in oauthProviders" :key="p.id" class="lv-oauth" :title="`sign in with ${p.label} — the provider proves who you are; your club and career live here`" @click="oauthGo(p.id)">
               ⬡ Continue with {{ p.label }}
             </button>

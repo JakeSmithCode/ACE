@@ -47,6 +47,10 @@ export interface LiveServerOpts {
   /** The server's public base URL (the OAuth redirect_uri host). Defaults to the
    *  local listen address — set it in any real deployment. */
   publicBase?: string;
+  /** Outbound mail seam (verification + password-reset). Configured → tokens are
+   *  MAILED and never appear in responses; omitted → the dev flow surfaces them
+   *  inline (an honest stand-in, same server gates). */
+  mailer?: (to: string, subject: string, text: string) => Promise<void>;
   /** DEPLOYMENT SEAM — inject durable stores and the server RESUMES the world they
    *  hold instead of seeding a fresh one: the day cursor, standings, ownership,
    *  academies/mail/social all come back (verified by the restart-resume test).
@@ -971,6 +975,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (path[1] === 'verify') {
           const acct = await auth.verifyEmail(b.token ?? '');
           return acct ? json(res, 200, { verified: true, accountId: acct }) : json(res, 400, { error: 'invalid or expired verification token' });
+        }
+        // account recovery: ALWAYS 200 (no account enumeration); the token is
+        // mailed when a mailer is configured, surfaced inline in dev
+        if (path[1] === 'forgot') {
+          const tok = await auth.forgot((b as { email?: string }).email ?? '');
+          if (tok && opts.mailer) { await opts.mailer((b as { email: string }).email, 'Reset your ACE password', `Your reset token (15 min): ${tok}`); return json(res, 200, { sent: true }); }
+          return json(res, 200, tok ? { sent: true, devResetToken: tok } : { sent: true });
+        }
+        if (path[1] === 'reset') {
+          const ok2 = await auth.reset((b as { token?: string }).token ?? '', (b as { password?: string }).password ?? '');
+          return ok2 ? json(res, 200, { reset: true }) : json(res, 400, { error: 'invalid or expired reset token' });
         }
       } catch (e) { return json(res, 401, { error: (e as Error).message }); }
       return json(res, 404, { error: 'unknown auth route' });
