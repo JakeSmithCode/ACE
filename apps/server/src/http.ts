@@ -1266,7 +1266,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'honors' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
       const allTime = w.clubs.filter(c => c.titles > 0).map(c => ({ tag: c.tag, name: c.name, titles: c.titles })).sort((a, b) => b.titles - a.titles || a.tag.localeCompare(b.tag));
-      return json(res, 200, { honors: [...honors].reverse(), allTime, awards: [...seasonAwards].reverse().slice(0, 10) });
+      // the INDUCTED — retirement completes a career; an exceptional one is enshrined:
+      // a season-MVP winner, or a monster body of work (1000+ career kills)
+      const mvpHandles = new Set(seasonAwards.map(a => a.mvp?.handle).filter(Boolean));
+      const legends = Object.values(careerStats)
+        .filter(c2 => (c2 as { retired?: boolean }).retired && (c2.kills >= 1000 || mvpHandles.has(c2.handle)))
+        .sort((a, b) => b.kills - a.kills)
+        .slice(0, 8)
+        .map(c2 => ({ handle: c2.handle, club: c2.club, kills: c2.kills, seasons: c2.seasons, mvps: seasonAwards.filter(a => a.mvp?.handle === c2.handle).length }));
+      return json(res, 200, { honors: [...honors].reverse(), allTime, awards: [...seasonAwards].reverse().slice(0, 10), legends });
     }
     // GET /leaderboard  → the world's best players (cross-club prestige board), optional ?role=
     if (path[0] === 'leaderboard' && path.length === 1) {

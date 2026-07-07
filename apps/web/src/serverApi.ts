@@ -149,7 +149,7 @@ export class AceServer {
   /** The World Cup legacy — past champions (nation + manager) + the title boards. */
   worldCupHonors(): Promise<WorldCupHonors> { return fetch(`${this.base}/worldcup/honors`).then(r => j<WorldCupHonors>(r)); }
   /** The Hall of Fame — season champions + all-time title leaders (the legacy engine). */
-  honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[] }> {
+  honors(): Promise<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }> {
     return fetch(`${this.base}/honors`).then(r => j<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[] }>(r));
   }
   /** A club's public page (identity, division, the fielded five) — read-only. */

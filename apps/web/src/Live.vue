@@ -766,7 +766,7 @@ const tableGroup = computed(() => tableTier.value === (myClub.value?.tier ?? -1)
 function pickTier(t: number) { viewTier.value = t === (myClub.value?.tier ?? 0) ? null : t; void refreshTable(); }
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
-const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[] }>({ honors: [], allTime: [] });
+const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
 
 // the world news feed — a live ticker of transfers + champions (the world feels alive)
@@ -1819,6 +1819,14 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div v-for="h in hof.honors.slice(0, 6)" :key="h.season" class="lv-hofseason">
               <span class="lv-hofsno">S{{ h.season }}</span><span>🏆</span><b class="lv-cname clickable" @click="openClub(h.champion)">{{ h.champion }}</b>
             </div>
+            <template v-if="hof.legends?.length">
+              <div class="lv-hofsec">🏛 Inducted — careers complete</div>
+              <div v-for="l in hof.legends" :key="'lg' + l.handle" class="lv-hofseason">
+                <span title="retired — enshrined for an exceptional career">🎙</span>
+                <b>{{ l.handle }}</b>
+                <span class="lv-hofname">{{ l.kills.toLocaleString() }} career kills · {{ l.seasons }} season(s)<template v-if="l.mvps"> · {{ l.mvps }}× MVP</template> · last of <i class="clickable" @click="openClub(l.club)">{{ l.club }}</i></span>
+              </div>
+            </template>
             <template v-if="hof.awards?.length">
               <div class="lv-hofsec">Individual honours</div>
               <div v-for="a in hof.awards.slice(0, 5)" :key="'aw' + a.season" class="lv-hofseason">
