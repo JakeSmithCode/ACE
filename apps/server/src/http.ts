@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, loanOut, recallLoan, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { fanSponsorMul, baseFans, cupRoundName, standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, loanOut, recallLoan, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -200,6 +200,8 @@ const publicClub = (w: WorldState, c: WorldClub) => {
   return {
     tag: c.tag, name: c.name, tier: c.tier, group: c.group, titles: c.titles, intlTitles: c.intlTitles ?? 0,
     owned: !ai, rating: Math.round(c.strength * 100), phase: clubPhase(team),
+    // the FOLLOWING: real for an owned club, the stature baseline for AI
+    fans: c.fans ?? baseFans(c.strength, c.tier, c.titles),
     // an AI club's tactical IDENTITY (Phase 5) — scout it to know how a rival plays; a
     // human-owned club authors its own tactics, so it has no fixed AI style.
     style: ai ? (({ archetype, label }) => ({ archetype, label }))(aiStyle(team)) : null,
@@ -619,6 +621,15 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // (deduped by fixture key, so the same event never double-notifies).
     const notifyOwners = async () => {
       const wn = (await store.loadWorld(id))!;
+      // the CUP DRAW SHOW: one world-news item per freshly-drawn round (owners or not)
+      {
+        const pend = wn.cup?.pending;
+        if (pend && !notifiedDraws.has(`world:${wn.season}:${pend.round}`)) {
+          notifiedDraws.add(`world:${wn.season}:${pend.round}`);
+          const marquee = [...pend.pairs].sort((x, y) => (wn.clubs[y[0]].strength + wn.clubs[y[1]].strength) - (wn.clubs[x[0]].strength + wn.clubs[x[1]].strength))[0];
+          if (marquee) pushNews('season', `🎱 Cup draw: ${cupRoundName(pend.pairs.length * 2)} — the marquee tie is ${wn.clubs[marquee[0]].tag} vs ${wn.clubs[marquee[1]].tag}`, wn.season, liveDay, wn.clubs[marquee[0]].tag);
+        }
+      }
       const owned = ownedClubs(wn);
       if (!owned.length) return;
       const rows = await store.fixtures(id, wn.season);
@@ -1780,7 +1791,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const facilities = c.facilities ?? defaultFacilities();
       const staff = c.staff ?? {};
       const ci = wm.clubs.findIndex(x => x.id === c.id);
-      const sponsorList = c.sponsor ? [] : sponsorOffers(wm.seed, wm.season, c.strength, ci).map(o => ({ ...o, goalText: sponsorGoalText(o) }));
+      const fanMul = fanSponsorMul(c.fans, baseFans(c.strength, c.tier, c.titles));
+      const sponsorList = c.sponsor ? [] : sponsorOffers(wm.seed, wm.season, c.strength, ci).map(o => ({ ...o, base: Math.round(o.base * fanMul), bonus: Math.round(o.bonus * fanMul), goalText: sponsorGoalText(o) }));
       // the board's brief: the target + live rank vs it (from resolved fixtures) + confidence
       const meRows = await store.fixtures(id, wm.season);
       const meTable = standingsView(wm, meRows, c.tier, c.group, clock());
@@ -1809,7 +1821,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const w = (await store.loadWorld(id))!;
       const ci = w.clubs.findIndex(x => x.id === mine.id);
       if (w.clubs[ci].sponsor) return json(res, 200, { ok: false, reason: 'already signed' });
-      const offers = sponsorOffers(w.seed, w.season, w.clubs[ci].strength, ci);
+      const fanMul2 = fanSponsorMul(w.clubs[ci].fans, baseFans(w.clubs[ci].strength, w.clubs[ci].tier, w.clubs[ci].titles));
+      const offers = sponsorOffers(w.seed, w.season, w.clubs[ci].strength, ci).map(o => ({ ...o, base: Math.round(o.base * fanMul2), bonus: Math.round(o.bonus * fanMul2) }));
       const b = (await readBody(req)) as { index?: number };
       const offer = offers[b.index ?? -1];
       if (!offer) return json(res, 400, { error: 'no such offer' });

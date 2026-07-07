@@ -76,6 +76,10 @@ export interface WorldClub {
    *  rusts). Auto-returns at the rollover. Additive/owner-scoped: undefined =
    *  byte-identical worlds. */
   loans?: Loan[];
+  /** The club's FOLLOWING (owner-scoped; AI clubs display `baseFans`). Grows on
+   *  wins/derbies/star power, decays on losses, and scales the sponsor table
+   *  (`fanSponsorMul`). Additive: undefined → ×1 everywhere, byte-identical. */
+  fans?: number;
 }
 
 export interface Loan { playerId: string; host: string; hostTag: string; hostTier: number; season: number }

@@ -2136,3 +2136,4 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-feattag{position:absolute;top:-8px;left:12px;font-size:9px;letter-spacing:.12em;font-weight:800;color:#e8b03c;background:#141212;border:1px solid #5a4a24;border-radius:8px;padding:1px 8px}
 .lv-cuproundh.draw{color:#e8b03c;letter-spacing:.1em}
 .lv-cupscore.vs{font-size:10px;color:#8a90a0;letter-spacing:.1em}
+.lv-fans{font-size:11px;color:#c78ae8;letter-spacing:.04em;white-space:nowrap}

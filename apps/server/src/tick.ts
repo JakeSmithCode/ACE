@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { type Retirement, resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, CAMP_FAT, MAP_POOL, mapAffinity, type Bracket, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { tickFans, baseFans, type Retirement, resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, CAMP_FAT, MAP_POOL, mapAffinity, type Bracket, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -108,6 +108,7 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
   const resultOf = new Map<number, MatchResult>();
   for (const r of results) { resultOf.set(r.home, r); resultOf.set(r.away, r); }
   const derbyByIdx = new Map<number, boolean>();   // owned club idx → won its derby this day (for the H2H tally)
+  const fansByIdx = new Map<number, number>();     // owned club idx → the day's fan movement
   let clubsOut = clubs;
   const ownedIdx = w.clubs.map((c, i) => (c.owner ? i : -1)).filter(i => i >= 0);
   if (ownedIdx.length) {
@@ -131,13 +132,18 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
         injured: id => isInjured(fit, id), sharpnessCamp: c.camp === 'sharpness',
       });
       if (derby && won != null) derbyByIdx.set(i, won);   // record the derby result for the H2H tally
+      // the FANBASE moves with the result (wins build the brand, a derby win
+      // travels, star accolades keep the pull) — owner-scoped, ×1 when absent
+      const accolades = c.roster.reduce((n, p) => n + (p.accolades?.length ?? 0), 0);
+      fansByIdx.set(i, tickFans(c.fans ?? baseFans(c.strength, c.tier, c.titles), { won, derby, accolades }));
     }
     fitness = fit; morale = mor;
     // the team talk was a one-shot for this match — clear it; a derby updates the H2H record
     clubsOut = clubs.map((c, idx) => {
       const d = derbyByIdx.get(idx);
       const rec = d != null ? { w: (c.derby?.w ?? 0) + (d ? 1 : 0), l: (c.derby?.l ?? 0) + (d ? 0 : 1) } : c.derby;
-      return c.owner && (c.teamTalk || d != null) ? { ...c, teamTalk: undefined, derby: rec } : c;
+      const fans = fansByIdx.get(idx);
+      return c.owner && (c.teamTalk || d != null || fans != null) ? { ...c, teamTalk: undefined, derby: rec, fans: fans ?? c.fans } : c;
     });
   }
 

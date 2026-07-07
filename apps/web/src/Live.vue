@@ -1129,6 +1129,7 @@ async function openClub(slug: string) {
 }
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 // club-profile readouts: a star tier from squad power, and the world-rank percentile
+const kfans = (n = 0) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
 const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55) / 7)));   // ~55→1★ .. ~90→5★
 // ── PRE-MATCH PREVIEW: the tale of the tape for your NEXT fixture ──────────
 const preview = ref<{ me: ClubPage; them: ClubPage; map: string; home: boolean; day: number; label?: string } | null>(null);
@@ -1203,6 +1204,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <button class="lv-planbtn trophies" :class="{ on: trophiesOpen }" @click="showPanel('trophies')">🏆 trophies</button>
           </span>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
+          <span v-if="myClub.fans" class="lv-fans" title="your following — wins grow it (derby wins travel further), losses cost a little, and star accolades keep the pull. It prices your sponsor offers.">◉ {{ kfans(myClub.fans) }} fans</span>
           <span v-if="myClub.vip" class="lv-vip" :title="`VIP supporter — half-price scout reports + the club badge. Renews ${vipDate(myClub.vipUntil)}`">★ VIP</span>
           <button v-else class="lv-vipbtn" :disabled="vipBusy" @click="goVip"
                   title="become a VIP supporter — half-price scout reports, a club badge. Convenience only, never pay-to-win: the sim is identical for everyone">☆ go VIP</button>
@@ -2229,6 +2231,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div class="lv-cstat"><b>#{{ clubModal.powerRank ?? '—' }}</b><span>WORLD RANK<i v-if="clubPct(clubModal.powerRank, clubModal.totalClubs)"> · top {{ clubPct(clubModal.powerRank, clubModal.totalClubs) }}%</i></span></div>
           <div class="lv-cstat"><b class="lv-hqpips"><i v-for="n in 5" :key="n" :class="{ on: n <= (clubModal.infra ?? 0) }"></i></b><span>HQ INFRA</span></div>
           <div class="lv-cstat"><b class="lv-trophyn">{{ (clubModal.titles || 0) + (clubModal.intlTitles || 0) + (clubModal.wcTitles || 0) }}</b><span>TROPHIES</span></div>
+          <div v-if="clubModal.fans" class="lv-cstat" :title="`the club's following — results grow it, stars hold it, and it prices the sponsor table (a grown brand draws bigger cheques)`"><b>{{ kfans(clubModal.fans) }}</b><span>FOLLOWERS</span></div>
         </div>
         <!-- the cabinet -->
         <div v-if="clubModal.titles || clubModal.intlTitles || clubModal.wcTitles" class="lv-honstrip">
