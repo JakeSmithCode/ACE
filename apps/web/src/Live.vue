@@ -24,6 +24,19 @@ const errMsg = ref('');
 const world = ref<WorldSummary | null>(null);
 const table = ref<StandingRow[]>([]);
 const fixtures = ref<LiveFixture[]>([]);
+// the day's FEATURED match: the fixture with the highest combined squad power
+// (the broadcast pin — big games should read as big at a glance)
+const featuredSlot = computed<number | null>(() => {
+  if (!powerClubs.value.length || fixtures.value.length < 2) return null;
+  const pw = new Map(powerClubs.value.map(c => [c.tag, c.power]));
+  let best: { slot: number; sum: number } | null = null;
+  for (const f of fixtures.value) {
+    const a = pw.get(f.home.tag), b = pw.get(f.away.tag);
+    if (a == null || b == null) continue;
+    if (!best || a + b > best.sum) best = { slot: f.slot, sum: a + b };
+  }
+  return best?.slot ?? null;
+});
 let stopStream: (() => void) | null = null;
 let stopEvents: (() => void) | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -686,6 +699,7 @@ async function connect() {
     await refreshTable();   // after refreshMe, so the table follows YOUR division if you're not Premier
     await loadHonors();
     await loadNews();
+    void loadPower();   // feeds the FEATURED-match pin (memoized server-side)
     openStream();
     // a shared deep-link (?watch=season/day/slot) → auto-open that replay
     const wp = new URL(location.href).searchParams.get('watch');
@@ -1778,8 +1792,9 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span v-else-if="myClub && allDone && world && DAY >= world.lastDay" class="lv-seasondone">season complete · playoffs next</span>
         </div>
         <div class="lv-cards">
-          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag), derby: isDerby(f) }]">
+          <div v-for="f in fixtures" :key="f.slot" class="lv-card" :class="[f.status, { mine: mine(f.home.tag) || mine(f.away.tag), derby: isDerby(f), featured: f.slot === featuredSlot }]">
             <span v-if="isDerby(f)" class="lv-derbytag" title="a derby vs your rival — extra stakes; a win lifts the room, a loss stings">⚔ DERBY</span>
+            <span v-else-if="f.slot === featuredSlot" class="lv-feattag" title="the day's biggest game — highest combined squad power">★ FEATURED</span>
             <div class="lv-team">
               <i class="lv-badge clickable" :style="{ background: `hsl(${hue(f.home.tag)} 60% 24%)`, borderColor: `hsl(${hue(f.home.tag)} 65% 55%)` }" @click="openClub(f.home.tag)">{{ f.home.tag }}</i>
               <span class="lv-tname">{{ f.home.name }}</span>

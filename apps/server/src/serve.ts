@@ -40,6 +40,17 @@ const opts: LiveServerOpts = {
   stripeWebhookSecret: env('STRIPE_WEBHOOK_SECRET'),
   publicBase: env('ACE_PUBLIC_URL'),
 };
+// outbound mail: ACE_MAIL_WEBHOOK posts {to, subject, text} as JSON to any HTTP
+// sender (a Resend/SES/worker endpoint — the fetch IS the mailer, zero-dep).
+// Configured → verification/reset tokens are mailed, never surfaced in responses.
+if (env('ACE_MAIL_WEBHOOK')) {
+  const hook = env('ACE_MAIL_WEBHOOK')!;
+  opts.mailer = async (to, subject, text) => {
+    const r = await fetch(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to, subject, text }) });
+    if (!r.ok) throw new Error(`mail webhook ${r.status}`);
+  };
+  console.log('  outbound mail: webhook configured');
+}
 // social sign-in: any provider with an id+secret configured lights up its button
 {
   const oauth: OAuthProvider[] = [];
