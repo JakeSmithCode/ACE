@@ -369,22 +369,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   };
 
   // happening — signings, champions. Newest pushed last; the API returns it reversed.
-  const news: { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number }[] = [];
-  const pushNews = (kind: 'transfer' | 'champion' | 'season' | 'award', text: string, season: number, day: number) => {
-    news.push({ kind, text, season, day });
+  const news: { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number; tag?: string }[] = [];
+  const pushNews = (kind: 'transfer' | 'champion' | 'season' | 'award', text: string, season: number, day: number, tag?: string) => {
+    news.push({ kind, text, season, day, tag });
     if (news.length > 60) news.shift();   // keep it bounded
-    emit('news', { kind, text, season, day });
+    emit('news', { kind, text, season, day, tag });
   };
   // per-account notifications — the world news feed targeted to YOU (your fixtures +
   // results, season outcomes, your player's awards). In-memory keyed by account (the
   // PgStore per-account table is the same follow-up as academy/scout state).
   type NotifKind = 'fixture' | 'result' | 'season' | 'award' | 'system';
-  interface Notif { id: number; kind: NotifKind; text: string; season: number; day: number; read: boolean; at: number }
+  type NotifLink = { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string };
+  interface Notif { id: number; kind: NotifKind; text: string; season: number; day: number; read: boolean; at: number; link?: NotifLink }
   const notifs = new Map<string, Notif[]>();
   let notifSeq = 0;
-  const notify = (account: string, kind: NotifKind, text: string, season: number, day: number) => {
+  const notify = (account: string, kind: NotifKind, text: string, season: number, day: number, link?: NotifLink) => {
     const list = notifs.get(account) ?? [];
-    list.unshift({ id: ++notifSeq, kind, text, season, day, read: false, at: clock() });
+    list.unshift({ id: ++notifSeq, kind, text, season, day, read: false, at: clock(), link });
     if (list.length > 50) list.length = 50;   // bounded inbox
     notifs.set(account, list);
     emit('notif', { kind, text }, account);   // targeted push — the bell updates live
@@ -571,7 +572,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const { world: nw, signings } = resolveAiMarket(w0, avail, 2);
       if (signings.length) {
         await store.saveWorld(id, nw);
-        signings.forEach(s => { sold.add(s.handle); pushNews('transfer', `${s.club} signed ${s.handle} ($${(s.fee / 1000).toFixed(1)}k)`, w0.season, liveDay); });
+        signings.forEach(s => { sold.add(s.handle); pushNews('transfer', `${s.club} signed ${s.handle} ($${(s.fee / 1000).toFixed(1)}k)`, w0.season, liveDay, s.club); });
         emit('market', { sold: signings.map(s => s.handle) });   // boards refresh live
       }
       return signings.length;
@@ -618,7 +619,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
             const msg = derby
               ? `⚔ ${won ? 'WON the derby' : 'lost the derby'} ${us}–${them} vs ${opp.tag} — ${won ? 'bragging rights are yours' : 'they get the bragging rights'}`
               : `${won ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`;
-            notify(c.owner, 'result', msg, wn.season, f.day);
+            notify(c.owner, 'result', msg + ' · tap to watch it back', wn.season, f.day, { kind: 'replay', season: f.season, day: f.day, slot: f.slot });
           }
         }
         // birthdays: any roster player whose birthday falls between the last match-day and
@@ -719,18 +720,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       });
       if (changed) await store.saveWorld(id, { ...nw, clubs });
     }
-    if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); await persistSocial(); }
+    if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay, roll.champion); await persistSocial(); }
     // retirements: the age-curve loop closing in public — legends get a send-off,
     // owners get told who left and who was called up, the career ledger closes
     for (const rt of roll.retirements ?? []) {
       const career = careerStats[rt.handle];
       if (career) careerStats[rt.handle] = { ...career, retired: true } as typeof career & { retired: boolean };
-      if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay);
+      if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay, rt.club);
       // induction fires the moment a qualifying career completes — front-page news,
       // and the last club's owner gets the moment too
       const done = careerStats[rt.handle];
       if (done && isLegend(done)) {
-        pushNews('champion', `🏛 ${rt.handle} is INDUCTED into the Hall of Fame — ${done.kills.toLocaleString()} career kills, ${seasonAwards.filter(a => a.mvp?.handle === rt.handle).length}× MVP. Enshrined forever.`, roll.season, liveDay);
+        pushNews('champion', `🏛 ${rt.handle} is INDUCTED into the Hall of Fame — ${done.kills.toLocaleString()} career kills, ${seasonAwards.filter(a => a.mvp?.handle === rt.handle).length}× MVP. Enshrined forever.`, roll.season, liveDay, rt.club);
         const oc = w.clubs.find(c => c.tag === rt.club);
         if (oc?.owner) notify(oc.owner, 'award', `🏛 ${rt.handle} — YOUR retired star — has been inducted into the Hall of Fame`, roll.season, liveDay);
       }
@@ -742,8 +743,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (oc?.owner) notify(oc.owner, 'system', `🎙 ${rt.handle} (${rt.age}) has retired${rt.replacement ? ` — ${rt.replacement} signed from free agency to cover` : ''}`, roll.season, liveDay);
       }
     }
-    if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
-    if (yg && yg.handle !== mvp?.handle) pushNews('award', `Season ${roll.season} Young Gun: ${yg.handle} (${yg.club}), ${ageOf(yg.handle)} — ${yg.kills} kills. A star is forming.`, roll.season, liveDay);
+    if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay, mvp.club);
+    if (yg && yg.handle !== mvp?.handle) pushNews('award', `Season ${roll.season} Young Gun: ${yg.handle} (${yg.club}), ${ageOf(yg.handle)} — ${yg.kills} kills. A star is forming.`, roll.season, liveDay, yg.club);
     seasonAwards.push({ season: roll.season,
       mvp: mvp ? { handle: mvp.handle, club: mvp.club, kills: mvp.kills } : null,
       youngGun: yg ? { handle: yg.handle, club: yg.club, kills: yg.kills, age: ageOf(yg.handle) } : null });
@@ -765,7 +766,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     }
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
     if (cupChampClub) {
-      pushNews('champion', `🏆 ${cupChampClub.tag} lift the Season ${roll.season} ACE Cup`, roll.season, liveDay);
+      pushNews('champion', `🏆 ${cupChampClub.tag} lift the Season ${roll.season} ACE Cup`, roll.season, liveDay, cupChampClub.tag);
       if (cupChampClub.owner) { notify(cupChampClub.owner, 'award', `🏆 ${cupChampClub.tag} won the Season ${roll.season} ACE Cup!`, roll.season, liveDay); await persistAccount(cupChampClub.owner); }
     }
     if (wcMgrAccount) { notify(wcMgrAccount, 'award', `🏆🌍 You led ${wcv.bracket.champion.country} to the Season ${roll.season} World Cup title!`, roll.season, liveDay); await persistAccount(wcMgrAccount); }
@@ -1130,7 +1131,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       await persistSocial();
       const won = score[0] > score[1];
       // two OWNERS clashing is world news — the whole server sees the scrap
-      if (target.owner) pushNews('transfer', `⚔ Friendly: ${mine.tag} ${score[0]}–${score[1]} ${target.tag} on ${map}`, w.season, liveDay);
+      if (target.owner) pushNews('transfer', `⚔ Friendly: ${mine.tag} ${score[0]}–${score[1]} ${target.tag} on ${map}`, w.season, liveDay, mine.tag);
       notify(account, 'result', `⚔ Friendly: ${won ? 'WON' : 'lost'} ${score[0]}–${score[1]} vs ${target.tag} on ${map}`, w.season, liveDay);
       if (target.owner) notify(target.owner, 'result', `⚔ ${mine.tag} challenged you to a friendly — you ${score[1] > score[0] ? 'WON' : 'lost'} ${score[1]}–${score[0]} on ${map} (watch it under ⚔ friendlies)`, w.season, liveDay);
       await persistAccount(account);   // durable: the result notif survives a restart
@@ -1221,7 +1222,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       offer.status = 'accepted';
       await persistSocial();
       notify(offer.from, 'system', `✓ ${seller.tag} accepted — ${offer.handle} joins you for $${offer.amount.toLocaleString()}`, w.season, liveDay);
-      pushNews('transfer', `⇄ ${offer.handle} moves ${seller.tag} → ${buyer.tag} for $${offer.amount.toLocaleString()} — an owner-to-owner deal`, w.season, liveDay);
+      pushNews('transfer', `⇄ ${offer.handle} moves ${seller.tag} → ${buyer.tag} for $${offer.amount.toLocaleString()} — an owner-to-owner deal`, w.season, liveDay, buyer.tag);
       emit('market', { sold: [] });   // rosters + banks moved — squad/market views refresh
       return json(res, 200, { ok: true, offer });
     }

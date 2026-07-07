@@ -13,7 +13,7 @@ import { ANCHORS, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView , TransferOffer } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView , TransferOffer, type Notif } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -215,7 +215,11 @@ const presence = ref<{ online: number; tags: string[] }>({ online: 0, tags: [] }
 async function loadPresence() { if (server.value) try { presence.value = await server.value.presence(); } catch { /* transient */ } }
 let presenceTimer: ReturnType<typeof setInterval> | null = null;
 // a notification points somewhere — clicking it opens the right surface
-function notifGo(n: { text: string }) {
+function notifGo(n: { text: string; link?: Notif['link'] }) {
+  // a typed deep-link wins: a result notification plays the replay, a club link
+  // opens the club page — the notification IS the shortcut to the moment
+  if (n.link?.kind === 'replay') { void watchAt(n.link.season, n.link.day, n.link.slot); notifOpen.value = false; return; }
+  if (n.link?.kind === 'club') { void openClub(n.link.tag); notifOpen.value = false; return; }
   if (n.text.includes('Playoffs')) { playoffsOpen.value = true; void loadPlayoffs(); }
   else if (n.text.startsWith('⇄') || n.text.startsWith('✓')) { transfersOpen.value = true; void loadTransfers(); }
   else if (n.text.startsWith('⚔')) { friendliesOpen.value = true; void loadFriendlies(); }
@@ -1667,7 +1671,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       <div v-if="newsFeed.length" class="lv-newsbar">
         <span class="lv-newslabel">📰 World news</span>
         <div class="lv-newsscroll">
-          <span v-for="(n, i) in newsFeed.slice(0, 14)" :key="i" class="lv-newsitem" :class="n.kind">
+          <span v-for="(n, i) in newsFeed.slice(0, 14)" :key="i" class="lv-newsitem" :class="[n.kind, { clickable: !!n.tag }]" :title="n.tag ? `open ${n.tag}'s club page` : undefined" @click="n.tag && openClub(n.tag)">
             <i class="lv-newsico">{{ newsIcon[n.kind] }}</i>{{ n.text }}<em class="lv-newsage">S{{ n.season }}</em>
           </span>
         </div>
