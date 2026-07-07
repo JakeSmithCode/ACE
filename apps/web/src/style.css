@@ -2107,3 +2107,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* individual honours: the gold accolade chip (MVP / Young Gun seasons) */
 .lv-acc{font-size:9px;letter-spacing:.05em;font-weight:800;color:#e8b03c;border:1px solid #5a4a24;background:rgba(230,176,60,.08);border-radius:8px;padding:0 6px;white-space:nowrap;font-style:normal}
 .lv-retired{font-size:9px;color:#8a90a0;border:1px solid #33384a;border-radius:8px;padding:0 5px;margin-left:6px;font-style:normal}
+/* pre-match preview: the tale of the tape */
+.lv-pvhead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.lv-pvgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
+.lv-pvcol{display:flex;flex-direction:column;align-items:center;gap:5px;padding:14px 10px;background:#10131b;border:1px solid #232a3a;border-radius:10px}
+.lv-pvcol.mine{border-color:#3d5a2e;box-shadow:0 0 0 1px rgba(120,200,90,.10) inset}
+.lv-crest.sm{width:52px;height:52px;display:grid;place-items:center;border:1px solid;border-radius:10px}
+.lv-crest.sm .lv-cresttag{font-size:14px;font-weight:800;letter-spacing:.06em}
+.lv-pvname{font-size:14px}
+.lv-pvmeta{font-size:10.5px;color:#8a90a0}
+.lv-pvhome{font-size:9px;letter-spacing:.16em;color:#6d7488}
+.lv-pvready{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.lv-nmgo{font-style:normal;font-size:10px;color:#8fd3e8;opacity:.85;margin-left:6px}
+.lv-nmcore.clickable{cursor:pointer}

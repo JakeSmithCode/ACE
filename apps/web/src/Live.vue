@@ -1081,6 +1081,22 @@ async function openClub(slug: string) {
 const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 // club-profile readouts: a star tier from squad power, and the world-rank percentile
 const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55) / 7)));   // ~55→1★ .. ~90→5★
+// ── PRE-MATCH PREVIEW: the tale of the tape for your NEXT fixture ──────────
+const preview = ref<{ me: ClubPage; them: ClubPage; map: string; home: boolean; day: number } | null>(null);
+const previewBusy = ref(false);
+async function openPreview() {
+  if (!server.value || !myClub.value || !upcoming.value.length) return;
+  previewBusy.value = true;
+  try {
+    const u = upcoming.value[0];
+    const [me, them] = await Promise.all([
+      server.value.club(myClub.value.tag, token.value ?? undefined),
+      server.value.club(u.opp, token.value ?? undefined),
+    ]);
+    preview.value = { me, them, map: u.map, home: u.home, day: u.day };
+  } catch (e) { errMsg.value = (e as Error).message; } finally { previewBusy.value = false; }
+}
+const formPills = (c: ClubPage) => (c.form ?? []).slice(0, 5);
 const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.max(1, Math.round((rank / total) * 100)) : null);
 const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
 
@@ -1693,7 +1709,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       <!-- NEXT MATCH — the owner's focal point: who, where, and whether you're ready -->
       <div v-if="myClub && upcoming.length" class="lv-nextmatch">
         <span class="lv-nmlabel">NEXT MATCH</span>
-        <span class="lv-nmcore">md {{ upcoming[0].day + 1 }} · {{ upcoming[0].home ? 'vs' : '@' }} <b class="lv-nmopp clk" title="open their club page — the scouting dossier" @click="openClub(upcoming[0].opp)">{{ upcoming[0].opp }}</b> on <b class="lv-nmmap">{{ upcoming[0].map }}</b></span>
+        <span class="lv-nmcore clickable" title="open the pre-match preview — the tale of the tape" @click="openPreview">md {{ upcoming[0].day + 1 }} · {{ upcoming[0].home ? 'vs' : '@' }} <b class="lv-nmopp">{{ upcoming[0].opp }}</b> on <b class="lv-nmmap">{{ upcoming[0].map }}</b> <i class="lv-nmgo">{{ previewBusy ? '…' : '⊞ preview' }}</i></span>
         <span class="lv-nmready" :class="pbBook[upcoming[0].map] ? 'ok' : 'warn'"
               :title="pbBook[upcoming[0].map] ? 'you have authored plays on this map — they field in this fixture' : 'no plays authored on this map — your side runs on dials alone. Click to author.'"
               @click="pbPick(upcoming[0].map as MapId)">▦ {{ pbBook[upcoming[0].map] ? 'playbook ready' : 'no plays on this map' }}</span>
@@ -2046,6 +2062,43 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         </div>
       </div>
     </Teleport>
+
+    <!-- PRE-MATCH PREVIEW: the tale of the tape (you vs your next opponent) -->
+    <div v-if="preview" class="lv-clubmodal" @click.self="preview = null">
+      <div class="lv-clubcard">
+        <button class="lv-clubx" @click="preview = null">✕</button>
+        <div class="lv-pvhead">
+          <span class="lv-kicker">MATCH-DAY {{ preview.day + 1 }} PREVIEW</span>
+          <b class="lv-nmmap">{{ preview.map }}</b>
+          <span v-if="myClub?.rival && preview.them.tag === myClub.rival.tag" class="lv-rival">⚔ DERBY</span>
+        </div>
+        <div class="lv-pvgrid">
+          <div v-for="(c, side) in [preview.home ? preview.me : preview.them, preview.home ? preview.them : preview.me]" :key="c.tag" class="lv-pvcol" :class="{ mine: c.tag === preview.me.tag }">
+            <div class="lv-crest sm" :style="{ background: `linear-gradient(150deg, hsl(${hue(c.tag)} 55% 26%), hsl(${hue(c.tag)} 50% 16%))`, borderColor: `hsl(${hue(c.tag)} 66% 56%)` }"><span class="lv-cresttag">{{ c.tag }}</span></div>
+            <b class="lv-pvname clickable" @click="openClub(c.tag); preview = null">{{ c.name }}</b>
+            <span class="lv-pvmeta">{{ c.power ?? c.rating }} OVR · #{{ c.powerRank ?? '—' }} world<template v-if="c.standing"> · {{ ord(c.standing) }} in {{ c.division }}</template></span>
+            <span class="lv-formpills">
+              <i v-for="(g, i) in formPills(c)" :key="i" :class="g.r === 'W' ? 'w' : 'l'" :title="`${g.us}–${g.them} vs ${g.opp}`">{{ g.r }}</i>
+              <em v-if="!formPills(c).length" class="lv-note">no games yet</em>
+            </span>
+            <span class="lv-pvhome">{{ side === 0 ? 'HOME' : 'AWAY' }}</span>
+          </div>
+        </div>
+        <div class="lv-pvready">
+          <span class="lv-nmready" :class="pbBook[preview.map] ? 'ok' : 'warn'" @click="pbPick(preview.map as MapId); preview = null">▦ {{ pbBook[preview.map] ? 'your playbook is ready for this map' : 'no plays on this map — author before kickoff' }}</span>
+          <span class="lv-nmtalk" :class="myClub?.teamTalk ? 'ok' : 'warn'" @click="showPanel('tactics'); preview = null">◆ {{ myClub?.teamTalk ? 'talk set: ' + myClub.teamTalk : 'set a team talk' }}</span>
+          <span v-if="preview.them.owned && preview.them.playbookMaps?.includes(preview.map)" class="lv-nmready warn" title="this HUMAN owner has authored plays on this map — expect set pieces">⚠ they have plays on {{ preview.map }}</span>
+        </div>
+        <div v-if="preview.them.dossier" class="lv-dossier">
+          <div class="lv-doshead">⌖ THEIR TENDENCIES</div>
+          <div class="lv-dosrow"><i>ATTACK</i><span>{{ preview.them.dossier.attack }}<em v-if="preview.them.dossier.lurk"> · runs a lurk</em></span></div>
+          <div class="lv-dosrow"><i>DEFENSE</i><span>{{ preview.them.dossier.defense }}</span></div>
+          <div v-for="(k, ki) in (preview.them.dossier.kit ?? []).slice(0, 3)" :key="'pk' + ki" class="lv-dosrow" style="opacity:.85"><i>{{ ki === 0 ? 'KITS' : '' }}</i><span>{{ k }}</span></div>
+          <div class="lv-doscounter"><i>⮞ COUNTER</i><span>{{ preview.them.dossier.counter }}</span></div>
+        </div>
+        <div v-else class="lv-note" style="padding:8px 2px">a human-run club — no AI tells; scout their form and playbook coverage above</div>
+      </div>
+    </div>
 
     <div v-if="clubModal" class="lv-clubmodal" @click.self="clubModal = null">
       <div class="lv-clubcard">
