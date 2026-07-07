@@ -30,6 +30,14 @@ export function playerValue(p: Player, patch?: PatchState, scoutLevel = 0): numb
     const tier = main ? (patch.agentTier[main] ?? 1) : 1;
     v *= 0.55 + tier * 0.45;                             // tier ~0.85..1.15 → mult ~0.93..1.07
   }
+  // ACCOLADES are proof: an MVP season is the market's strongest signal (a Young
+  // Gun award a softer one) — a decorated player commands a premium, capped so a
+  // trophy shelf never dwarfs current ability. Absent → ×1, byte-identical.
+  if (p.accolades?.length) {
+    const mvps = p.accolades.filter(a => a.startsWith('MVP')).length;
+    const ygs = p.accolades.filter(a => a.startsWith('YG')).length;
+    v *= 1 + Math.min(0.35, mvps * 0.12 + ygs * 0.06);
+  }
   return Math.round(v);
 }
 

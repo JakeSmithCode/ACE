@@ -196,7 +196,8 @@ const publicClub = (w: WorldState, c: WorldClub) => {
       const person = personOf(p.id);
       return { handle: p.handle, role: p.role, overall: ovr, igl: !!p.igl, solo: sr.label, soloTier: sr.tier,
                agent: comp[p.id] ?? topAgentOf(p), trait: traitOf(p.id)?.label ?? null,
-               name: person.name, country: person.nation.country, flag: person.nation.flag, age: p.age };
+               name: person.name, country: person.nation.country, flag: person.nation.flag, age: p.age,
+               accolades: p.accolades };
     }),
   };
 };
@@ -724,6 +725,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       careerStats[r2.handle] = { ...c2, club: r2.club, role: r2.role, kills: c2.kills + r2.kills, deaths: c2.deaths + r2.deaths, matches: c2.matches + r2.matches, fb: c2.fb + r2.fb, mvp: c2.mvp + r2.mvp, hs: c2.hs + r2.hs, clutch: c2.clutch + r2.clutch, seasons: c2.seasons + 1 };
     }
     await persistSocial();
+    // stamp the winners' ACCOLADES onto their Player objects (post-rollover world —
+    // an MVP season is proof the market prices: playerValue carries the premium)
+    {
+      const nw2 = (await store.loadWorld(id))!;
+      const stamp = (handle: string, tag: string) => (cl: WorldClub): WorldClub =>
+        ({ ...cl, roster: cl.roster.map(pp => pp.handle === handle ? { ...pp, accolades: [...(pp.accolades ?? []), tag] } : pp) });
+      let clubs2 = nw2.clubs;
+      if (mvp) clubs2 = clubs2.map(stamp(mvp.handle, `MVP S${roll.season}`));
+      if (yg) clubs2 = clubs2.map(stamp(yg.handle, `YG S${roll.season}`));
+      if (mvp || yg) await store.saveWorld(id, { ...nw2, clubs: clubs2 });
+    }
     pushNews('champion', `🌍 ${wcv.bracket.champion.flag} ${wcv.bracket.champion.country} win the Season ${roll.season} World Cup${wcMgrTag ? ` — managed by ${wcMgrTag}` : ''}`, roll.season, liveDay);
     if (cupChampClub) {
       pushNews('champion', `🏆 ${cupChampClub.tag} lift the Season ${roll.season} ACE Cup`, roll.season, liveDay);

@@ -1439,6 +1439,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
                   <i v-if="sp.mentor" class="lv-sqment mentor" title="a veteran leader — he develops your young players faster (mentoring)">🎓 mentor</i>
                   <i v-else-if="sp.mentee" class="lv-sqment mentee" title="a young player being mentored by a senior leader — he grows faster">↑ mentored</i>
                   <i v-if="sp.focus" class="lv-sqfocus" :title="`training focus: ${ATTR_LABEL[sp.focus] || sp.focus} grows faster (the rest a touch slower)`">◎ {{ ATTR_LABEL[sp.focus] || sp.focus }}</i>
+                  <i v-for="a in sp.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — carries a transfer-value premium' : 'season Young Gun (best U22)'">★ {{ a }}</i>
                   <i v-if="sp.loan" class="lv-sqment mentee" :title="`out on loan at ${sp.loan.tag} (tier ${sp.loan.tier + 1}) — starter minutes all season, back at the rollover. He can't be fielded here until recalled.`">⇆ on loan @ {{ sp.loan.tag }}</i>
                   <i v-if="sp.injury" class="lv-sqinj" :title="`injured — out ${sp.injury} more match-day(s); a reserve covers, or he plays hurt`">⚕ OUT {{ sp.injury }}d</i>
                   <i v-else-if="sp.fatigue >= 40" class="lv-sqfat" :class="{ tired: sp.fatigue >= 70 }" :title="`match fatigue ${sp.fatigue}% — rotate him out to recover; high fatigue dulls his game and risks injury`">◔ {{ sp.fatigue }}%</i>
@@ -2111,7 +2112,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
             <span class="lv-fivehandle">
-              <span class="lv-fivetop"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span></span>
+              <span class="lv-fivetop"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span><span v-for="a in p.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — the market prices the proof' : 'season Young Gun (best U22)'">★ {{ a }}</span></span>
               <span v-if="p.name" class="lv-fiveperson" :title="p.country"><span class="lv-flag">{{ p.flag }}</span> {{ p.name }}<i v-if="p.age"> · {{ p.age }}</i></span>
             </span>
             <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>

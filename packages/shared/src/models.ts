@@ -41,6 +41,10 @@ export interface Player {
                         // seasons (the lasting cost of a signing — you pay it even if he declines),
                         // counting down each off-season; at 0 he walks free unless renewed.
                         // Undefined = no contract (wage falls back to the market rate).
+  accolades?: string[]; // individual honours won ('MVP S3', 'YG S1') — stamped at the season
+                        // rollover from the real stat tallies. Additive: undefined = none, and
+                        // the match engine never reads it; accolades carry a transfer-value
+                        // premium (a proven star costs more) and a badge wherever he's listed.
 }
 
 export interface Team {
