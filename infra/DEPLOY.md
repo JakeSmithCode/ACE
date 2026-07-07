@@ -38,6 +38,14 @@ pnpm run server:serve
 - `STRIPE_WEBHOOK_SECRET` arms `POST /billing/webhook` with Stripe's exact
   signature scheme — point a real Stripe endpoint at it and VIP flows with no
   code change (the hosted-checkout session creation is the one remaining SDK call).
+- **Social sign-in (Google / Discord)**: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
+  and/or `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` and the buttons light up.
+  Register the callback `${ACE_PUBLIC_URL}/auth/oauth/<provider>/callback` with the
+  provider, and set `ACE_PUBLIC_URL` to the server's public base. The provider only
+  proves identity — accounts, sessions and data stay in our tables (DESIGN §16);
+  a provider-verified email links to an existing email/password account, and an
+  OAuth-born account is passwordless + already verified. Migration
+  `0007`-less: apply `infra/migrations/0006_oauth.sql` for the identity table.
 - **Abuse hardening is built in**: request bodies are capped at 256 KB (the socket
   is destroyed past it), and an in-memory token-bucket limiter throttles per-IP —
   auth 10/min (scrypt is compute-heavy), chat sends ~45/min, other writes ~120/min;

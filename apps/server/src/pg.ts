@@ -128,4 +128,19 @@ export class PgAccountStore implements AccountStore {
   async revokeRefresh(hash: string): Promise<void> {
     await this.db.query('update ace_refresh set revoked = true where token_hash = $1', [hash]);
   }
+  async byIdentity(provider: string, subject: string): Promise<Account | undefined> {
+    const r = await this.db.query('select a.* from ace_account a join ace_oauth_identity i on i.account_id = a.id where i.provider = $1 and i.subject = $2', [provider, subject]);
+    return r.rows[0] ? this.acc(r.rows[0]) : undefined;
+  }
+  async linkIdentity(provider: string, subject: string, accountId: string): Promise<void> {
+    await this.db.query('insert into ace_oauth_identity (provider, subject, account_id) values ($1, $2, $3) on conflict (provider, subject) do update set account_id = $3', [provider, subject, accountId]);
+  }
+  async createVerified(email: string, now: number): Promise<Account> {
+    const id = `acct-${randomUUID()}`;
+    const norm = email.trim().toLowerCase();
+    try {
+      await this.db.query("insert into ace_account (id, email, password_hash, created_at, verified, verify_token) values ($1, $2, '', $3, true, null)", [id, norm, now]);
+    } catch { throw new Error('email already registered'); }
+    return { id, email: norm, passwordHash: '', createdAt: now, verified: true, verifyToken: null, vipUntil: null };
+  }
 }

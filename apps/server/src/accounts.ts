@@ -30,6 +30,13 @@ export interface AccountStore {
   /** The live row for a refresh-token hash (or undefined) — for verify + rotation. */
   refresh(hash: string): Promise<RefreshRow | undefined>;
   revokeRefresh(hash: string): Promise<void>;
+  /** OAuth identity linkage: (provider, subject) → account. A subject is the
+   *  provider's permanent user id; one account can hold many identities. */
+  byIdentity(provider: string, subject: string): Promise<Account | undefined>;
+  linkIdentity(provider: string, subject: string, accountId: string): Promise<void>;
+  /** Create a PASSWORDLESS, already-verified account (an OAuth sign-up: the
+   *  provider vouched for the email). passwordHash '' can never pass login. */
+  createVerified(email: string, now: number): Promise<Account>;
 }
 
 export class MemoryAccountStore implements AccountStore {
@@ -54,6 +61,22 @@ export class MemoryAccountStore implements AccountStore {
   async saveRefresh(accountId: string, hash: string, expiresAt: number): Promise<void> { this.refreshes.set(hash, { accountId, tokenHash: hash, expiresAt, revoked: false }); }
   async refresh(hash: string): Promise<RefreshRow | undefined> { return this.refreshes.get(hash); }
   async revokeRefresh(hash: string): Promise<void> { const r = this.refreshes.get(hash); if (r) this.refreshes.set(hash, { ...r, revoked: true }); }
+  private identities = new Map<string, string>();  // provider|subject → account id
+  async byIdentity(provider: string, subject: string): Promise<Account | undefined> {
+    const id = this.identities.get(`${provider}|${subject}`);
+    return id ? this.accounts.get(id) : undefined;
+  }
+  async linkIdentity(provider: string, subject: string, accountId: string): Promise<void> {
+    this.identities.set(`${provider}|${subject}`, accountId);
+  }
+  async createVerified(email: string, now: number): Promise<Account> {
+    const norm = email.trim().toLowerCase();
+    if (this.byEmailIdx.has(norm)) throw new Error('email already registered');
+    const acc: Account = { id: `acct-${++this.n}`, email: norm, passwordHash: '', createdAt: now, verified: true, verifyToken: null, vipUntil: null };
+    this.accounts.set(acc.id, acc);
+    this.byEmailIdx.set(norm, acc.id);
+    return acc;
+  }
 }
 
 export const ACCESS_TTL = 15 * 60;            // 15 min access token
@@ -95,7 +118,21 @@ export class AuthService {
   }
   async login(email: string, password: string): Promise<Session> {
     const acc = await this.store.byEmail(email ?? '');
-    if (!acc || !verifyPassword(password ?? '', acc.passwordHash)) throw new Error('invalid email or password');
+    // a passwordless (OAuth-born) account can never log in with a password
+    if (!acc || !acc.passwordHash || !verifyPassword(password ?? '', acc.passwordHash)) throw new Error('invalid email or password');
+    return this.issue(acc.id);
+  }
+  /** Social sign-in: the provider proved the identity; we own the session. Order:
+   *  a linked identity signs straight in; else a PROVIDER-VERIFIED email that
+   *  matches an existing account LINKS to it (the standard verified-email rule);
+   *  else a fresh passwordless account is created (already verified). */
+  async oauthLogin(provider: string, subject: string, email: string | null): Promise<Session> {
+    const linked = await this.store.byIdentity(provider, subject);
+    if (linked) return this.issue(linked.id);
+    let acc = email ? await this.store.byEmail(email) : undefined;
+    if (!acc) acc = await this.store.createVerified(email ?? `${provider}-${subject}@oauth.ace`, Math.floor(this.clock()));
+    else if (!acc.verified) await this.store.markVerified(acc.id);   // the provider vouched
+    await this.store.linkIdentity(provider, subject, acc.id);
     return this.issue(acc.id);
   }
   /** Rotate a refresh token: the presented one is revoked and a fresh pair issued

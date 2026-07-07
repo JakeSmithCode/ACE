@@ -42,6 +42,12 @@ const token = ref<string | null>(null);
 const myClub = ref<ClubPage | null>(null);
 const authOpen = ref(false);
 const authMode = ref<'register' | 'login'>('register');
+const oauthProviders = ref<{ id: string; label: string }[]>([]);
+function oauthGo(pid: string) {
+  if (!server.value) return;
+  const back = new URL(location.href); back.searchParams.delete('oauthCode');
+  location.href = server.value.oauthStart(pid, back.toString());
+}
 const email = ref(''); const password = ref(''); const authErr = ref(''); const busy = ref(false);
 const claimTag = ref('');
 const authed = computed(() => !!token.value);
@@ -647,6 +653,15 @@ async function connect() {
     server.value = s; status.value = 'live';
     const saved = localStorage.getItem('ace.token');   // stay signed in across refresh
     if (saved && !token.value) token.value = saved;
+    // social sign-in return leg: the callback bounced back with a one-time code —
+    // swap it for OUR session over POST (tokens never ride a URL), then clean it
+    const ocode = new URL(location.href).searchParams.get('oauthCode');
+    if (ocode) {
+      try { token.value = (await s.oauthComplete(ocode)).accessToken; } catch { authErr.value = 'sign-in expired — try again'; }
+      const clean = new URL(location.href); clean.searchParams.delete('oauthCode');
+      history.replaceState(null, '', clean.toString());
+    }
+    try { oauthProviders.value = (await s.authProviders()).providers; } catch { /* older server */ }
     await refreshMe();
     await refreshTable();   // after refreshMe, so the table follows YOUR division if you're not Premier
     await loadHonors();
@@ -1261,6 +1276,9 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <input v-model="email" placeholder="email" class="lv-authin" spellcheck="false" />
             <input v-model="password" type="password" placeholder="password (8+ chars)" class="lv-authin" @keyup.enter="doAuth" />
             <button class="lv-go sm" :disabled="busy" @click="doAuth">{{ authMode === 'register' ? 'Create account' : 'Log in' }}</button>
+            <button v-for="p in oauthProviders" :key="p.id" class="lv-oauth" :title="`sign in with ${p.label} — the provider proves who you are; your club and career live here`" @click="oauthGo(p.id)">
+              ⬡ Continue with {{ p.label }}
+            </button>
             <span v-if="authErr" class="lv-autherr">{{ authErr }}</span>
           </div>
         </template>

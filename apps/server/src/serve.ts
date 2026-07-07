@@ -16,6 +16,7 @@
 //                                                          the one optional dependency, loaded dynamically)
 import { startLiveServer, type LiveServerOpts } from './http.js';
 import { PgStore, PgAccountStore } from './pg.js';
+import { googleProvider, discordProvider, type OAuthProvider } from './oauth.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: number) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? parseInt(argv[i + 1], 10) : d; };
@@ -37,7 +38,15 @@ const opts: LiveServerOpts = {
   allowManualAdvance: devAdvance,
   jwtSecret: env('ACE_JWT_SECRET'),
   stripeWebhookSecret: env('STRIPE_WEBHOOK_SECRET'),
+  publicBase: env('ACE_PUBLIC_URL'),
 };
+// social sign-in: any provider with an id+secret configured lights up its button
+{
+  const oauth: OAuthProvider[] = [];
+  if (env('GOOGLE_CLIENT_ID') && env('GOOGLE_CLIENT_SECRET')) oauth.push(googleProvider(env('GOOGLE_CLIENT_ID')!, env('GOOGLE_CLIENT_SECRET')!));
+  if (env('DISCORD_CLIENT_ID') && env('DISCORD_CLIENT_SECRET')) oauth.push(discordProvider(env('DISCORD_CLIENT_ID')!, env('DISCORD_CLIENT_SECRET')!));
+  if (oauth.length) { opts.oauth = oauth; console.log(`  social sign-in: ${oauth.map(o => o.label).join(' + ')}`); }
+}
 if (!auto && !devAdvance) console.warn('  ⚠ world clock FROZEN: no scheduler (--auto 0) and no --dev-advance — nothing can advance a match-day.');
 
 // DATABASE_URL → the durable Pg stores. `pg` is deliberately NOT a dependency of

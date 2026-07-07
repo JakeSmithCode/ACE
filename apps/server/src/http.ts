@@ -21,6 +21,8 @@ import { claim, savePlan, savePlay, myClub } from './owner.js';
 import { AuthService, MemoryAccountStore } from './accounts.js';
 import { verifyStripeSig, vipFromEvent, vipActive, VIP_DAYS } from './billing.js';
 import { IntervalScheduler, type Scheduler } from './scheduler.js';
+import { authorizeUrl, exchangeCode, fetchIdentity, type OAuthProvider } from './oauth.js';
+import { newRefreshToken } from './auth.js';
 import { buildCircuitView, type CircuitView } from './circuitView.js';
 import { buildWorldCupView, type WorldCupView } from './worldCupView.js';
 import { cupViewFromState } from './cupView.js';
@@ -39,6 +41,12 @@ export interface LiveServerOpts {
   allowManualAdvance?: boolean;
   /** Event-bus replay backlog size (tests shrink it to exercise the resync path). */
   eventBacklogMax?: number;
+  /** Social sign-in providers (Google/Discord/...) — plain configs, ids/secrets from
+   *  env. Empty/omitted → the buttons don't render and the routes 404. */
+  oauth?: OAuthProvider[];
+  /** The server's public base URL (the OAuth redirect_uri host). Defaults to the
+   *  local listen address — set it in any real deployment. */
+  publicBase?: string;
   /** DEPLOYMENT SEAM — inject durable stores and the server RESUMES the world they
    *  hold instead of seeding a fresh one: the day cursor, standings, ownership,
    *  academies/mail/social all come back (verified by the restart-resume test).
@@ -832,6 +840,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     chat: { capacity: 8, perSec: 0.75 },          // 8 burst, ~45/min
     write: { capacity: 60, perSec: 2 },           // 60 burst, ~120/min
   };
+  // OAuth flow state: CSRF `state` values (10 min TTL, carry the web redirect) and
+  // ONE-TIME login codes the callback mints (60s TTL — the browser lands back on
+  // the web app with ?oauthCode=..., which it swaps for the session over POST so
+  // tokens never ride a URL).
+  const oauthStates = new Map<string, { redirect: string; at: number }>();
+  const oauthCodes = new Map<string, { session: import('./accounts.js').Session; at: number }>();
+  const oauthProviders = opts.oauth ?? [];
+  const providerOf = (pid: string) => oauthProviders.find(x => x.id === pid);
   const buckets = new Map<string, { tokens: number; at: number }>();
   const allow = (ip: string, cls: keyof typeof RATES): boolean => {
     const r = RATES[cls], k = `${ip}|${cls}`, t = clock();
@@ -843,6 +859,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   };
   const bucketSweep = setInterval(() => { const t = clock(); for (const [k, b] of buckets) if (t - b.at > 600) buckets.delete(k); }, 120_000);
 
+  let selfBase = '';   // the server's own URL (set at listen; publicBase overrides in deployments)
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
     // CORS preflight: a cross-origin POST/PATCH with a JSON body or Authorization
@@ -860,7 +877,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // rate limits: auth endpoints (scrypt), chat sends, and all other writes
     {
       const ip = req.socket.remoteAddress ?? '?';
-      const cls = path[0] === 'auth' ? 'auth'
+      // the tight 'auth' bucket prices the scrypt POSTs; the OAuth GET redirect
+      // legs are cheap bounces and ride free (their state map is size-guarded)
+      const cls = path[0] === 'auth' && req.method === 'POST' ? 'auth'
         : path[0] === 'chat' && path[1] === 'send' ? 'chat'
         : (req.method === 'POST' || req.method === 'PATCH') && path[0] !== 'billing' ? 'write'
         : null;   // reads + the Stripe webhook (signature-gated) are unthrottled
@@ -891,6 +910,55 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       evClients.add(client);
       req.on('close', () => evClients.delete(client));
       return;
+    }
+
+    // ── social sign-in (OAuth2 code flow — Google/Discord/injected mocks) ─────
+    // GET /auth/providers → which buttons to render
+    if (path[0] === 'auth' && path[1] === 'providers' && req.method === 'GET') {
+      return json(res, 200, { providers: oauthProviders.map(x => ({ id: x.id, label: x.label })) });
+    }
+    // GET /auth/oauth/:provider?redirect=<web app URL> → 302 to the provider
+    if (path[0] === 'auth' && path[1] === 'oauth' && path.length === 3 && req.method === 'GET') {
+      const p2 = providerOf(path[2]);
+      if (!p2) return json(res, 404, { error: 'unknown provider' });
+      const q = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
+      for (const [k, v] of oauthStates) if (clock() - v.at > 600) oauthStates.delete(k);   // 10 min TTL sweep
+      if (oauthStates.size > 10000) return json(res, 429, { error: 'too many pending sign-ins — try again shortly' });   // an unthrottled GET can't bloat the map
+      const state = newRefreshToken();
+      oauthStates.set(state, { redirect: q.get('redirect') ?? '/', at: clock() });
+      const cb = `${opts.publicBase ?? selfBase}/auth/oauth/${p2.id}/callback`;
+      res.writeHead(302, { location: authorizeUrl(p2, cb, state) });
+      return res.end();
+    }
+    // GET /auth/oauth/:provider/callback?code&state → exchange, identify, mint a
+    // ONE-TIME code and bounce back to the web app (tokens never ride a URL)
+    if (path[0] === 'auth' && path[1] === 'oauth' && path.length === 4 && path[3] === 'callback' && req.method === 'GET') {
+      const p2 = providerOf(path[2]);
+      if (!p2) return json(res, 404, { error: 'unknown provider' });
+      const q = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
+      const st = oauthStates.get(q.get('state') ?? '');
+      if (!st || clock() - st.at > 600) return json(res, 400, { error: 'invalid or expired oauth state' });
+      oauthStates.delete(q.get('state')!);
+      const cb = `${opts.publicBase ?? selfBase}/auth/oauth/${p2.id}/callback`;
+      const tok = await exchangeCode(p2, q.get('code') ?? '', cb);
+      const ident = tok && await fetchIdentity(p2, tok);
+      if (!ident) return json(res, 401, { error: 'the provider rejected the sign-in' });
+      const session = await auth.oauthLogin(p2.id, ident.subject, ident.email);
+      const code = newRefreshToken();
+      oauthCodes.set(code, { session, at: clock() });
+      for (const [k, v] of oauthCodes) if (clock() - v.at > 60) oauthCodes.delete(k);   // 60s TTL sweep
+      const back = new URL(st.redirect, opts.publicBase ?? selfBase);
+      back.searchParams.set('oauthCode', code);
+      res.writeHead(302, { location: back.toString() });
+      return res.end();
+    }
+    // POST /auth/oauth/complete { code } → swap the one-time code for the session
+    if (path[0] === 'auth' && path[1] === 'oauth' && path[2] === 'complete' && req.method === 'POST') {
+      const b = (await readBody(req)) as { code?: string };
+      const row = oauthCodes.get(b.code ?? '');
+      if (!row || clock() - row.at > 60) return json(res, 401, { error: 'invalid or expired sign-in code' });
+      oauthCodes.delete(b.code!);
+      return json(res, 200, row.session);
     }
 
     // ── self-owned auth (§5/§9): register / login / refresh / verify ──────────
@@ -1974,6 +2042,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     server.listen(opts.port ?? 0, () => {
       const addr = server.address();
       const port = typeof addr === 'object' && addr ? addr.port : opts.port;
+      selfBase = `http://127.0.0.1:${port}`;
       resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => {
       scheduler?.stop();
       clearInterval(evHeartbeat);

@@ -265,6 +265,15 @@ export class AceServer {
   /** Challenge a club to a FRIENDLY — resolved instantly with the real engine
    *  (your playbooks/fitness/morale all bite), watchable at once, standings
    *  untouched. Works vs another human's club or any AI club (a scrim). */
+  authProviders(): Promise<{ providers: { id: string; label: string }[] }> {
+    return fetch(`${this.base}/auth/providers`).then(r => j(r));
+  }
+  oauthStart(provider: string, redirect: string): string {
+    return `${this.base}/auth/oauth/${provider}?redirect=${encodeURIComponent(redirect)}`;
+  }
+  oauthComplete(code: string): Promise<Session> {
+    return this.post('/auth/oauth/complete', { code });
+  }
   loanOut(token: string, playerId: string): Promise<{ ok: boolean; reason?: string; loan?: { tag: string; tier: number } }> {
     return this.post('/loan', { id: playerId }, token);
   }
