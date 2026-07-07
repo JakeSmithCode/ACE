@@ -2100,6 +2100,12 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span v-if="clubModal.intlTitles" class="lv-hon">🌐 <b>{{ clubModal.intlTitles }}×</b> Masters</span>
           <span v-if="clubModal.wcTitles" class="lv-hon gold">🌍 <b>{{ clubModal.wcTitles }}×</b> World Cup mgr</span>
         </div>
+        <!-- franchise legends: careers that finished wearing this tag -->
+        <div v-if="clubModal.clubLegends?.length" class="lv-honstrip" title="retired players whose careers ended at this club — the franchise's history">
+          <span v-for="l in clubModal.clubLegends" :key="l.handle" class="lv-hon">
+            {{ l.inducted ? '🏛' : '🎙' }} <b>{{ l.handle }}</b> <i style="opacity:.75">{{ l.kills.toLocaleString() }}k · {{ l.seasons }}s</i>
+          </span>
+        </div>
         <!-- current form: how good RIGHT NOW (resolved games only) -->
         <div v-if="clubModal.record && (clubModal.record.w + clubModal.record.l) > 0" class="lv-clubform">
           <span class="lv-formlbl">FORM</span>

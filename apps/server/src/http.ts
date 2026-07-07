@@ -463,6 +463,10 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // into this ledger, so legends accumulate across seasons (handles are globally
   // unique; `club` tracks the latest). Durable — legends survive restarts.
   const careerStats: Record<string, PlayerStat & { seasons: number }> = {};
+  // the induction bar (deliberately high — enshrinement should be rare): a completed
+  // career with a monster body of work or a season-MVP title
+  const isLegend = (c2: PlayerStat & { seasons: number; retired?: boolean }) =>
+    !!c2.retired && (c2.kills >= 1000 || seasonAwards.some(a => a.mvp?.handle === c2.handle));
   const persistSocial = () => store.saveAccountData(id, SOCIAL_KEY, {
     friendlies, friendlySeq,
     playoffHistory, playoffSnaps: Object.fromEntries(playoffSnaps),
@@ -700,6 +704,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     {
       const nw = (await store.loadWorld(id))!;
       const allHandles = new Set(nw.clubs.flatMap(c => c.roster.map(p => p.handle)));
+      for (const h of nw.retired ?? []) allHandles.add(h);   // retired handles are closed careers
       let changed = false;
       const clubs = nw.clubs.map(c => {
         if (!c.owner) return c;
@@ -721,6 +726,14 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const career = careerStats[rt.handle];
       if (career) careerStats[rt.handle] = { ...career, retired: true } as typeof career & { retired: boolean };
       if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay);
+      // induction fires the moment a qualifying career completes — front-page news,
+      // and the last club's owner gets the moment too
+      const done = careerStats[rt.handle];
+      if (done && isLegend(done)) {
+        pushNews('champion', `🏛 ${rt.handle} is INDUCTED into the Hall of Fame — ${done.kills.toLocaleString()} career kills, ${seasonAwards.filter(a => a.mvp?.handle === rt.handle).length}× MVP. Enshrined forever.`, roll.season, liveDay);
+        const oc = w.clubs.find(c => c.tag === rt.club);
+        if (oc?.owner) notify(oc.owner, 'award', `🏛 ${rt.handle} — YOUR retired star — has been inducted into the Hall of Fame`, roll.season, liveDay);
+      }
     }
     {
       const ownedRet = (roll.retirements ?? []).filter(rt => rt.owned);
@@ -996,6 +1009,13 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       }
       return json(res, 200, {
         ...publicClub(w, c),
+        // FRANCHISE legends — retired careers that finished wearing this tag (the
+        // club-level bar sits below world induction: 300+ career kills means
+        // something here; ⚑ marks the world-inducted)
+        clubLegends: Object.values(careerStats)
+          .filter(c2 => (c2 as { retired?: boolean }).retired && c2.club === c.tag && c2.kills >= 300)
+          .sort((a, b) => b.kills - a.kills).slice(0, 3)
+          .map(c2 => ({ handle: c2.handle, kills: c2.kills, seasons: c2.seasons, inducted: isLegend(c2) })),
         division: tierName(c.tier),
         power: row?.power ?? Math.round(c.strength * 100),
         powerRank: row?.rank ?? null, totalClubs: w.clubs.length,
@@ -1268,9 +1288,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const allTime = w.clubs.filter(c => c.titles > 0).map(c => ({ tag: c.tag, name: c.name, titles: c.titles })).sort((a, b) => b.titles - a.titles || a.tag.localeCompare(b.tag));
       // the INDUCTED — retirement completes a career; an exceptional one is enshrined:
       // a season-MVP winner, or a monster body of work (1000+ career kills)
-      const mvpHandles = new Set(seasonAwards.map(a => a.mvp?.handle).filter(Boolean));
       const legends = Object.values(careerStats)
-        .filter(c2 => (c2 as { retired?: boolean }).retired && (c2.kills >= 1000 || mvpHandles.has(c2.handle)))
+        .filter(c2 => isLegend(c2))
         .sort((a, b) => b.kills - a.kills)
         .slice(0, 8)
         .map(c2 => ({ handle: c2.handle, club: c2.club, kills: c2.kills, seasons: c2.seasons, mvps: seasonAwards.filter(a => a.mvp?.handle === c2.handle).length }));

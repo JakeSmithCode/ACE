@@ -22,6 +22,7 @@ import { negotiatedContract, contractWage, demandWage } from './finance.js';
 export function marketBoard(w: WorldState, signed: Set<string> = new Set(), count = 16): Player[] {
   const exclude = new Set<string>(signed);
   for (const c of w.clubs) for (const p of c.roster) exclude.add(p.handle);
+  for (const h of w.retired ?? []) exclude.add(h);   // a retired handle is a closed career — never reissued
   return freeAgents(((w.seed ^ 0x5f356495) >>> 0) ^ (w.season * 0x9e3779b9), exclude, count + signed.size)
     .filter(p => !signed.has(p.handle)).slice(0, count);
 }

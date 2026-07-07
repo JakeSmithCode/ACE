@@ -138,6 +138,11 @@ function developClubOff(c: WorldClub, rng: Rng, frac: number): Player[] {
 
 export interface WorldState {
   seed: number; region: string;
+  /** Handles whose careers are COMPLETE (retired at a rollover). Every free-agent
+   *  generation site excludes them — a handle is a career identity, and a new
+   *  player minted under a retired legend's name would corrupt the career ledger
+   *  (caught live: an inducted 1,600-kill career kept "growing"). Bounded FIFO. */
+  retired?: string[];
   tiers: number; size: number; promo: number;
   layout: number[];         // groups per tier (the pyramid: 1 at the top, wider below)
   season: number; day: number;
@@ -393,6 +398,7 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
   {
     const retRng = new Rng((w.seed ^ (w.season * 0x51ab3d77)) >>> 0);
     const allHandles = new Set(clubs.flatMap(c => c.roster.map(p => p.handle)));
+    for (const h of w.retired ?? []) allHandles.add(h);   // a retired handle is never reissued
     const pool = freeAgents((w.seed ^ (w.season * 0x9137)) >>> 0, allHandles, 160);
     const taken = new Set<string>();
     clubs = clubs.map(c => {
@@ -445,5 +451,5 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
   // open a fresh cup for the new season (every club re-entered; club indices are stable)
   const cup = createCup(clubs.map((_, i) => i), w.season + 1);
   // the off-season heals everyone — fitness resets for the new campaign
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion , bracket, retirements };
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined, retired: [...(w.retired ?? []), ...retirements.map(r => r.handle)].slice(-2000) }, champion, moves, notes: meta.changes, cupChampion , bracket, retirements };
 }
