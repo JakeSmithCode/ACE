@@ -99,18 +99,27 @@ const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
   res.end(JSON.stringify(body));
 };
-const readBody = (req: IncomingMessage): Promise<unknown> => new Promise(resolve => {
-  let buf = '';
-  req.on('data', c => (buf += c));
-  req.on('end', () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
+// bodies are BOUNDED (256 KB — playbooks are a few KB; sanitizePlay caps deeper):
+// past the cap the socket is destroyed, so a hostile client can't stream gigabytes
+// into server memory. Oversized → {} (routes then fail their own validation).
+const BODY_MAX = 256 * 1024;
+const readBounded = (req: IncomingMessage): Promise<string | null> => new Promise(resolve => {
+  let buf = '', dead = false;
+  req.on('data', c => {
+    if (dead) return;
+    buf += c;
+    if (buf.length > BODY_MAX) { dead = true; req.destroy(); resolve(null); }
+  });
+  req.on('end', () => { if (!dead) resolve(buf); });
+  req.on('error', () => { if (!dead) { dead = true; resolve(null); } });
 });
+const readBody = async (req: IncomingMessage): Promise<unknown> => {
+  const buf = await readBounded(req);
+  try { return buf ? JSON.parse(buf) : {}; } catch { return {}; }
+};
 // the RAW body — the Stripe webhook signature is computed over the exact bytes,
 // so it must be verified BEFORE any JSON parse.
-const readRaw = (req: IncomingMessage): Promise<string> => new Promise(resolve => {
-  let buf = '';
-  req.on('data', c => (buf += c));
-  req.on('end', () => resolve(buf));
-});
+const readRaw = async (req: IncomingMessage): Promise<string> => (await readBounded(req)) ?? '';
 
 /** A player's highest-mastery agent (the engine's default pick; name tiebreak). */
 const topAgentOf = (p: { agents: { agent: string; level: number }[] }) =>
@@ -813,6 +822,27 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   const meta = (await store.loadWorld(id))!;
   const labelOf = (i: number) => ({ tag: meta.clubs[i]?.tag ?? '?', name: meta.clubs[i]?.name ?? '?' });
 
+  // ── abuse hardening: an in-memory token-bucket limiter per (ip, class) ──────
+  // 'auth' is tight (scrypt is compute-heavy — a login flood is a CPU DoS),
+  // 'chat' stops spam, 'write' is generous (a real manager never hits it) and
+  // reads are unlimited (cached + cheap). Behind a proxy, set trust for
+  // X-Forwarded-For at the proxy layer; here the socket address is the identity.
+  const RATES: Record<string, { capacity: number; perSec: number }> = {
+    auth: { capacity: 10, perSec: 10 / 60 },      // 10 burst, ~10/min sustained
+    chat: { capacity: 8, perSec: 0.75 },          // 8 burst, ~45/min
+    write: { capacity: 60, perSec: 2 },           // 60 burst, ~120/min
+  };
+  const buckets = new Map<string, { tokens: number; at: number }>();
+  const allow = (ip: string, cls: keyof typeof RATES): boolean => {
+    const r = RATES[cls], k = `${ip}|${cls}`, t = clock();
+    const b = buckets.get(k) ?? { tokens: r.capacity, at: t };
+    b.tokens = Math.min(r.capacity, b.tokens + (t - b.at) * r.perSec); b.at = t;
+    if (b.tokens < 1) { buckets.set(k, b); return false; }
+    b.tokens -= 1; buckets.set(k, b);
+    return true;
+  };
+  const bucketSweep = setInterval(() => { const t = clock(); for (const [k, b] of buckets) if (t - b.at > 600) buckets.delete(k); }, 120_000);
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const now = clock();
     // CORS preflight: a cross-origin POST/PATCH with a JSON body or Authorization
@@ -826,6 +856,16 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // `x-account` header is a dev fallback for unauthenticated local pokes).
     const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     const account = (bearer && auth.verify(bearer)) || (req.headers['x-account'] as string | undefined) || null;
+
+    // rate limits: auth endpoints (scrypt), chat sends, and all other writes
+    {
+      const ip = req.socket.remoteAddress ?? '?';
+      const cls = path[0] === 'auth' ? 'auth'
+        : path[0] === 'chat' && path[1] === 'send' ? 'chat'
+        : (req.method === 'POST' || req.method === 'PATCH') && path[0] !== 'billing' ? 'write'
+        : null;   // reads + the Stripe webhook (signature-gated) are unthrottled
+      if (cls && !allow(ip, cls)) return json(res, 429, { error: 'slow down — too many requests; try again shortly' });
+    }
 
     if (path[0] === 'health') return json(res, 200, { ok: true, id, now, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs });
 
@@ -1937,6 +1977,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       resolve({ server, url: `http://127.0.0.1:${port}`, id, store, auth, close: () => new Promise(r => {
       scheduler?.stop();
       clearInterval(evHeartbeat);
+      clearInterval(bucketSweep);
       if (revealTimer) clearTimeout(revealTimer);
       for (const h of liveHubs.values()) { if (h.timer) clearInterval(h.timer); for (const c of h.clients) { try { c.end(); } catch { /* gone */ } } }
       liveHubs.clear();

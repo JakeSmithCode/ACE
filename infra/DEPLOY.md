@@ -38,6 +38,11 @@ pnpm run server:serve
 - `STRIPE_WEBHOOK_SECRET` arms `POST /billing/webhook` with Stripe's exact
   signature scheme — point a real Stripe endpoint at it and VIP flows with no
   code change (the hosted-checkout session creation is the one remaining SDK call).
+- **Abuse hardening is built in**: request bodies are capped at 256 KB (the socket
+  is destroyed past it), and an in-memory token-bucket limiter throttles per-IP —
+  auth 10/min (scrypt is compute-heavy), chat sends ~45/min, other writes ~120/min;
+  reads are unthrottled (cached + cheap). Behind a proxy, resolve the client IP at
+  the proxy layer (the socket address is the identity here).
 - On boot with an existing world the server logs `resumed at match-day N` —
   standings, ownership, academies, mail, friendlies, playoff brackets and the
   Hall of Fame all come back (the `__social__` + per-account blobs hydrate).
