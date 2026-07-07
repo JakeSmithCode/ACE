@@ -105,6 +105,7 @@ export interface CupView {
   rounds: { round: number; name: string; ties: CupTieView[]; byes: CupClubRef[] }[];
   champion: CupClubRef | null;
   upsets: { w: CupClubRef; l: CupClubRef }[];
+  next?: { round: number; name: string; matchday: number; ties: { home: CupClubRef; away: CupClubRef; map: MapId }[] } | null;
 }
 
 const j = async <T>(r: Response): Promise<T> => {

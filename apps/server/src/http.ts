@@ -412,6 +412,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     emit('notif', { kind, text }, account);   // targeted push — the bell updates live
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
+  const notifiedDraws = new Set<string>();   // cup draws already announced (season:round)
   const notifiedBdays = new Set<string>();   // season:day:playerId birthdays already shouted out
   const injuredKnown = new Set<string>();    // account:playerId currently known injured (fire once per spell)
   // owner-to-owner mail (human-to-human, DESIGN §16 social) — real CONVERSATIONS: every
@@ -641,6 +642,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
               ? `⚔ ${won ? 'WON the derby' : 'lost the derby'} ${us}–${them} vs ${opp.tag} — ${won ? 'bragging rights are yours' : 'they get the bragging rights'}`
               : `${won ? 'WON' : 'LOST'} ${us}–${them} vs ${opp.tag}`;
             notify(c.owner, 'result', msg + ' · tap to watch it back', wn.season, f.day, { kind: 'replay', season: f.season, day: f.day, slot: f.slot });
+          }
+        }
+        // the CUP DRAW: announce a freshly-drawn round to any owner whose club is in it
+        const pend = wn.cup?.pending;
+        if (pend) {
+          const dk = `${wn.season}:${pend.round}`;
+          const myIdx = wn.clubs.findIndex(x => x.id === c.id);
+          const myPair = pend.pairs.find(([h, a]) => h === myIdx || a === myIdx);
+          if (myPair && !notifiedDraws.has(`${dk}:${c.id}`)) {
+            notifiedDraws.add(`${dk}:${c.id}`);
+            const opp = wn.clubs[myPair[0] === myIdx ? myPair[1] : myPair[0]];
+            notify(c.owner, 'fixture', `🏆 Cup draw: you face ${opp.tag} (${tierName(opp.tier)}) — the balls are out`, wn.season, liveDay, { kind: 'club', tag: opp.tag });
           }
         }
         // birthdays: any roster player whose birthday falls between the last match-day and

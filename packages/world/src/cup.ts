@@ -27,6 +27,13 @@ export interface CupState {
   alive: number[];           // clubs through to the NEXT round
   nextRound: number;         // 0..CUP_DAYS.length
   champion: number | null;
+  /** THE DRAW: the next round's pairings, drawn the moment the previous round
+   *  resolves — public before the ties are played (the cup draw is an EVENT).
+   *  Additive: absent → resolveCupRound draws at play time exactly as before.
+   *  Only rounds ≥ 2 are pre-drawn: their draw is a pure seeded shuffle (byes
+   *  are round-1-only, and byes are what read strengths), so revealing the
+   *  pairings early is byte-identical to drawing them at play time. */
+  pending?: { round: number; pairs: [number, number][]; byes: number[] };
 }
 
 /** First-round byes: the strongest clubs sit out so the field reduces to a power of two
@@ -91,7 +98,10 @@ export function resolveCupRound(c: CupState, strengthOf: (i: number) => number, 
   const round = c.nextRound, entering = c.alive.length;
   const byeCount = round === 0 ? cupByes(entering) : 0;
   const drawSeed = (worldSeed ^ (season * 0x9e3779b1) ^ ((round + 1) * 0x2545f491)) >>> 0;
-  const { pairs, byes } = drawCup(c.alive, byeCount, strengthOf, drawSeed);
+  // the pre-drawn pairings (the public DRAW) when present; the same seeded draw
+  // at play time when not — identical either way (same seed, same alive order)
+  const drawn = c.pending && c.pending.round === round ? c.pending : drawCup(c.alive, byeCount, strengthOf, drawSeed);
+  const { pairs, byes } = drawn;
   const ties: CupTie[] = pairs.map(([home, away], slot) => {
     const seed = (drawSeed ^ ((slot + 1) * 0x27d4eb2f)) >>> 0;
     const { result, input } = resolve(home, away, seed);
@@ -99,5 +109,10 @@ export function resolveCupRound(c: CupState, strengthOf: (i: number) => number, 
   });
   const alive = [...byes, ...ties.map(t => t.result!.winner)];
   const champion = alive.length === 1 ? alive[0] : null;
-  return { ...c, rounds: [...c.rounds, { round, matchday: CUP_DAYS[round], entering, ties, byes }], alive, nextRound: round + 1, champion };
+  // pre-draw the NEXT round the moment this one completes (byes are round-1-only,
+  // so this is a strength-free pure shuffle — safe to reveal early)
+  const nextSeed = (worldSeed ^ (season * 0x9e3779b1) ^ ((round + 2) * 0x2545f491)) >>> 0;
+  const pending = champion == null && round + 1 < CUP_DAYS.length
+    ? { round: round + 1, ...drawCup(alive, 0, strengthOf, nextSeed) } : undefined;
+  return { ...c, rounds: [...c.rounds, { round, matchday: CUP_DAYS[round], entering, ties, byes }], alive, nextRound: round + 1, champion, pending };
 }

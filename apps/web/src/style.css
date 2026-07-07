@@ -1852,7 +1852,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-cupside.win{color:var(--win)}
 .lv-cupside em{font-style:normal;font-size:9px;color:var(--muted-2);text-transform:uppercase;letter-spacing:.03em}
 .lv-cupscore{font-family:var(--display);font-weight:800;font-size:14px;color:var(--ink);min-width:48px;text-align:center}
-.lv-watch.sm{padding:2px 7px;font-size:11px;min-width:0}
+/* the small in-row variant is a NORMAL grid child — the base .lv-watch is
+   absolutely positioned for the match cards, which made every cup-row button
+   escape its row and stack at the panel's bottom-center (unclickable rows) */
+.lv-watch.sm{position:static;transform:none;left:auto;bottom:auto;padding:2px 7px;font-size:11px;min-width:0}
 .lv-cupq{text-align:center;color:var(--muted-2)}
 .lv-pwname{font-size:11px;color:var(--muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lv-pwtier{font-family:var(--label);font-size:10px;color:var(--muted-2);letter-spacing:.02em}
@@ -2047,7 +2050,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-obstep.next i{border-color:#5abedc;color:#8fd3e8}
 .lv-obfoot{margin-top:9px;font-size:10.5px;color:#6d7488}
 /* Match Center quick-nav (sticky) + the next-match hero */
-.lv-quicknav{position:sticky;top:0;z-index:40;display:flex;gap:6px;padding:7px 2px;margin:4px 0 2px;background:linear-gradient(180deg,var(--bg,#0b0d12) 78%,transparent);backdrop-filter:blur(3px)}
+.lv-quicknav{position:sticky;top:0;z-index:40;display:flex;gap:6px;padding:7px 2px;margin:4px 0 2px;background:linear-gradient(180deg,var(--bg,#0b0d12) 78%,transparent);backdrop-filter:blur(3px);pointer-events:none}
+.lv-quicknav button{pointer-events:auto}
+/* content scrolled to via the nav clears the sticky bar (and stays clickable) */
+.lv-stage,.lv-table,.lv-leaders,.lv-cuptie,.lv-mktpanel{scroll-margin-top:54px}
 .lv-quicknav button{background:#141824;border:1px solid #262c3c;color:#9aa1b2;font-size:10.5px;letter-spacing:.06em;border-radius:14px;padding:3px 11px;cursor:pointer}
 .lv-quicknav button:hover{color:#dfe3ec;border-color:#3a4258}
 .lv-nextmatch{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 4px;padding:10px 14px;background:linear-gradient(160deg,#161b28,#111420);border:1px solid #2a3247;border-radius:11px}
@@ -2128,3 +2134,5 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 /* the day's featured match: the broadcast pin */
 .lv-card.featured{border-color:#8a6d2c;box-shadow:0 0 0 1px rgba(232,176,60,.14) inset}
 .lv-feattag{position:absolute;top:-8px;left:12px;font-size:9px;letter-spacing:.12em;font-weight:800;color:#e8b03c;background:#141212;border:1px solid #5a4a24;border-radius:8px;padding:1px 8px}
+.lv-cuproundh.draw{color:#e8b03c;letter-spacing:.1em}
+.lv-cupscore.vs{font-size:10px;color:#8a90a0;letter-spacing:.1em}

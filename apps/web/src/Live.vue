@@ -1131,18 +1131,22 @@ const roleAbbr = (r: string) => r.slice(0, 3).toUpperCase();
 // club-profile readouts: a star tier from squad power, and the world-rank percentile
 const clubStars = (power = 0) => Math.max(1, Math.min(5, Math.round((power - 55) / 7)));   // ~55→1★ .. ~90→5★
 // ── PRE-MATCH PREVIEW: the tale of the tape for your NEXT fixture ──────────
-const preview = ref<{ me: ClubPage; them: ClubPage; map: string; home: boolean; day: number } | null>(null);
+const preview = ref<{ me: ClubPage; them: ClubPage; map: string; home: boolean; day: number; label?: string } | null>(null);
 const previewBusy = ref(false);
 async function openPreview() {
-  if (!server.value || !myClub.value || !upcoming.value.length) return;
+  if (!upcoming.value.length) return;
+  const u = upcoming.value[0];
+  await openPreviewVs(u.opp, u.map, u.home, u.day);
+}
+async function openPreviewVs(opp: string, map: string, home: boolean, day: number, label?: string) {
+  if (!server.value || !myClub.value) return;
   previewBusy.value = true;
   try {
-    const u = upcoming.value[0];
     const [me, them] = await Promise.all([
       server.value.club(myClub.value.tag, token.value ?? undefined),
-      server.value.club(u.opp, token.value ?? undefined),
+      server.value.club(opp, token.value ?? undefined),
     ]);
-    preview.value = { me, them, map: u.map, home: u.home, day: u.day };
+    preview.value = { me, them, map, home, day, label };
   } catch (e) { errMsg.value = (e as Error).message; } finally { previewBusy.value = false; }
 }
 const formPills = (c: ClubPage) => (c.form ?? []).slice(0, 5);
@@ -2088,6 +2092,19 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div v-if="!cupView" class="lv-empty">loading…</div>
           <template v-else>
             <div v-if="cupView.champion" class="lv-cupchamp" :class="{ mine: mine(cupView.champion.tag) }">🏆 {{ cupView.champion.tag }} · {{ cupView.champion.name }} <i>{{ tierName(cupView.champion.tier) }}</i> — ACE Cup winners</div>
+            <!-- THE DRAW: the next round's pairings + maps, public before the ties are played -->
+            <template v-if="cupView.next">
+              <div class="lv-cuproundh draw">🎱 THE DRAW — {{ cupView.next.name }} · match-day {{ cupView.next.matchday + 1 }}</div>
+              <div v-for="(t, ti) in cupView.next.ties" :key="'nx' + ti" class="lv-cuptie" :class="{ mine: mine(t.home.tag) || mine(t.away.tag) }">
+                <span class="lv-cupside"><i class="hq-dot" :style="{ background: `hsl(${hue(t.home.tag)} 65% 55%)` }"></i><b class="clickable" @click="openClub(t.home.tag)">{{ t.home.tag }}</b> <em>{{ tierName(t.home.tier) }}</em></span>
+                <b class="lv-cupscore vs">vs</b>
+                <span class="lv-cupside rt"><em>{{ tierName(t.away.tier) }}</em> <b class="clickable" @click="openClub(t.away.tag)">{{ t.away.tag }}</b><i class="hq-dot" :style="{ background: `hsl(${hue(t.away.tag)} 65% 55%)` }"></i></span>
+                <i class="hq-rmap">{{ t.map }}</i>
+                <button v-if="myClub && (mine(t.home.tag) || mine(t.away.tag))" class="lv-watch sm" :disabled="previewBusy"
+                        title="the pre-match preview — the tale of the tape for your cup tie"
+                        @click="openPreviewVs(mine(t.home.tag) ? t.away.tag : t.home.tag, t.map, mine(t.home.tag), cupView.next.matchday, `🏆 CUP · ${cupView.next.name.toUpperCase()}`)">⊞</button>
+              </div>
+            </template>
             <!-- your own run (any round) — watchable -->
             <div v-if="myCupRun" class="lv-cuptie myrun" :class="{ win: myCupRun.won }">
               <span class="lv-cuprunh">Your run · {{ myCupRun.round }}</span>
@@ -2130,7 +2147,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       <div class="lv-clubcard">
         <button class="lv-clubx" @click="preview = null">✕</button>
         <div class="lv-pvhead">
-          <span class="lv-kicker">MATCH-DAY {{ preview.day + 1 }} PREVIEW</span>
+          <span class="lv-kicker">{{ preview.label ?? `MATCH-DAY ${preview.day + 1} PREVIEW` }}</span>
           <b class="lv-nmmap">{{ preview.map }}</b>
           <span v-if="myClub?.rival && preview.them.tag === myClub.rival.tag" class="lv-rival">⚔ DERBY</span>
         </div>

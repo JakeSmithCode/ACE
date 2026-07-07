@@ -3,7 +3,7 @@
 // in the cup state itself, so it survives restarts via the Pg jsonb world). This shapes that
 // persisted state into the client's CupView + the watchable ties' snapshots (by tie id), so
 // `GET /cup` is a cheap read and `/cup/replay/:id` serves the stored snapshot. No engine here.
-import { cupRoundName, fixtureMap, type WorldState } from '@ace/world';
+import { CUP_DAYS, cupRoundName, fixtureMap, type WorldState } from '@ace/world';
 import type { MatchInput, MapId } from '@ace/shared';
 
 interface ClubRef { idx: number; tag: string; name: string; tier: number }
@@ -13,6 +13,8 @@ export interface CupView {
   rounds: { round: number; name: string; ties: CupTieView[]; byes: ClubRef[] }[];
   champion: ClubRef | null;
   upsets: { w: ClubRef; l: ClubRef }[];   // the cup's biggest giant-killings (by division gap)
+  /** THE DRAW: the next round, pre-drawn + public (pairings and maps) before it's played. */
+  next?: { round: number; name: string; matchday: number; ties: { home: ClubRef; away: ClubRef; map: MapId }[] } | null;
 }
 
 /** Shape the persisted `WorldState.cup` into the client view + the watchable ties' snapshots. */
@@ -35,5 +37,16 @@ export function cupViewFromState(w: WorldState): { view: CupView; games: Map<str
     }),
   }));
   upsets.sort((a, b) => (b.w.tier - b.l.tier) - (a.w.tier - a.l.tier) || a.w.idx - b.w.idx);
-  return { view: { season: w.season, rounds, champion: c.champion != null ? ref(c.champion) : null, upsets: upsets.slice(0, 10) }, games };
+  // THE DRAW: the pre-drawn next round — pairings AND maps are public before the
+  // ties are played (both are pure functions of the stable per-round seed)
+  const next = c.pending && c.champion == null ? {
+    round: c.pending.round,
+    name: cupRoundName(c.pending.pairs.length * 2 + c.pending.byes.length),
+    matchday: CUP_DAYS[c.pending.round],
+    ties: c.pending.pairs.map(([h, a], slot) => {
+      const drawSeed = (w.seed ^ (w.season * 0x9e3779b1) ^ ((c.pending!.round + 1) * 0x2545f491)) >>> 0;
+      return { home: ref(h), away: ref(a), map: fixtureMap((drawSeed ^ ((slot + 1) * 0x27d4eb2f)) >>> 0) };
+    }),
+  } : null;
+  return { view: { season: w.season, rounds, champion: c.champion != null ? ref(c.champion) : null, upsets: upsets.slice(0, 10), next }, games };
 }
