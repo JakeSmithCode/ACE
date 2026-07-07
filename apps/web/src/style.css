@@ -2106,3 +2106,4 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-nexttick b{font-variant-numeric:tabular-nums}
 /* individual honours: the gold accolade chip (MVP / Young Gun seasons) */
 .lv-acc{font-size:9px;letter-spacing:.05em;font-weight:800;color:#e8b03c;border:1px solid #5a4a24;background:rgba(230,176,60,.08);border-radius:8px;padding:0 6px;white-space:nowrap;font-style:normal}
+.lv-retired{font-size:9px;color:#8a90a0;border:1px solid #33384a;border-radius:8px;padding:0 5px;margin-left:6px;font-style:normal}

@@ -16,6 +16,9 @@ import type { Fitness } from './fitness.js';
 import type { Morale, Talk } from './morale.js';
 import { CAMP_CHEM, type Camp } from './camps.js';
 import { quickResult, settleClub, squadWageBill } from './resolve.js';
+import { shouldRetire } from './develop.js';
+import { freeAgents } from './market.js';
+import { newContract } from './finance.js';
 import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_BOOST, isMentor, mentorBoost } from './develop.js';
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
 import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
@@ -321,7 +324,8 @@ export function simulateSeason(w: WorldState): WorldState {
   return { ...cur, results, day: total, cup };
 }
 
-export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[]; cupChampion: number | null; bracket: Bracket }
+export interface Rollover { world: WorldState; champion: number; moves: DivMove[]; notes: MetaChange[]; cupChampion: number | null; bracket: Bracket; retirements: Retirement[] }
+export interface Retirement { handle: string; age: number; club: string; overall: number; owned: boolean; replacement: string | null }
 
 /** Injectable Premier-playoff resolution (additive): the server full-sims the
  *  bracket with the real engine over the live pool + map affinity so the season
@@ -378,6 +382,39 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
     // loans auto-RETURN at the rollover (a loan is one season of minutes)
     return { ...c, sponsor, roster, camp: undefined, loans: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
   });
+  // RETIREMENT closes the age-curve loop in the PERSISTENT world too (without it a
+  // long-running server decays into a league of 35-year-olds): each rollover every
+  // player draws once on a dedicated rng (fixed club/roster order — deterministic),
+  // veterans hang it up, and the club reloads from a season-seeded free-agent pool
+  // (handles disjoint from every roster) so it always fields a valid five. An owned
+  // club's replacement signs a real contract; the events feed the news + the owner's
+  // notifications, and the career ledger marks the legend retired.
+  const retirements: Retirement[] = [];
+  {
+    const retRng = new Rng((w.seed ^ (w.season * 0x51ab3d77)) >>> 0);
+    const allHandles = new Set(clubs.flatMap(c => c.roster.map(p => p.handle)));
+    const pool = freeAgents((w.seed ^ (w.season * 0x9137)) >>> 0, allHandles, 160);
+    const taken = new Set<string>();
+    clubs = clubs.map(c => {
+      const keep: Player[] = [];
+      const gone: Player[] = [];
+      for (const p of c.roster) (shouldRetire(p, retRng) ? gone : keep).push(p);
+      if (!gone.length) return c;
+      let roster = keep;
+      for (const p of gone) {
+        // prefer a young replacement; fall back to any untaken same-role FA; with
+        // NOBODY available the veteran plays one more season — a club must never
+        // drop below its valid five (the probe caught exactly this in season 10)
+        const fa = pool.find(x => x.role === p.role && !taken.has(x.handle) && x.age <= 26)
+          ?? pool.find(x => x.role === p.role && !taken.has(x.handle));
+        if (!fa) { roster = [...roster, p]; continue; }   // stays on — retirement deferred
+        taken.add(fa.handle);
+        roster = [...roster, c.owner ? { ...fa, contract: newContract(fa, w.patch) } : fa];
+        retirements.push({ handle: p.handle, age: p.age, club: c.tag, overall: Math.round(overall(p)), owned: !!c.owner, replacement: fa.handle });
+      }
+      return { ...c, roster, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100) };
+    });
+  }
   const meta = patchMeta(w.patch, new Rng((w.seed ^ (w.season * 0x27d4eb2f)) >>> 0));
   // promote/relegate. A FLAT world (every tier one group — the single-player + PvP
   // shape) also runs a promotion PLAYOFF per boundary: the clubs just below the auto
@@ -408,5 +445,5 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
   // open a fresh cup for the new season (every club re-entered; club indices are stable)
   const cup = createCup(clubs.map((_, i) => i), w.season + 1);
   // the off-season heals everyone — fitness resets for the new campaign
-  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion , bracket };
+  return { world: { ...w, clubs, patch: meta.patch, season: w.season + 1, day: 0, results: [], cup, fitness: undefined }, champion, moves, notes: meta.changes, cupChampion , bracket, retirements };
 }

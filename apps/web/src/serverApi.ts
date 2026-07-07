@@ -164,7 +164,7 @@ export class AceServer {
   news(): Promise<{ news: NewsItem[] }> { return fetch(`${this.base}/news`).then(r => j<{ news: NewsItem[] }>(r)); }
   /** Season player stats (top fraggers) from resolved watched matches. */
   stats(): Promise<{ season: number; players: StatRow[] }> { return fetch(`${this.base}/stats`).then(r => j<{ season: number; players: StatRow[] }>(r)); }
-  careerStats(): Promise<{ players: (StatRow & { seasons?: number })[] }> { return fetch(`${this.base}/stats/career`).then(r => j(r)); }
+  careerStats(): Promise<{ players: (StatRow & { seasons?: number; retired?: boolean })[] }> { return fetch(`${this.base}/stats/career`).then(r => j(r)); }
   /** Your notification inbox (targeted events) + unread count. */
   notifications(token: string): Promise<{ items: Notif[]; unread: number }> {
     return fetch(`${this.base}/notifications`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ items: Notif[]; unread: number }>(r));

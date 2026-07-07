@@ -5,7 +5,7 @@
 // world, calls the shared pure `resolveSeasonDay` / `advanceWorld` from @ace/world,
 // and persists. Matchdays within a season are sequential (economy/dev carry);
 // fixtures within a day are resolved by the pure core (parallel-safe).
-import { resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, CAMP_FAT, MAP_POOL, mapAffinity, type Bracket, type WorldState, type Fixture, type MatchResult } from '@ace/world';
+import { type Retirement, resolveSeasonDay, advanceWorld, quickResult, membersOfDiv, divisionSchedule, createCup, cupRoundDue, resolveCupRound, planFive, fitFive, tickFitness, emptyFitness, isInjured, traitKeyOf, staffEffect, updateMorale, emptyMorale, captainOf, CAMP_FAT, MAP_POOL, mapAffinity, type Bracket, type WorldState, type Fixture, type MatchResult } from '@ace/world';
 import type { Navmesh } from '@ace/maps';
 import type { MatchInput, MapId } from '@ace/shared';
 import { Rng } from '@ace/engine';
@@ -52,6 +52,7 @@ export interface TickReport {
   champion?: string; promoted?: number;   // rollover tick
   bracket?: Bracket;                 // rollover: the Premier playoff bracket (engine-simmed when navOf given)
   playoffSnapshots?: Map<number, MatchInput>;   // rollover + navOf: per-game snapshots (seed → input), watchable
+  retirements?: Retirement[];        // rollover: who hung it up (news + owner notifications + the career ledger)
 }
 
 /** Resolve the world's current match-day (or roll the season over if the season's
@@ -172,7 +173,7 @@ async function rollover(store: WorldStore, id: string, w: WorldState, opts?: Tic
   const { world: next, champion, moves } = roll;   // playoffs · settle · develop · patch · promote/relegate
   await store.recordTick({ worldId: id, season: w.season, day: w.day, kind: 'rollover', fixtures: 0 });
   await store.saveWorld(id, next);
-  return { kind: 'rollover', skipped: false, season: w.season, day: w.day, fixtures: 0, champion: w.clubs[champion].tag, promoted: moves.length, bracket: roll.bracket, playoffSnapshots: po?.snapshots };
+  return { kind: 'rollover', skipped: false, season: w.season, day: w.day, fixtures: 0, champion: w.clubs[champion].tag, promoted: moves.length, bracket: roll.bracket, playoffSnapshots: po?.snapshots, retirements: roll.retirements };
 }
 
 /** Drive one full season to its rollover (a convenience over `runTick` for the

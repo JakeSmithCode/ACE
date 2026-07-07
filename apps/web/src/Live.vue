@@ -1896,7 +1896,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div v-for="s in statRows" :key="s.handle" class="lv-strow">
               <span class="lv-ldrank" :class="{ top: s.rank <= 3 }">{{ s.rank }}</span>
               <span class="rs-role" :class="s.role">{{ s.role.slice(0,3).toUpperCase() }}</span>
-              <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i></b>
+              <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i><i v-if="(s as any).retired" class="lv-retired" title="retired — the career is complete">🎙 retired</i></b>
               <span class="lv-stk">{{ s.kills }}</span><span>{{ s.deaths }}</span>
               <span :class="s.kd >= 1 ? 'pos' : 'neg'">{{ s.kd.toFixed(2) }}</span>
               <span>{{ s.fb }}</span><span :class="{ 'lv-hshot': (s.hsPct || 0) >= 40 }">{{ s.hsPct ?? 0 }}%</span><span class="lv-stcl">{{ s.clutch || '' }}</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>

@@ -715,6 +715,20 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (changed) await store.saveWorld(id, { ...nw, clubs });
     }
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay); await persistSocial(); }
+    // retirements: the age-curve loop closing in public — legends get a send-off,
+    // owners get told who left and who was called up, the career ledger closes
+    for (const rt of roll.retirements ?? []) {
+      const career = careerStats[rt.handle];
+      if (career) careerStats[rt.handle] = { ...career, retired: true } as typeof career & { retired: boolean };
+      if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay);
+    }
+    {
+      const ownedRet = (roll.retirements ?? []).filter(rt => rt.owned);
+      for (const rt of ownedRet) {
+        const oc = w.clubs.find(c => c.tag === rt.club);
+        if (oc?.owner) notify(oc.owner, 'system', `🎙 ${rt.handle} (${rt.age}) has retired${rt.replacement ? ` — ${rt.replacement} signed from free agency to cover` : ''}`, roll.season, liveDay);
+      }
+    }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay);
     if (yg && yg.handle !== mvp?.handle) pushNews('award', `Season ${roll.season} Young Gun: ${yg.handle} (${yg.club}), ${ageOf(yg.handle)} — ${yg.kills} kills. A star is forming.`, roll.season, liveDay);
     seasonAwards.push({ season: roll.season,
@@ -1308,7 +1322,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const players = [...merged.values()]
         .sort((a, b) => b.kills - a.kills || (b.kills - b.deaths) - (a.kills - a.deaths) || a.handle.localeCompare(b.handle))
         .slice(0, 25)
-        .map((s2, i) => ({ rank: i + 1, ...s2, kd: s2.deaths ? Math.round((s2.kills / s2.deaths) * 100) / 100 : s2.kills, hsPct: s2.kills ? Math.round((s2.hs / s2.kills) * 100) : 0 }));
+        .map((s2, i) => ({ rank: i + 1, ...s2, kd: s2.deaths ? Math.round((s2.kills / s2.deaths) * 100) / 100 : s2.kills, hsPct: s2.kills ? Math.round((s2.hs / s2.kills) * 100) : 0, retired: (s2 as { retired?: boolean }).retired ?? false }));
       return json(res, 200, { players });
     }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
