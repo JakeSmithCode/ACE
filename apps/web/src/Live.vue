@@ -1290,6 +1290,22 @@ async function openPreviewVs(opp: string, map: string, home: boolean, day: numbe
 const formPills = (c: ClubPage) => (c.form ?? []).slice(0, 5);
 const clubPct = (rank?: number | null, total?: number) => (rank && total ? Math.max(1, Math.round((rank / total) * 100)) : null);
 const ord = (n: number) => { const s = n % 100; return n + (s > 3 && s < 21 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th')); };
+// the SEASON RECAP — one narrative card after each rollover, shown until dismissed
+// (seen-tracking is local: the dismissed season number survives in localStorage)
+const recapSeen = ref<number>(Number(localStorage.getItem('ace.recapSeen') ?? 0));
+const recap = computed(() => (myClub.value?.recap && myClub.value.recap.season > recapSeen.value ? myClub.value.recap : null));
+function dismissRecap() {
+  if (!myClub.value?.recap) return;
+  recapSeen.value = myClub.value.recap.season;
+  localStorage.setItem('ace.recapSeen', String(recapSeen.value));
+}
+const recapHeadline = computed(() => {
+  const r = recap.value; if (!r) return '';
+  if (r.champion) return `CHAMPIONS — ${r.tag} win the ${r.divName} title`;
+  if (r.promoted) return `PROMOTED — ${ord(r.finish)} in ${r.divName} sends ${r.tag} up`;
+  if (r.relegated) return `Relegated — ${ord(r.finish)} in ${r.divName} sends ${r.tag} down`;
+  return `${r.tag} finish ${ord(r.finish)} of ${r.divSize} in ${r.divName}`;
+});
 
 onMounted(() => { connect(); window.addEventListener('keydown', onKey); });
 onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTimer) clearInterval(presenceTimer); if (pollTimer) clearInterval(pollTimer); stopLivePoll(); viewer?.destroy(); window.removeEventListener('keydown', onKey); });
@@ -1476,6 +1492,22 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
 
       <!-- getting started — the guided path for a fresh visitor (connected, no club yet).
            Each step lights as it's done; the whole card disappears once you're rolling. -->
+      <!-- SEASON RECAP — the rollover's whole story on one card, told once -->
+      <div v-if="recap" class="lv-recap">
+        <button class="lv-clubx" @click="dismissRecap" title="dismiss">✕</button>
+        <div class="lv-recaphead">📜 SEASON {{ recap.season }} RECAP</div>
+        <b class="lv-recapline" :class="{ gold: recap.champion || recap.promoted, bad: recap.relegated }">{{ recapHeadline }}</b>
+        <div class="lv-recapgrid">
+          <span v-if="recap.brief"><i>BOARD</i>{{ recap.brief.met ? `✓ brief met — ${recap.brief.label} (+$${recap.brief.bonus.toLocaleString()})` : `✗ brief missed — ${recap.brief.label}` }}</span>
+          <span v-if="recap.cup"><i>CUP</i>{{ recap.cup.won ? '🏆 ACE Cup WINNERS' : `run ended at the ${recap.cup.round}` }}</span>
+          <span v-if="recap.topPlayer"><i>TOP FRAGGER</i><b class="clickable" @click="openPlayer(recap.topPlayer!.handle)">{{ recap.topPlayer.handle }}</b>&nbsp;· {{ recap.topPlayer.kills }} kills</span>
+          <span v-if="recap.mvp"><i>HONOURS</i>★ {{ recap.mvp }} — league MVP</span>
+          <span v-if="recap.youngGun && recap.youngGun !== recap.mvp"><i>HONOURS</i>☄ {{ recap.youngGun }} — Young Gun</span>
+          <span v-if="recap.fans != null"><i>FANS</i>◉ {{ kfans(recap.fans) }} following · tickets +${{ recap.ticketIncome.toLocaleString() }}</span>
+          <span><i>SETTLE</i>{{ recap.settleNet >= 0 ? '+' : '−' }}${{ Math.abs(recap.settleNet).toLocaleString() }} season net</span>
+        </div>
+      </div>
+
       <div v-if="!myClub" class="lv-onboard">
         <div class="lv-obhead">◢ WELCOME TO ACE <span>an always-on VALORANT world — every match resolves on the server, you run a club inside it</span></div>
         <div class="lv-obsteps">

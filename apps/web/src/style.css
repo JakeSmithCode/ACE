@@ -1211,6 +1211,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-pslabel i{font-style:normal;color:var(--muted-2);margin-left:4px}
 .lv-pscareer{color:var(--text);font-weight:600}
 .lv-pshonors{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px}
+/* the SEASON RECAP card */
+.lv-recap{position:relative;margin:14px 0;padding:14px 18px 16px;background:linear-gradient(120deg,rgba(230,198,106,.08),rgba(107,226,225,.04));border:1px solid rgba(230,198,106,.4);border-radius:10px}
+.lv-recaphead{font-family:var(--label);font-size:10px;letter-spacing:.1em;color:var(--gold);font-weight:700;margin-bottom:6px}
+.lv-recapline{display:block;font-family:var(--display);font-size:20px;letter-spacing:.03em;margin-bottom:10px}
+.lv-recapline.gold{color:var(--gold)}
+.lv-recapline.bad{color:var(--def)}
+.lv-recapgrid{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text)}
+.lv-recapgrid>span{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.lv-recapgrid i{font-style:normal;font-family:var(--label);font-size:9px;letter-spacing:.08em;color:var(--muted-2);min-width:82px}
 .lv-thead{border-bottom:1px solid var(--line-2)}
 .lv-thead span{font-family:var(--label);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2)!important}
 .lv-title{display:flex;align-items:center;gap:12px}

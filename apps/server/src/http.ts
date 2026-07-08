@@ -9,7 +9,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import type { MapId, MatchTimeline, Tactics, MatchInput } from '@ace/shared';
 import { DEFAULT_TACTICS } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { fanSponsorMul, baseFans, cupRoundName, standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, loanOut, recallLoan, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
+import { fanSponsorMul, baseFans, FAN_TICKET, cupRoundName, standings, planFive, MAP_POOL, fixtureMap, fixtureSeed, divSeedOffset, seasonSeedOf, overall, planOf, worldDivisions, divisionSchedule, membersOfDiv, marketBoard, marketEntry, resolveWorldBid, applySigning, resolveSale, applySale, resolveDirect, loanOut, recallLoan, squadView, resolveAiMarket, scoutCost, chargeScout, scoutedRange, SCOUT_MAX, defaultAcademy, academyView, upgradeAcademy, takeIntake, graduateProspect, cutProspect, developAcademy, topPlayers, topClubs, clubPhase, soloRank, ownedClubs, RANK_TIERS, aiStyle, aiComp, aiBestFive, aiTactics, traitOf, personOf, matchDate, birthdayPassed, displayAge, nationPools, pickFive, bestFive, newContract, renewContract, processContracts, CONTRACT_YEARS, defaultFacilities, facilityCost, facilityUpkeep, FACILITY_MAX, staffMarket, staffWageBill, STAFF_ROLES, sponsorOffers, sponsorGoalText, confidenceStatus, squadMood, talkFit, canPickCamp, teamCohesion, injuryOf, type Talk, type Camp, type FacilityId, type Facilities, type StaffHires, type StaffRole, type Academy, type WorldState, type WorldClub } from '@ace/world';
 import type { Player } from '@ace/shared';
 import { MemoryStore, CachedStore, type WorldStore, type FixtureRow } from './store.js';
 import { seedWorld } from './seed.js';
@@ -430,6 +430,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // Trophy Room aggregates: titles, promotions, cup wins, briefs met). Persisted per account.
   interface CareerEntry { season: number; tier: number; divName: string; finish: number; champion: boolean; promoted: boolean; relegated: boolean; cupWon: boolean; intlWon: boolean; briefMet: boolean }
   const careers = new Map<string, CareerEntry[]>();
+  // the SEASON RECAP — one narrative card per rollover (the latest only), assembled
+  // from data already in hand at the season boundary; the client shows it once.
+  interface SeasonRecap {
+    season: number; tag: string; divName: string; finish: number; divSize: number;
+    champion: boolean; promoted: boolean; relegated: boolean;
+    brief: { met: boolean; label: string; bonus: number } | null;
+    cup: { round: string; won: boolean } | null;
+    topPlayer: { handle: string; kills: number } | null;
+    fans: number | null; ticketIncome: number; settleNet: number;
+    mvp: string | null; youngGun: string | null;
+  }
+  const recaps = new Map<string, SeasonRecap>();
   let mailSeq = 0;
   const pushMail = (account: string, m: MailMsg) => { const box = mailboxes.get(account) ?? []; box.unshift(m); if (box.length > 200) box.length = 200; mailboxes.set(account, box); };
   // The academy + scout + notif + mail Maps are a write-through CACHE over the store's
@@ -442,6 +454,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     notifs: notifs.get(account) ?? [],
     mail: mailboxes.get(account) ?? [],
     career: careers.get(account) ?? [],
+    recap: recaps.get(account) ?? null,
   });
   for (const { account, data } of await store.listAccountData(id)) {
     if (data.academy) academies.set(account, data.academy as Academy);
@@ -449,6 +462,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (Array.isArray(data.notifs)) notifs.set(account, data.notifs as Notif[]);
     if (Array.isArray(data.mail)) mailboxes.set(account, data.mail as MailMsg[]);
     if (Array.isArray(data.career)) careers.set(account, data.career as CareerEntry[]);
+    if (data.recap && typeof data.recap === 'object') recaps.set(account, data.recap as SeasonRecap);
   }
   for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
   for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
@@ -858,6 +872,26 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (!log.some(e => e.season === entry.season)) careers.set(c.owner, [...log, entry]);   // idempotent per season
         if (promoted) notify(c.owner, 'season', `▲ ${c.tag} PROMOTED to ${tierName(post!.tier)}!`, roll.season, liveDay);
         else if (relegated) notify(c.owner, 'season', `▼ ${c.tag} relegated to ${tierName(post!.tier)}`, roll.season, liveDay);
+        // the SEASON RECAP card — the whole story in one place (the client shows it once)
+        {
+          // the cup run: the last round this club PLAYED (round-1 byes don't count as a run)
+          let cupRun: SeasonRecap['cup'] = null;
+          const ci = w.clubs.indexOf(c);
+          for (const rd of w.cup?.rounds ?? []) if (rd.ties.some(t => t.home === ci || t.away === ci)) cupRun = { round: cupRoundName(rd.entering), won: cupChampClub?.id === c.id };
+          const myTop = [...mvpAcc.values()].filter(p => p.club === c.tag).sort((a, b) => b.kills - a.kills)[0] ?? null;
+          recaps.set(c.owner, {
+            season: roll.season, tag: c.tag, divName: tierName(c.tier), finish: pos || 0, divSize: table.length,
+            champion: roll.champion === c.tag, promoted, relegated,
+            brief: post?.boardOutcome ? { met: post.boardOutcome.met, label: post.boardOutcome.label, bonus: post.boardOutcome.bonus } : null,
+            cup: cupRun,
+            topPlayer: myTop ? { handle: myTop.handle, kills: myTop.kills } : null,
+            fans: post?.fans ?? null,
+            ticketIncome: c.owner && c.fans ? Math.round(c.fans * FAN_TICKET) : 0,
+            settleNet: post ? post.balance - c.balance : 0,
+            mvp: mvp && c.roster.some(p => p.handle === mvp.handle) ? mvp.handle : null,
+            youngGun: yg && c.roster.some(p => p.handle === yg.handle) ? yg.handle : null,
+          });
+        }
         await persistAccount(c.owner);
       }
     }
@@ -1878,7 +1912,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const rivalClub = c.rival ? wm.clubs.find(x => x.id === c.rival) : null;
       const rival = rivalClub ? { tag: rivalClub.tag, name: rivalClub.name } : null;
       const nextDerby = oppIdx >= 0 && c.rival === wm.clubs[oppIdx].id;
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null, plays: c.plays ?? {}, planFive: planFive(c).map(p => ({ id: p.id, handle: p.handle, role: p.role, utility: p.attr.utility })) });
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null, recap: recaps.get(account) ?? null, plays: c.plays ?? {}, planFive: planFive(c).map(p => ({ id: p.id, handle: p.handle, role: p.role, utility: p.attr.utility })) });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.
