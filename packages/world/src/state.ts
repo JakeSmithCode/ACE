@@ -23,6 +23,7 @@ import { developPlayer, developInSeason, SEASON_SHARE, overall, squadRating, NO_
 import { facilityBoost, facilityUpkeep, type Facilities } from './facilities.js';
 import { staffEffect, withStaffBoost, staffWageBill, type StaffHires } from './staff.js';
 import { sponsorGoalMet, type ActiveSponsor } from './sponsor.js';
+import { FAN_TICKET } from './fans.js';
 import { computeObjective, confDelta, CONF_START, type Objective, type BoardOutcome } from './objectives.js';
 import type { DevBoost } from './develop.js';
 import { startingBalance, playoffPrize } from './finance.js';
@@ -388,8 +389,11 @@ export function advanceWorld(w: WorldState, opts: RolloverOpts = {}): Rollover {
       const yl = sponsor.yearsLeft - 1;
       sponsor = yl > 0 ? { ...sponsor, yearsLeft: yl } : undefined;
     }
+    // season tickets: the FANBASE is direct revenue at the rollover (owner-scoped —
+    // `fans` is only ever set for owned clubs, so a no-owner world is byte-identical)
+    const ticketPay = c.owner && c.fans ? Math.round(c.fans * FAN_TICKET) : 0;
     // loans auto-RETURN at the rollover (a loan is one season of minutes)
-    return { ...c, sponsor, roster, camp: undefined, loans: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
+    return { ...c, sponsor, roster, camp: undefined, loans: undefined, strength: clampStr(squadRating(clubTeam({ ...c, roster })) / 100), balance: c.balance + led.net + sponsorPay + objBonus + ticketPay, titles: c.titles + (i === champion ? 1 : 0), cupTitles: (c.cupTitles ?? 0) + (i === cupChampion ? 1 : 0), boardConfidence, boardOutcome };
   });
   // RETIREMENT closes the age-curve loop in the PERSISTENT world too (without it a
   // long-running server decays into a league of 35-year-olds): each rollover every

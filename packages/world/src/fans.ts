@@ -19,11 +19,17 @@ export const FAN_DERBY = 0.02;   // extra on a DERBY win (bragging gravity trave
 export const FAN_STAR = 0.0008;  // per roster accolade per match-day (star pull — an
                                  // MVP on the books keeps the shirts selling)
 export const FAN_FLOOR = 200;    // nobody draws zero
+export const FAN_CUP = 0.025;    // a cup win travels further than a league win
+export const FAN_UPSET = 0.05;   // a GIANT-KILLING is front-page — the surge
+export const FAN_TICKET = 0.4;   // season-ticket income per fan at the rollover —
+                                 // the brand is direct revenue, not only a
+                                 // sponsor multiplier (~13k fans → ~$5.2k/season)
 
 /** One match-day of fan movement. `accolades` = total accolades on the roster. */
-export function tickFans(fans: number, r: { won: boolean | null; derby?: boolean; accolades: number }): number {
+export function tickFans(fans: number, r: { won: boolean | null; derby?: boolean; accolades: number; cup?: 'win' | 'upset' | 'loss' }): number {
   const result = r.won == null ? 0 : r.won ? FAN_WIN + (r.derby ? FAN_DERBY : 0) : FAN_LOSS;
-  return Math.max(FAN_FLOOR, Math.round(fans * (1 + result + r.accolades * FAN_STAR)));
+  const cup = r.cup === 'upset' ? FAN_UPSET : r.cup === 'win' ? FAN_CUP : r.cup === 'loss' ? FAN_LOSS : 0;
+  return Math.max(FAN_FLOOR, Math.round(fans * (1 + result + cup + r.accolades * FAN_STAR)));
 }
 
 /** How the following prices the SPONSOR table: offers scale by the ratio of the

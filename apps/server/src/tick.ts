@@ -109,6 +109,10 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
   for (const r of results) { resultOf.set(r.home, r); resultOf.set(r.away, r); }
   const derbyByIdx = new Map<number, boolean>();   // owned club idx → won its derby this day (for the H2H tally)
   const fansByIdx = new Map<number, number>();     // owned club idx → the day's fan movement
+  // the cup round just played today (if any) — a cup result moves the following harder
+  // than a league one, and a GIANT-KILLING (winning up a tier) is the front-page surge
+  const cupToday = cup.rounds.length && cup.rounds[cup.rounds.length - 1].matchday === w.day
+    ? cup.rounds[cup.rounds.length - 1] : null;
   let clubsOut = clubs;
   const ownedIdx = w.clubs.map((c, i) => (c.owner ? i : -1)).filter(i => i >= 0);
   if (ownedIdx.length) {
@@ -135,7 +139,13 @@ export async function runTick(store: WorldStore, id: string, opts?: TickOptions)
       // the FANBASE moves with the result (wins build the brand, a derby win
       // travels, star accolades keep the pull) — owner-scoped, ×1 when absent
       const accolades = c.roster.reduce((n, p) => n + (p.accolades?.length ?? 0), 0);
-      fansByIdx.set(i, tickFans(c.fans ?? baseFans(c.strength, c.tier, c.titles), { won, derby, accolades }));
+      const tie = cupToday?.ties.find(t => t.home === i || t.away === i);
+      const cupRes = tie?.result
+        ? (tie.result.winner === i
+            ? (w.clubs[i].tier > w.clubs[tie.home === i ? tie.away : tie.home].tier ? 'upset' as const : 'win' as const)
+            : 'loss' as const)
+        : undefined;
+      fansByIdx.set(i, tickFans(c.fans ?? baseFans(c.strength, c.tier, c.titles), { won, derby, accolades, cup: cupRes }));
     }
     fitness = fit; morale = mor;
     // the team talk was a one-shot for this match — clear it; a derby updates the H2H record

@@ -415,6 +415,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   };
   const notifiedLive = new Set<string>(), notifiedResults = new Set<string>();   // fixture keys already notified (no dupes)
   const notifiedDraws = new Set<string>();   // cup draws already announced (season:round)
+  const fanMarks = new Map<string, number>();   // owner → last fan milestone told (init silently at claim baseline)
+  const FAN_MARKS = [500, 1000, 2000, 5000, 10000, 15000, 20000, 30000, 50000, 75000, 100000, 150000, 250000];
+  const fanMark = (f: number) => { let m = 0; for (const t of FAN_MARKS) if (f >= t) m = t; return m; };
   const notifiedBdays = new Set<string>();   // season:day:playerId birthdays already shouted out
   const injuredKnown = new Set<string>();    // account:playerId currently known injured (fire once per spell)
   // owner-to-owner mail (human-to-human, DESIGN §16 social) — real CONVERSATIONS: every
@@ -678,6 +681,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
             if (notifiedBdays.has(bk)) continue;
             notifiedBdays.add(bk);
             notify(c.owner, 'system', `🎂 ${p.handle} (${personOf(p.id).name}) turns ${displayAge(p.age, bd, today)} today`, wn.season, liveDay);
+          }
+        }
+        // fan milestones: crossing a follower line is a brand moment worth telling.
+        // Initialized SILENTLY on first sight, so claiming a club never fires one
+        // for the baseline following it inherited — only real growth announces.
+        if (c.fans != null) {
+          // high-water: a mark is told ONCE — dipping under and re-crossing is not news
+          const mark = fanMark(c.fans), prev = fanMarks.get(c.owner);
+          if (prev == null) fanMarks.set(c.owner, mark);
+          else if (mark > prev) {
+            fanMarks.set(c.owner, mark);
+            const label = mark >= 1000 ? `${mark / 1000}k` : `${mark}`;
+            notify(c.owner, 'system', `◉ Your following crossed ${label} — the brand is growing, and sponsors price it in`, wn.season, liveDay);
           }
         }
         // injuries: a starter who just picked up a knock — fire once per spell (tracked so a
