@@ -96,23 +96,43 @@ const isDerby = (f: { home: { tag: string }; away: { tag: string } }) => {
 };
 
 const verifyNote = ref('');
+// mailed-verification entry (a mail-configured server never returns the token)
+const needVerify = ref(false);
+const verifyInput = ref('');
+async function submitVerify() {
+  if (!server.value || !verifyInput.value.trim()) return; busy.value = true; authErr.value = '';
+  try {
+    await server.value.verifyEmail(verifyInput.value.trim());
+    needVerify.value = false; verifyInput.value = '';
+    verifyNote.value = '✓ email verified';
+    setTimeout(() => (verifyNote.value = ''), 3000);
+    authOpen.value = false;
+    await refreshMe();
+  } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
+}
 async function doAuth() {
   if (!server.value) return; busy.value = true; authErr.value = ''; verifyNote.value = '';
   try {
     if (authMode.value === 'register') {
       const s = await server.value.register(email.value, password.value);
       token.value = s.accessToken;
-      // a real account must verify its email before it can claim a club. In production
-      // the user clicks a link we email; this demo surfaces the token and completes it
-      // inline (an honest stand-in — same server gate, no mail server).
-      await server.value.verifyEmail(s.verifyToken);
-      verifyNote.value = '✓ email verified';
-      setTimeout(() => (verifyNote.value = ''), 3000);
+      // a real account must verify its email before it can claim a club. A dev server
+      // surfaces the token inline and we complete it here (same gate, no mail server);
+      // a mail-configured server EMAILS it instead — show the token entry.
+      if (s.verifyToken) {
+        await server.value.verifyEmail(s.verifyToken);
+        verifyNote.value = '✓ email verified';
+        setTimeout(() => (verifyNote.value = ''), 3000);
+      } else {
+        needVerify.value = true;
+        verifyNote.value = '✉ check your email — paste the verification token below';
+      }
     } else {
       const s = await server.value.login(email.value, password.value);
       token.value = s.accessToken;
     }
-    authOpen.value = false; password.value = '';
+    if (!needVerify.value) authOpen.value = false;   // stay open for the mailed-token entry
+    password.value = '';
     await refreshMe();
     openEvents();   // re-key the event stream with the signed-in token (targeted notif/mail)
   } catch (e) { authErr.value = (e as Error).message; } finally { busy.value = false; }
@@ -1376,6 +1396,10 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         <template v-else-if="authed">
           <span class="lv-signedin">● signed in</span>
           <span v-if="verifyNote" class="lv-verifynote">{{ verifyNote }}</span>
+          <template v-if="needVerify">
+            <input v-model="verifyInput" placeholder="verification token (from your email)" class="lv-authin lv-verifyin" spellcheck="false" @keyup.enter="submitVerify" />
+            <button class="lv-go sm" :disabled="busy || !verifyInput.trim()" @click="submitVerify">Verify email</button>
+          </template>
           <span class="lv-claimlbl">claim a Premier club</span>
           <select v-model="claimTag" class="lv-claimsel"><option value="">choose…</option><option v-for="s in table" :key="s.club" :value="s.club">{{ s.club }}</option></select>
           <button class="lv-go sm" :disabled="!claimTag || busy" @click="doClaim">claim</button>

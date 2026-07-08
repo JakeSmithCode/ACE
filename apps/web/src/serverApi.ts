@@ -21,7 +21,7 @@ export interface Session { accountId: string; accessToken: string; refreshToken:
 /** Register also returns the email-verification token. In production it's emailed (a
  *  link the user clicks); this dev/demo surface returns it so the client can complete
  *  verification inline — a real account must be verified before it can claim a club. */
-export interface RegisterResult extends Session { verifyToken: string }
+export interface RegisterResult extends Session { verifyToken?: string; sent?: boolean }
 export interface StaffMember { id: string; name: string; role: string; rating: number; wage: number }
 export interface SponsorOffer { name: string; base: number; bonus: number; goal: string; goalN: number; years: number; goalText?: string }
 export interface AttrScout { key: string; cur: number; ceil: number; mech: boolean }

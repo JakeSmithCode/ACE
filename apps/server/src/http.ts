@@ -1009,7 +1009,17 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (path[0] === 'auth' && req.method === 'POST') {
       const b = (await readBody(req)) as { email?: string; password?: string; refreshToken?: string; token?: string };
       try {
-        if (path[1] === 'register') return json(res, 201, await auth.register(b.email ?? '', b.password ?? ''));
+        if (path[1] === 'register') {
+          const reg = await auth.register(b.email ?? '', b.password ?? '');
+          // a configured mailer carries the verification token (never the response —
+          // the dev flow without one surfaces it inline, same contract as /forgot)
+          if (opts.mailer) {
+            await opts.mailer(b.email ?? '', 'Verify your ACE account', `Your verification token: ${reg.verifyToken}`);
+            const { verifyToken: _vt, ...rest } = reg;
+            return json(res, 201, { ...rest, sent: true });
+          }
+          return json(res, 201, reg);
+        }
         if (path[1] === 'login') return json(res, 200, await auth.login(b.email ?? '', b.password ?? ''));
         if (path[1] === 'refresh') return json(res, 200, await auth.refresh(b.refreshToken ?? ''));
         if (path[1] === 'verify') {

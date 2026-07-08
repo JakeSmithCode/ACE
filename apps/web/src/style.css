@@ -1268,6 +1268,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-authtabs button{background:#0a121b;border:1px solid var(--line-2);color:var(--muted);font-family:var(--label);font-size:11px;letter-spacing:.05em;padding:6px 13px;cursor:pointer}
 .lv-authtabs button.on{color:var(--brand);border-color:rgba(34,211,238,.5);background:rgba(34,211,238,.1)}
 .lv-authin{background:#0a121b;border:1px solid var(--line-2);color:var(--text);font-family:var(--body);font-size:12px;padding:8px 11px;width:190px;clip-path:var(--bevel)}
+.lv-verifyin{width:240px}
 .lv-autherr{font-family:var(--label);font-size:11px;color:var(--def);letter-spacing:.03em}
 .lv-card.mine{border-color:rgba(229,181,103,.5);box-shadow:0 0 0 1px rgba(229,181,103,.25),0 8px 26px rgba(0,0,0,.4)}
 .lv-trow.mine{background:rgba(229,181,103,.07)}

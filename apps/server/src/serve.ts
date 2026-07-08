@@ -17,6 +17,7 @@
 import { startLiveServer, type LiveServerOpts } from './http.js';
 import { PgStore, PgAccountStore } from './pg.js';
 import { googleProvider, discordProvider, type OAuthProvider } from './oauth.js';
+import { smtpMailer } from './smtp.js';
 
 const argv = process.argv.slice(2);
 const flag = (n: string, d: number) => { const i = argv.indexOf('--' + n); return i >= 0 && argv[i + 1] ? parseInt(argv[i + 1], 10) : d; };
@@ -40,10 +41,22 @@ const opts: LiveServerOpts = {
   stripeWebhookSecret: env('STRIPE_WEBHOOK_SECRET'),
   publicBase: env('ACE_PUBLIC_URL'),
 };
-// outbound mail: ACE_MAIL_WEBHOOK posts {to, subject, text} as JSON to any HTTP
-// sender (a Resend/SES/worker endpoint — the fetch IS the mailer, zero-dep).
+// outbound mail, two zero-dep transports (SMTP wins when both are set):
+//   ACE_SMTP_HOST/PORT/USER/PASS + ACE_MAIL_FROM  → the real protocol against any
+//     relay (SES, Mailgun, Postfix…). ACE_SMTP_SECURE=1 for implicit-TLS :465;
+//     default is STARTTLS on :587 (credentials never cross an open wire).
+//   ACE_MAIL_WEBHOOK  → posts {to, subject, text} as JSON to any HTTP sender.
 // Configured → verification/reset tokens are mailed, never surfaced in responses.
-if (env('ACE_MAIL_WEBHOOK')) {
+if (env('ACE_SMTP_HOST') && env('ACE_MAIL_FROM')) {
+  opts.mailer = smtpMailer({
+    host: env('ACE_SMTP_HOST')!,
+    port: env('ACE_SMTP_PORT') ? Number(env('ACE_SMTP_PORT')) : undefined,
+    secure: env('ACE_SMTP_SECURE') === '1',
+    user: env('ACE_SMTP_USER'), pass: env('ACE_SMTP_PASS'),
+    from: env('ACE_MAIL_FROM')!,
+  });
+  console.log(`  outbound mail: SMTP via ${env('ACE_SMTP_HOST')}`);
+} else if (env('ACE_MAIL_WEBHOOK')) {
   const hook = env('ACE_MAIL_WEBHOOK')!;
   opts.mailer = async (to, subject, text) => {
     const r = await fetch(hook, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to, subject, text }) });
