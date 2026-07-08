@@ -43,6 +43,16 @@ pnpm run server:serve
   sender — SES/Resend/SMTP) and reset+verification tokens are mailed, never
   surfaced in responses; without a mailer the dev flow returns them inline.
   A consumed reset revokes every live session for the account.
+- **Outbound mail, two zero-dep transports** (SMTP wins when both are set):
+  - `ACE_SMTP_HOST` + `ACE_MAIL_FROM` (plus optional `ACE_SMTP_PORT`,
+    `ACE_SMTP_USER`/`ACE_SMTP_PASS`, `ACE_SMTP_SECURE=1` for implicit-TLS :465)
+    → the built-in SMTP client (`smtp.ts`) against any relay — SES, Mailgun,
+    Postfix, a LAN smarthost. Default is STARTTLS on :587; the client refuses
+    to send credentials over a channel that doesn't offer STARTTLS.
+  - `ACE_MAIL_WEBHOOK` → POSTs `{to, subject, text}` as JSON to any HTTP sender
+    (a Resend/SES/worker endpoint — the fetch is the mailer).
+  With either configured, register responds `sent: true` (no `verifyToken`) and
+  the Match Center shows a paste-the-token entry after sign-up.
 - **Social sign-in (Google / Discord)**: set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
   and/or `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` and the buttons light up.
   Register the callback `${ACE_PUBLIC_URL}/auth/oauth/<provider>/callback` with the
