@@ -1193,6 +1193,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-zonekey i.zone-pop{background:var(--att)}
 .lv-zonekey i.zone-risk{background:#e0a95e}
 .lv-zonekey i.zone-down{background:var(--def)}
+.lv-clinch{font-style:normal;font-size:11px;font-weight:700;margin-left:2px}
+.lv-clinch.in{color:#7ee2a0}
+.lv-clinch.out{color:var(--muted-2)}
+.lv-clinch.rel{color:var(--def)}
 .lv-thead{border-bottom:1px solid var(--line-2)}
 .lv-thead span{font-family:var(--label);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2)!important}
 .lv-title{display:flex;align-items:center;gap:12px}

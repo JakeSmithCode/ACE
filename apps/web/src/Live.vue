@@ -854,6 +854,36 @@ const zoneLegend = computed(() => {
   const L: Record<string, string> = { po: 'title playoffs', up: 'promoted', pop: 'promotion playoff', risk: 'at risk', down: 'relegated' };
   return ['po', 'up', 'pop', 'risk', 'down'].filter(z => seen.has(z)).map(z => ({ z, label: L[z] }));
 });
+// CLINCH / ELIMINATION markers — the run-in narrative. Conservative magic-number
+// math over the table alone (a rival "can pass" whenever max-points can even TIE,
+// so a ✓ is never premature; head-to-heads only make the real cut earlier):
+//   ✓  top-K locked (Premier K=4 playoffs; lower tiers K=promo auto-promotion)
+//   ✗  top-K out of reach   ⬇ relegation mathematically confirmed
+const clinchOf = computed(() => {
+  const t = table.value, n = t.length;
+  if (!world.value || n < 2) return [] as string[];
+  const total = 2 * (n - 1);                          // double round-robin
+  const maxOf = (r: StandingRow) => r.points + 3 * Math.max(0, total - r.played);
+  const k = world.value.promo ?? 2, bottom = (world.value.tiers ?? 1) - 1;
+  // ✓ clinches the SURE thing (Premier playoffs / auto-promotion); ✗ requires the
+  // WHOLE route up gone (auto + the promotion-playoff band) — a club out of the
+  // auto spots but alive for the playoff is still in the race
+  const Kin = tableTier.value === 0 ? 4 : k;
+  const Kout = tableTier.value === 0 ? 4 : k + PLAYOFF_SLOTS;
+  return t.map((row, i) => {
+    const rivalsCanPass = t.filter((r, j) => j !== i && maxOf(r) >= row.points).length;
+    if (rivalsCanPass < Kin) return 'in';             // top-Kin locked
+    const aboveForever = t.filter((r, j) => j !== i && r.points > maxOf(row)).length;
+    if (tableTier.value < bottom && aboveForever >= n - k) return 'rel';   // bottom-k confirmed
+    if (aboveForever >= Kout) return 'out';           // every route up unreachable
+    return '';
+  });
+});
+const CLINCH_LABEL: Record<string, string> = {
+  in: 'clinched — the spot is mathematically locked',
+  out: 'out of the race — the top spots are mathematically out of reach',
+  rel: 'relegation confirmed — cannot climb out of the drop zone',
+};
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }>({ honors: [], allTime: [] });
@@ -2003,7 +2033,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
           <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="[{ mine: mine(s.club) }, zoneOf(rank) ? 'zone-' + zoneOf(rank) : '']">
             <span class="r">{{ rank + 1 }}</span>
-            <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
+            <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i><i v-if="clinchOf[rank]" class="lv-clinch" :class="clinchOf[rank]" :title="CLINCH_LABEL[clinchOf[rank]]">{{ clinchOf[rank] === 'in' ? '✓' : clinchOf[rank] === 'rel' ? '⬇' : '✗' }}</i></span>
             <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
             <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
             <span class="pts">{{ s.points }}</span>
