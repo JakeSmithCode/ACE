@@ -13,7 +13,7 @@ import { ANCHORS, siteIds, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
-import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView , TransferOffer, type Notif } from './serverApi';
+import { AceServer, type WorldSummary, type StandingRow, type LiveFixture, type ClubPage, type MarketEntry, type SquadPlayer, type LeaderRow, type ClubRankRow, type NewsItem, type StatRow, type CupView, type CupTieView, type FriendlyRow, type ScheduleRow, type PlayoffView , TransferOffer, type Notif, type PlayerProfile } from './serverApi';
 const SCOUT_MAX = 3;
 
 const DEFAULT = new URL(location.href).searchParams.get('server') || 'http://127.0.0.1:8787';
@@ -1244,6 +1244,17 @@ function shareWatch() {
   navigator.clipboard?.writeText(u).then(() => { shareCopied.value = true; setTimeout(() => (shareCopied.value = false), 2200); }).catch(() => { /* clipboard blocked */ });
 }
 
+// --- the PLAYER PROFILE (click any player name — one identity card everywhere) ---
+const playerModal = ref<PlayerProfile | null>(null);
+const playerBusy = ref(false);
+async function openPlayer(handle: string) {
+  if (!server.value || !handle) return; playerBusy.value = true;
+  try { playerModal.value = await server.value.player(handle); }
+  catch (e) { errMsg.value = (e as Error).message; } finally { playerBusy.value = false; }
+}
+const kdOf = (t: { kills: number; deaths: number } | null) => !t ? '—' : t.deaths ? (t.kills / t.deaths).toFixed(2) : String(t.kills);
+const hsPctOf = (t: { kills: number; hs: number } | null) => !t || !t.kills ? '—' : Math.round((t.hs / t.kills) * 100) + '%';
+
 // --- the public club page (click any club tag to browse its squad) ----------
 const clubModal = ref<ClubPage | null>(null);
 const clubBusy = ref(false);
@@ -2010,7 +2021,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div class="lv-boxrow lv-boxthead"><span>Player</span><span>K</span><span>D</span><span>+/−</span><span>FB</span><span title="headshot kill rate">HS%</span></div>
             <div v-for="p in team" :key="p.handle" class="lv-boxrow clickable" :class="{ mvp: p.mvp, followed: p.handle === followed }"
                  :title="p.handle === followed ? 'release the follow cam' : `follow ${p.handle} with the director camera`" @click="followRow(p.handle)">
-              <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b>{{ p.handle }}</b><span v-if="p.flag" class="lv-boxflag" :title="p.name">{{ p.flag }}</span><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
+              <span class="lv-boxp"><span class="rs-role" :class="p.role">{{ p.role.slice(0,3).toUpperCase() }}</span><b class="clickable" title="open player profile" @click.stop="openPlayer(p.handle)">{{ p.handle }}</b><span v-if="p.flag" class="lv-boxflag" :title="p.name">{{ p.flag }}</span><i v-if="p.igl" class="lv-igl">IGL</i><i v-if="p.mvp" class="lv-mvp">★ MVP</i></span>
               <span>{{ p.kills }}</span><span>{{ p.deaths }}</span>
               <span :class="p.kills - p.deaths >= 0 ? 'pos' : 'neg'">{{ p.kills - p.deaths >= 0 ? '+' : '' }}{{ p.kills - p.deaths }}</span>
               <span>{{ p.fb }}</span>
@@ -2063,7 +2074,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               <div class="lv-hofsec">🏛 Inducted — careers complete</div>
               <div v-for="l in hof.legends" :key="'lg' + l.handle" class="lv-hofseason">
                 <span title="retired — enshrined for an exceptional career">🎙</span>
-                <b>{{ l.handle }}</b>
+                <b class="clickable" title="open player profile" @click="openPlayer(l.handle)">{{ l.handle }}</b>
                 <span class="lv-hofname">{{ l.kills.toLocaleString() }} career kills · {{ l.seasons }} season(s)<template v-if="l.mvps"> · {{ l.mvps }}× MVP</template> · last of <i class="clickable" @click="openClub(l.club)">{{ l.club }}</i></span>
               </div>
             </template>
@@ -2071,8 +2082,8 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               <div class="lv-hofsec">Individual honours</div>
               <div v-for="a in hof.awards.slice(0, 5)" :key="'aw' + a.season" class="lv-hofseason">
                 <span class="lv-hofsno">S{{ a.season }}</span>
-                <span v-if="a.mvp" :title="`${a.mvp.kills} kills across the season`">★ MVP <b>{{ a.mvp.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.mvp.club)">{{ a.mvp.club }}</i></span>
-                <span v-if="a.youngGun && a.youngGun.handle !== a.mvp?.handle" :title="`the best under-22 — ${a.youngGun.kills} kills at ${a.youngGun.age}`">☄ Young Gun <b>{{ a.youngGun.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.youngGun.club)">{{ a.youngGun.club }}</i></span>
+                <span v-if="a.mvp" :title="`${a.mvp.kills} kills across the season`">★ MVP <b class="clickable" title="open player profile" @click="openPlayer(a.mvp.handle)">{{ a.mvp.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.mvp.club)">{{ a.mvp.club }}</i></span>
+                <span v-if="a.youngGun && a.youngGun.handle !== a.mvp?.handle" :title="`the best under-22 — ${a.youngGun.kills} kills at ${a.youngGun.age}`">☄ Young Gun <b class="clickable" title="open player profile" @click="openPlayer(a.youngGun.handle)">{{ a.youngGun.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.youngGun.club)">{{ a.youngGun.club }}</i></span>
               </div>
             </template>
           </template>
@@ -2094,7 +2105,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div v-for="p in leaders" :key="p.handle" class="lv-ldrow">
               <span class="lv-ldrank" :class="{ top: p.rank <= 3 }">{{ p.rank }}</span>
               <span class="rs-role" :class="p.role">{{ p.role.slice(0, 3).toUpperCase() }}</span>
-              <b class="lv-ldhandle">{{ p.handle }}<i v-if="p.name" class="lv-ldperson" :title="p.name">{{ p.flag }} {{ p.name }}</i></b>
+              <b class="lv-ldhandle clickable" title="open player profile" @click="openPlayer(p.handle)">{{ p.handle }}<i v-if="p.name" class="lv-ldperson" :title="p.name">{{ p.flag }} {{ p.name }}</i></b>
               <span class="lv-ldovr">{{ p.overall }} <i>OVR</i></span>
               <span class="lv-ldsolo" :class="'rk-' + p.soloTier.toLowerCase()">{{ p.soloLabel }}</span>
               <span class="lv-ldclub"><i class="hq-dot" :style="{ background: `hsl(${hue(p.clubTag)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(p.clubTag)">{{ p.clubTag }}</span> · {{ tierName(p.tier) }}<i v-if="p.owned" class="lv-youtag sm">OWNED</i></span>
@@ -2144,7 +2155,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <div v-for="s in statRows" :key="s.handle" class="lv-strow">
               <span class="lv-ldrank" :class="{ top: s.rank <= 3 }">{{ s.rank }}</span>
               <span class="rs-role" :class="s.role">{{ s.role.slice(0,3).toUpperCase() }}</span>
-              <b class="lv-sthandle">{{ s.handle }} <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i><i v-if="(s as any).retired" class="lv-retired" title="retired — the career is complete">🎙 retired</i></b>
+              <b class="lv-sthandle"><span class="clickable" title="open player profile" @click="openPlayer(s.handle)">{{ s.handle }}</span> <i class="lv-stclub" @click="openClub(s.club)">{{ s.club }}</i><i v-if="(s as any).retired" class="lv-retired" title="retired — the career is complete">🎙 retired</i></b>
               <span class="lv-stk">{{ s.kills }}</span><span>{{ s.deaths }}</span>
               <span :class="s.kd >= 1 ? 'pos' : 'neg'">{{ s.kd.toFixed(2) }}</span>
               <span>{{ s.fb }}</span><span :class="{ 'lv-hshot': (s.hsPct || 0) >= 40 }">{{ s.hsPct ?? 0 }}%</span><span class="lv-stcl">{{ s.clutch || '' }}</span><span class="lv-stmvp">{{ s.mvp || '' }}</span><span>{{ s.matches }}</span>
@@ -2333,6 +2344,49 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
     </div>
 
+    <!-- the PLAYER PROFILE card — identity + career, one modal for every name -->
+    <div v-if="playerModal" class="lv-clubmodal" @click.self="playerModal = null">
+      <div class="lv-clubcard lv-playercard">
+        <button class="lv-clubx" @click="playerModal = null">✕</button>
+        <div class="lv-clubhero" :style="{ '--cc': `hsl(${hue(playerModal.handle)} 66% 56%)` }">
+          <div class="lv-crest" :style="{ background: `linear-gradient(150deg, hsl(${hue(playerModal.handle)} 55% 26%), hsl(${hue(playerModal.handle)} 50% 16%))`, borderColor: `hsl(${hue(playerModal.handle)} 66% 56%)` }">
+            <span class="lv-cresttag">{{ playerModal.handle.slice(0, 5) }}</span>
+          </div>
+          <div class="lv-clubid">
+            <b class="lv-clubname">{{ playerModal.handle }}<i v-if="playerModal.igl" class="lv-igl" style="margin-left:8px">IGL</i><i v-if="playerModal.legend" class="lv-legendtag" title="inducted into the Hall of Fame">🏛 LEGEND</i></b>
+            <div class="lv-clubtags">
+              <span v-if="playerModal.name" class="lv-playerreal">{{ playerModal.flag }} {{ playerModal.name }}<template v-if="playerModal.age != null"> · {{ playerModal.age }}</template></span>
+              <span v-if="playerModal.role" class="rs-role" :class="playerModal.role">{{ playerModal.role.toUpperCase() }}</span>
+              <span v-if="playerModal.club" class="lv-clubdiv clickable" @click="openClub(playerModal.club.tag); playerModal = null">{{ playerModal.club.tag }}<template v-if="playerModal.club.division"> · {{ playerModal.club.division }}</template></span>
+              <span v-if="playerModal.career?.retired" class="lv-retiredtag">🎙 RETIRED</span>
+            </div>
+            <div class="lv-clubtags">
+              <span v-if="playerModal.soloRank" class="lv-ldsolo" :class="'rk-' + playerModal.soloRank.tier.toLowerCase()" :title="`solo-queue rank — individual skill, a different axis from the club's division`">{{ playerModal.soloRank.label }}</span>
+              <span v-if="playerModal.trait" class="lv-traitchip">✦ {{ playerModal.trait }}</span>
+              <i v-for="a in playerModal.accolades" :key="a" class="lv-acc">★ {{ a }}</i>
+            </div>
+          </div>
+        </div>
+        <div class="lv-playerstats">
+          <div class="lv-pstable">
+            <div class="lv-psrow lv-pshead"><span></span><span>GP</span><span>K</span><span>D</span><span>K/D</span><span>FB</span><span>HS%</span><span title="1vX clutches converted">CL</span><span>MVP</span></div>
+            <div v-if="playerModal.season" class="lv-psrow">
+              <span class="lv-pslabel">SEASON</span><span>{{ playerModal.season.matches }}</span><span>{{ playerModal.season.kills }}</span><span>{{ playerModal.season.deaths }}</span>
+              <span>{{ kdOf(playerModal.season) }}</span><span>{{ playerModal.season.fb }}</span><span>{{ hsPctOf(playerModal.season) }}</span><span>{{ playerModal.season.clutch }}</span><span>{{ playerModal.season.mvp }}</span>
+            </div>
+            <div v-if="playerModal.career" class="lv-psrow lv-pscareer">
+              <span class="lv-pslabel">CAREER <i>{{ playerModal.career.seasons }}s</i></span><span>{{ playerModal.career.matches }}</span><span>{{ playerModal.career.kills }}</span><span>{{ playerModal.career.deaths }}</span>
+              <span>{{ kdOf(playerModal.career) }}</span><span>{{ playerModal.career.fb }}</span><span>{{ hsPctOf(playerModal.career) }}</span><span>{{ playerModal.career.clutch }}</span><span>{{ playerModal.career.mvp }}</span>
+            </div>
+            <div v-if="!playerModal.season && !playerModal.career" class="lv-note" style="padding:8px 2px">no tracked matches yet — stats accrue from watched (Premier) games</div>
+          </div>
+          <div v-if="playerModal.awards.length" class="lv-pshonors">
+            <i v-for="aw in playerModal.awards" :key="aw.season" class="lv-acc">{{ aw.mvp ? '★ MVP' : '☄ Young Gun' }} S{{ aw.season }}</i>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="clubModal" class="lv-clubmodal" @click.self="clubModal = null">
       <div class="lv-clubcard">
         <button class="lv-clubx" @click="clubModal = null">✕</button>
@@ -2394,7 +2448,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         <!-- franchise legends: careers that finished wearing this tag -->
         <div v-if="clubModal.clubLegends?.length" class="lv-honstrip" title="retired players whose careers ended at this club — the franchise's history">
           <span v-for="l in clubModal.clubLegends" :key="l.handle" class="lv-hon">
-            {{ l.inducted ? '🏛' : '🎙' }} <b>{{ l.handle }}</b> <i style="opacity:.75">{{ l.kills.toLocaleString() }}k · {{ l.seasons }}s</i>
+            {{ l.inducted ? '🏛' : '🎙' }} <b class="clickable" title="open player profile" @click="openPlayer(l.handle)">{{ l.handle }}</b> <i style="opacity:.75">{{ l.kills.toLocaleString() }}k · {{ l.seasons }}s</i>
           </span>
         </div>
         <!-- current form: how good RIGHT NOW (resolved games only) -->
@@ -2417,7 +2471,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
             <span class="lv-fivehandle">
-              <span class="lv-fivetop"><b>{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span><span v-for="a in p.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — the market prices the proof' : 'season Young Gun (best U22)'">★ {{ a }}</span></span>
+              <span class="lv-fivetop"><b class="clickable" title="open player profile" @click="openPlayer(p.handle)">{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span><span v-for="a in p.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — the market prices the proof' : 'season Young Gun (best U22)'">★ {{ a }}</span></span>
               <span v-if="p.name" class="lv-fiveperson" :title="p.country"><span class="lv-flag">{{ p.flag }}</span> {{ p.name }}<i v-if="p.age"> · {{ p.age }}</i></span>
             </span>
             <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>

@@ -1526,6 +1526,48 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         .map((s2, i) => ({ rank: i + 1, ...s2, kd: s2.deaths ? Math.round((s2.kills / s2.deaths) * 100) / 100 : s2.kills, hsPct: s2.kills ? Math.round((s2.hs / s2.kills) * 100) : 0, retired: (s2 as { retired?: boolean }).retired ?? false }));
       return json(res, 200, { players });
     }
+    // GET /players/:handle  → the PLAYER PROFILE — one identity card wherever a name
+    // appears: who they are (person, club, role, rank, trait, accolades) + what
+    // they've done (this season's tally + the all-time career ledger, retired careers
+    // included — a rostered player and a Hall-of-Fame legend answer the same route).
+    if (path[0] === 'players' && path.length === 2) {
+      const handle = decodeURIComponent(path[1]);
+      const w = (await store.loadWorld(id))!;
+      let player: Player | undefined, club: WorldClub | undefined;
+      for (const c of w.clubs) { const p = c.roster.find(pp => pp.handle === handle); if (p) { player = p; club = c; break; } }
+      // season tally (resolved watched matches only — embargo-safe like /stats)
+      const rows = await store.fixtures(id, w.season);
+      const acc = new Map<string, PlayerStat>();
+      for (const f of rows) if (fixtureStatus(f, now) === 'resolved' && timelines.has(key(f))) tallyTimeline(timelines.get(key(f))!, acc);
+      const season = acc.get(handle) ?? null;
+      const base = careerStats[handle];
+      const career = base || season ? {
+        kills: (base?.kills ?? 0) + (season?.kills ?? 0), deaths: (base?.deaths ?? 0) + (season?.deaths ?? 0),
+        matches: (base?.matches ?? 0) + (season?.matches ?? 0), fb: (base?.fb ?? 0) + (season?.fb ?? 0),
+        mvp: (base?.mvp ?? 0) + (season?.mvp ?? 0), hs: (base?.hs ?? 0) + (season?.hs ?? 0),
+        clutch: (base?.clutch ?? 0) + (season?.clutch ?? 0),
+        seasons: (base?.seasons ?? 0) + (season?.matches ? 1 : 0),
+        retired: (base as { retired?: boolean } | undefined)?.retired ?? false,
+      } : null;
+      if (!player && !career) return json(res, 404, { error: 'unknown player' });
+      const person = player ? personOf(player.id) : null;
+      return json(res, 200, {
+        handle,
+        club: club ? { tag: club.tag, name: club.name, division: tierName(club.tier) } : (base?.club ? { tag: base.club, name: base.club, division: null } : null),
+        role: player?.role ?? base?.role ?? null,
+        age: player?.age ?? null,
+        name: person?.name ?? null, flag: person?.nation.flag ?? null,
+        overall: player ? overall(player) : null,
+        soloRank: player ? soloRank(overall(player)) : null,
+        trait: player ? traitOf(player.id)?.label ?? null : null,
+        igl: player?.igl ?? false,
+        accolades: player?.accolades ?? [],
+        season, career,
+        awards: seasonAwards.filter(a => a.mvp?.handle === handle || a.youngGun?.handle === handle)
+          .map(a => ({ season: a.season, mvp: a.mvp?.handle === handle, youngGun: a.youngGun?.handle === handle })),
+        legend: !!career && isLegend({ handle, club: base?.club ?? club?.tag ?? '', role: player?.role ?? base?.role ?? '', ...career } as PlayerStat & { seasons: number; retired?: boolean }),
+      });
+    }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
     if (path[0] === 'notifications' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
       if (!account) return json(res, 401, { error: 'no account' });

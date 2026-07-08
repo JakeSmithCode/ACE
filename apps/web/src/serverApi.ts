@@ -43,6 +43,16 @@ export interface LeaderRow { rank: number; handle: string; name?: string; flag?:
 export interface ClubRankRow { rank: number; tag: string; name: string; tier: number; group: number; power: number; phase: string; infra: number; titles: number; owned: boolean }
 export interface NewsItem { kind: 'transfer' | 'champion' | 'season' | 'award'; text: string; season: number; day: number; tag?: string }
 export interface StatRow { rank: number; handle: string; club: string; role: string; kills: number; deaths: number; matches: number; fb: number; mvp: number; kd: number; hsPct?: number; clutch?: number }
+export interface PlayerTally { kills: number; deaths: number; matches: number; fb: number; mvp: number; hs: number; clutch: number }
+export interface PlayerProfile {
+  handle: string; club: { tag: string; name: string; division: string | null } | null;
+  role: string | null; age: number | null; name: string | null; flag: string | null;
+  overall: number | null; soloRank: { tier: string; sub: number; label: string } | null;
+  trait: string | null; igl: boolean; accolades: string[];
+  season: PlayerTally | null; career: (PlayerTally & { seasons: number; retired: boolean }) | null;
+  awards: { season: number; mvp: boolean; youngGun: boolean }[];
+  legend: boolean;
+}
 export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number; link?: { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string } }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
@@ -166,6 +176,7 @@ export class AceServer {
   /** Season player stats (top fraggers) from resolved watched matches. */
   stats(): Promise<{ season: number; players: StatRow[] }> { return fetch(`${this.base}/stats`).then(r => j<{ season: number; players: StatRow[] }>(r)); }
   careerStats(): Promise<{ players: (StatRow & { seasons?: number; retired?: boolean })[] }> { return fetch(`${this.base}/stats/career`).then(r => j(r)); }
+  player(handle: string): Promise<PlayerProfile> { return fetch(`${this.base}/players/${encodeURIComponent(handle)}`).then(r => j(r)); }
   /** Your notification inbox (targeted events) + unread count. */
   notifications(token: string): Promise<{ items: Notif[]; unread: number }> {
     return fetch(`${this.base}/notifications`, { headers: { authorization: `Bearer ${token}` } }).then(r => j<{ items: Notif[]; unread: number }>(r));
