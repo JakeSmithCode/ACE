@@ -1179,6 +1179,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-trow .lv-cname{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.02em}
 .lv-trow .pts{text-align:right;font-weight:700;color:var(--text)}
 .lv-trow .pos{color:var(--win)}.lv-trow .neg{color:var(--def)}
+/* standings STAKES striping — what each position is playing for (cut lines) */
+.lv-trow.zone-po{box-shadow:inset 3px 0 0 #e6c66a}
+.lv-trow.zone-up{box-shadow:inset 3px 0 0 #7ee2a0}
+.lv-trow.zone-pop{box-shadow:inset 3px 0 0 var(--att)}
+.lv-trow.zone-risk{box-shadow:inset 3px 0 0 #e0a95e}
+.lv-trow.zone-down{box-shadow:inset 3px 0 0 var(--def)}
+.lv-zonelegend{display:flex;flex-wrap:wrap;gap:12px;padding:7px 8px 2px;font-size:10.5px;color:var(--muted)}
+.lv-zonekey{display:inline-flex;align-items:center;gap:5px}
+.lv-zonekey i{width:8px;height:8px;border-radius:2px;flex:none}
+.lv-zonekey i.zone-po{background:#e6c66a}
+.lv-zonekey i.zone-up{background:#7ee2a0}
+.lv-zonekey i.zone-pop{background:var(--att)}
+.lv-zonekey i.zone-risk{background:#e0a95e}
+.lv-zonekey i.zone-down{background:var(--def)}
 .lv-thead{border-bottom:1px solid var(--line-2)}
 .lv-thead span{font-family:var(--label);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2)!important}
 .lv-title{display:flex;align-items:center;gap:12px}
@@ -1877,11 +1891,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-turnbtn:hover{background:rgba(230,198,106,.25)}
 /* the post-match DEBRIEF — your reads graded (cyan: analysis, not glory) */
 .lv-debrief{display:flex;align-items:flex-start;gap:12px;margin-top:10px;padding:9px 14px;background:linear-gradient(90deg,rgba(107,226,225,.07),rgba(107,226,225,.015));border:1px solid rgba(107,226,225,.28);border-radius:8px}
-.lv-deblab{color:var(--atk)}
+.lv-deblab{color:var(--att)}
 .lv-debrows{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
 .lv-debrow{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--text);flex-wrap:wrap}
 .lv-debside{font-family:var(--label);font-size:9.5px;letter-spacing:.08em;color:var(--muted);flex-shrink:0}
-.lv-debrow>span b{color:var(--atk)}
+.lv-debrow>span b{color:var(--att)}
 .lv-debtip{font-style:normal;font-size:11px;color:var(--muted)}
 .lv-debtip.good{color:#7ee2a0}
 /* post-match box score + MVP */

@@ -1767,7 +1767,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     // live broadcast cursor so the client streams the right match-day)
     if (path[0] === 'world' && path.length === 1) {
       const w = (await store.loadWorld(id))!;
-      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs, lastDay: seasonLength(w) - 1, now,
+      return json(res, 200, { id, region: w.region, season: w.season, day: w.day, tiers: w.tiers, layout: w.layout, divisions: worldDivisions(w).length, clubs: w.clubs.length, promo: w.promo, broadcastDay: liveDay, kickoffAt: liveKickoff, revealAt: liveKickoff + broadcastSecs, lastDay: seasonLength(w) - 1, now,
         // the world-clock contract: who advances time and when the next tick lands
         autoAdvanceSecs: opts.autoAdvanceSecs ?? 0, nextTickAt, manualAdvance: !!opts.allowManualAdvance });
     }

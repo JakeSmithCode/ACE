@@ -8,7 +8,7 @@
 import { onMounted, onUnmounted, ref, computed, nextTick, shallowRef, watch as vueWatch } from 'vue';
 import type { MapId, Play, Tactics, Team } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
-import { RANK_TIERS, MAP_POOL, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
+import { RANK_TIERS, MAP_POOL, PLAYOFF_SLOTS, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
 import { ANCHORS, siteIds, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
@@ -817,6 +817,23 @@ const viewTier = ref<number | null>(null);
 const tableTier = computed(() => viewTier.value ?? myClub.value?.tier ?? 0);
 const tableGroup = computed(() => tableTier.value === (myClub.value?.tier ?? -1) ? ((myClub.value as { group?: number } | null)?.group ?? 0) : 0);
 function pickTier(t: number) { viewTier.value = t === (myClub.value?.tier ?? 0) ? null : t; void refreshTable(); }
+// STAKES striping — what each table position is playing for (the pyramid's cut
+// lines, mirrored from the rollover rules): Premier top 4 → the title playoffs;
+// lower tiers' top `promo` auto-promote and the next PLAYOFF_SLOTS enter the
+// promotion playoff; every non-bottom tier's bottom `promo` auto-relegate with
+// the band above them at risk (challenged by the lower tier's playoff).
+function zoneOf(rank: number): string {
+  const n = table.value.length; if (!world.value || !n) return '';
+  const k = world.value.promo ?? 2, t = tableTier.value, bottom = (world.value.tiers ?? 1) - 1;
+  const down = t < bottom ? (rank >= n - k ? 'down' : rank >= n - k - PLAYOFF_SLOTS ? 'risk' : '') : '';
+  if (t === 0) return rank < 4 ? 'po' : down;
+  return rank < k ? 'up' : rank < k + PLAYOFF_SLOTS ? 'pop' : down;
+}
+const zoneLegend = computed(() => {
+  const seen = new Set(table.value.map((_, i) => zoneOf(i)).filter(Boolean));
+  const L: Record<string, string> = { po: 'title playoffs', up: 'promoted', pop: 'promotion playoff', risk: 'at risk', down: 'relegated' };
+  return ['po', 'up', 'pop', 'risk', 'down'].filter(z => seen.has(z)).map(z => ({ z, label: L[z] }));
+});
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
 const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }>({ honors: [], allTime: [] });
@@ -1960,12 +1977,15 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
                     @click="pickTier(ti)">{{ tn }}</button>
           </div>
           <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
-          <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="{ mine: mine(s.club) }">
+          <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="[{ mine: mine(s.club) }, zoneOf(rank) ? 'zone-' + zoneOf(rank) : '']">
             <span class="r">{{ rank + 1 }}</span>
             <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i></span>
             <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
             <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
             <span class="pts">{{ s.points }}</span>
+          </div>
+          <div v-if="zoneLegend.length" class="lv-zonelegend">
+            <span v-for="z in zoneLegend" :key="z.z" class="lv-zonekey"><i :class="'zone-' + z.z"></i>{{ z.label }}</span>
           </div>
         </div>
 
