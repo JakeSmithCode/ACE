@@ -9,7 +9,7 @@ import { onMounted, onUnmounted, ref, computed, nextTick, shallowRef, watch as v
 import type { MapId, Play, Tactics, Team } from '@ace/shared';
 import { simulateMatch } from '@ace/engine';
 import { RANK_TIERS, MAP_POOL, personOf, soloRank, traitOf, fmtDayMonth, FACILITIES, facilityCost, FACILITY_MAX, STAFF_ROLES, STAFF_META } from '@ace/world';
-import { ANCHORS, type Navmesh } from '@ace/maps';
+import { ANCHORS, siteIds, type Navmesh } from '@ace/maps';
 import { Viewer } from './viewer';
 import PlayEditor from './PlayEditor.vue';
 import { starterAttack, starterDefense, altExecFrom } from './playbook';
@@ -1048,6 +1048,51 @@ function computeBox(tl: import('@ace/shared').MatchTimeline) {
   if (mvp) mvp.mvp = true;
   boxScore.value = { teams: [rowsOf(0).map(r => ({ ...r, mvp: r.handle === mvp?.handle })), rowsOf(1).map(r => ({ ...r, mvp: r.handle === mvp?.handle }))], mvp: mvp?.handle ?? '' };
 }
+// the post-match DEBRIEF — did YOUR reads play out? Your matches only (pov set).
+// Mirrors the engine's read→site mapping (readIndex) against each round's ACTUAL
+// site: your defensive stack vs where their attack went, and your attack picks vs
+// THEIR stacked site — the pre-match dossier's counter-tip, graded after the fact.
+// Pure presentation over the timeline + the replay snapshot's tactics (which are
+// the REAL tactics the tick resolved — an AI's matchup read included).
+interface DebriefSide { site: string; hit: number; hitWon: number; off: number; offWon: number }
+const debrief = ref<{ def: DebriefSide | null; atk: DebriefSide | null } | null>(null);
+function readSiteOf(read: number, sites: string[]): string {
+  if (sites.length <= 2) return read >= 0 ? sites[0] : sites[1] ?? sites[0];
+  return sites[Math.max(0, Math.min(sites.length - 1, Math.round((1 - read) / 2 * (sites.length - 1))))];
+}
+function computeDebrief(tl: import('@ace/shared').MatchTimeline, snap: import('@ace/shared').MatchInput | null, pov?: 0 | 1) {
+  debrief.value = null;
+  if (pov == null || !snap?.tactics) return;
+  const opp = (1 - pov) as 0 | 1;
+  const sites = siteIds((ANCHORS[tl.map as MapId] ?? ANCHORS.ascent)!).map(String);
+  const myRead = readSiteOf(snap.tactics[pov].defense.read, sites);
+  const theirRead = readSiteOf(snap.tactics[opp].defense.read, sites);
+  const def: DebriefSide = { site: myRead, hit: 0, hitWon: 0, off: 0, offWon: 0 };
+  const atk: DebriefSide = { site: theirRead, hit: 0, hitWon: 0, off: 0, offWon: 0 };
+  for (const r of tl.rounds) {
+    const won = r.winner === pov;
+    const s = r.attacker === opp ? def : atk;                      // our defense vs our attack round
+    const target = r.attacker === opp ? myRead : theirRead;        // the stacked site that mattered
+    if (r.site === target) { s.hit++; if (won) s.hitWon++; } else { s.off++; if (won) s.offWon++; }
+  }
+  debrief.value = { def: def.hit + def.off ? def : null, atk: atk.hit + atk.off ? atk : null };
+}
+// one-line coaching verdicts, computed from the tallies (never a mugging — a tip)
+const defTip = computed(() => {
+  const d = debrief.value?.def; if (!d) return '';
+  const n = d.hit + d.off;
+  if (d.hit >= n / 2 && d.hit && d.hitWon / d.hit >= 0.5) return '✓ read right — and the stack held';
+  if (d.hit >= n / 2 && d.hit) return 'read right, but the site still fell — a shape problem, not a read problem';
+  return `they went the other way ${d.off}/${n} — consider flipping the read`;
+});
+const atkTip = computed(() => {
+  const a = debrief.value?.atk; if (!a) return '';
+  const offPct = a.off ? a.offWon / a.off : 0, hitPct = a.hit ? a.hitWon / a.hit : 0;
+  if (a.hit >= a.off && hitPct >= 0.5) return '✓ you ran through their stack anyway — the firepower beat the read';
+  if (a.off > a.hit && offPct >= hitPct) return '✓ you attacked around their stack';
+  if (a.hit >= a.off) return 'you kept hitting their stacked site and it cost you — flip your site bias';
+  return 'you avoided their stack, but the hits into it went better — the stack was soft';
+});
 const shareCopied = ref(false);
 let viewer: Viewer | null = null;
 function watch(fx: LiveFixture) { return watchAt(season.value, DAY.value, fx.slot); }
@@ -1068,6 +1113,7 @@ async function watchAt(s: number, d: number, slot: number) {
     followed.value = null;
     computeBox(out);
     const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
+    computeDebrief(out, rep.snapshot, pov);
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, out, `/${map}.png`, nav, { pov }); });
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
@@ -1087,10 +1133,10 @@ async function watchLive(fx: LiveFixture) {
     const nav = await ensureNav(map);
     const tl = lt.timeline;
     watching.value = { home: fx.home, away: fx.away, final: lt.resolved ? tl.finalScore : null, map, season: season.value, day: DAY.value, slot: fx.slot, live: !lt.resolved };
-    boxScore.value = null; turning.value = null; followed.value = null;
+    boxScore.value = null; turning.value = null; followed.value = null; debrief.value = null;
     const pov = mine(fx.home.tag) ? 0 as const : mine(fx.away.tag) ? 1 as const : undefined;
     requestAnimationFrame(() => { viewer?.destroy(); if (host.value) viewer = new Viewer(host.value, tl, `/${map}.png`, nav, { live: !lt.resolved, pov }); });
-    if (lt.resolved) computeBox(tl);
+    if (lt.resolved) { computeBox(tl); void debriefFromReplay(tl, fx.slot, pov); }
     else startLivePoll(fx.slot);
   } catch (e) { errMsg.value = (e as Error).message; } finally { loadingWatch.value = false; }
 }
@@ -1105,12 +1151,25 @@ function startLivePoll(slot: number) {
       if (lt.resolved) {
         stopLivePoll();
         computeBox(lt.timeline);
-        if (watching.value) watching.value = { ...watching.value, live: false, final: lt.timeline.finalScore };
+        if (watching.value) {
+          watching.value = { ...watching.value, live: false, final: lt.timeline.finalScore };
+          const pov = mine(watching.value.home.tag) ? 0 as const : mine(watching.value.away.tag) ? 1 as const : undefined;
+          void debriefFromReplay(lt.timeline, slot, pov);
+        }
       }
     } catch { /* transient — keep polling */ }
   }, 2500);
 }
-function closeWatch() { stopLivePoll(); watching.value = null; boxScore.value = null; turning.value = null; followed.value = null; viewer?.destroy(); viewer = null; }
+/** The live path has no snapshot in hand — once resolved, pull the replay input
+ *  (now public) just for its tactics and grade the debrief off it. */
+async function debriefFromReplay(tl: import('@ace/shared').MatchTimeline, slot: number, pov?: 0 | 1) {
+  if (pov == null || !server.value) return;
+  try {
+    const rep = await server.value.replay(season.value, DAY.value, slot);
+    if (rep?.snapshot) computeDebrief(tl, rep.snapshot, pov);
+  } catch { /* embargo edge — the replay card just doesn't show */ }
+}
+function closeWatch() { stopLivePoll(); watching.value = null; boxScore.value = null; turning.value = null; followed.value = null; debrief.value = null; viewer?.destroy(); viewer = null; }
 /** A shareable deep-link to the watched replay — opening it auto-connects + plays. */
 function shareWatch() {
   if (!watching.value) return;
@@ -1849,6 +1908,25 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             {{ turning.before[0] }}–{{ turning.before[1] }} became {{ turning.after[0] }}–{{ turning.after[1] }}<template v-if="turning.closer"> · {{ turning.closer.killer }} closed it<i v-if="turning.closer.hs" class="lv-hshot" title="headshot">⊙</i></template>
           </span>
           <button class="lv-turnbtn" @click="replayTurning" title="jump the viewer to this round">▶ replay it</button>
+        </div>
+        <!-- the DEBRIEF — your reads, graded against what actually happened (your matches only) -->
+        <div v-if="debrief && boxScore && (debrief.def || debrief.atk)" class="lv-debrief">
+          <span class="lv-turnlab lv-deblab">📋 DEBRIEF</span>
+          <div class="lv-debrows">
+            <div v-if="debrief.def" class="lv-debrow">
+              <b class="lv-debside">DEF</b>
+              <span>you stacked <b>{{ debrief.def.site }}</b> — they hit it {{ debrief.def.hit }}/{{ debrief.def.hit + debrief.def.off }}
+                <template v-if="debrief.def.hit">(won {{ debrief.def.hitWon }} read-right)</template><template v-if="debrief.def.off"> · won {{ debrief.def.offWon }}/{{ debrief.def.off }} read-wrong</template></span>
+              <i class="lv-debtip" :class="{ good: defTip.startsWith('✓') }">{{ defTip }}</i>
+            </div>
+            <div v-if="debrief.atk" class="lv-debrow">
+              <b class="lv-debside">ATK</b>
+              <span>they stacked <b>{{ debrief.atk.site }}</b> — you hit into it {{ debrief.atk.hit }}×
+                <template v-if="debrief.atk.hit">(won {{ debrief.atk.hitWon }})</template> · went elsewhere {{ debrief.atk.off }}×
+                <template v-if="debrief.atk.off">(won {{ debrief.atk.offWon }})</template></span>
+              <i class="lv-debtip" :class="{ good: atkTip.startsWith('✓') }">{{ atkTip }}</i>
+            </div>
+          </div>
         </div>
         <!-- post-match box score + Player of the Match (derived from the timeline) -->
         <div v-if="boxScore" class="lv-box">

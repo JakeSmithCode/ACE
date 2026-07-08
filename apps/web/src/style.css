@@ -1875,6 +1875,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-turnbody .lv-hshot{font-style:normal;color:var(--def);font-weight:700;margin-left:3px}
 .lv-turnbtn{margin-left:auto;flex-shrink:0;background:rgba(230,198,106,.12);border:1px solid rgba(230,198,106,.5);color:#e6c66a;border-radius:6px;padding:4px 12px;font-family:var(--label);font-size:10.5px;letter-spacing:.05em;cursor:pointer;transition:background .15s}
 .lv-turnbtn:hover{background:rgba(230,198,106,.25)}
+/* the post-match DEBRIEF — your reads graded (cyan: analysis, not glory) */
+.lv-debrief{display:flex;align-items:flex-start;gap:12px;margin-top:10px;padding:9px 14px;background:linear-gradient(90deg,rgba(107,226,225,.07),rgba(107,226,225,.015));border:1px solid rgba(107,226,225,.28);border-radius:8px}
+.lv-deblab{color:var(--atk)}
+.lv-debrows{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
+.lv-debrow{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--text);flex-wrap:wrap}
+.lv-debside{font-family:var(--label);font-size:9.5px;letter-spacing:.08em;color:var(--muted);flex-shrink:0}
+.lv-debrow>span b{color:var(--atk)}
+.lv-debtip{font-style:normal;font-size:11px;color:var(--muted)}
+.lv-debtip.good{color:#7ee2a0}
 /* post-match box score + MVP */
 .lv-box{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:14px 4px 4px}
 .lv-boxteam{background:rgba(255,255,255,.015);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
