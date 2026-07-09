@@ -786,11 +786,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (!c.owner) return c;
         const faSeed = (nw.seed ^ (nw.season * 0x9e3779b1) ^ (c.tier * 131 + 7)) >>> 0;
         const r = processContracts(c.roster, nw.patch, faSeed, allHandles);
-        if (!r.departed.length) return c;
+        // proactive: any player now in his FINAL year (years === 1) — renew him this
+        // season or lose him free next off-season (the warning BEFORE the loss).
+        const expiring = r.roster.filter(p => p.contract?.years === 1).map(p => p.handle);
+        if (expiring.length) notify(c.owner!, 'system', `📑 ${expiring.length} contract${expiring.length > 1 ? 's' : ''} up this season — renew or lose ${expiring.length > 1 ? 'them' : 'him'} free: ${expiring.slice(0, 4).join(', ')}${expiring.length > 4 ? '…' : ''}`, nw.season, 0);
+        if (r.departed.length) {
+          r.signed.forEach(p => allHandles.add(p.handle));
+          for (const d of r.departed) notify(c.owner!, 'system', `📄 ${d.handle} left on a free — his contract expired unrenewed`, nw.season, 0);
+          for (const s of r.signed) notify(c.owner!, 'system', `✍ ${s.handle} signed to fill the gap (free agent, ${CONTRACT_YEARS}y deal)`, nw.season, 0);
+        }
+        // always persist the ticked roster (contract years decrement every season, not
+        // only when someone expires — the previous early-return dropped the tick)
         changed = true;
-        r.signed.forEach(p => allHandles.add(p.handle));
-        for (const d of r.departed) notify(c.owner!, 'system', `📄 ${d.handle} left on a free — his contract expired unrenewed`, nw.season, 0);
-        for (const s of r.signed) notify(c.owner!, 'system', `✍ ${s.handle} signed to fill the gap (free agent, ${CONTRACT_YEARS}y deal)`, nw.season, 0);
         return { ...c, roster: r.roster };
       });
       if (changed) await store.saveWorld(id, { ...nw, clubs });
