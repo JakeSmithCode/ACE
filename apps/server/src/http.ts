@@ -231,9 +231,14 @@ const publicClub = (w: WorldState, c: WorldClub) => {
 function standingsView(w: WorldState, rows: FixtureRow[], tier: number, group: number, now: number) {
   const inDiv = rows.filter(r => fixtureStatus(r, now) === 'resolved' && w.clubs[r.home].tier === tier && w.clubs[r.home].group === group);
   const results = inDiv.map(r => ({ home: r.home, away: r.away, score: [r.homeScore, r.awayScore] as [number, number], winner: r.winner, seed: r.seed }));
+  // form guide: each club's last 5 results (W/L), oldest→newest, by match-day
+  const formOf = (club: number): string => inDiv
+    .filter(r => r.home === club || r.away === club)
+    .sort((a, b) => a.day - b.day).slice(-5)
+    .map(r => (r.winner === club ? 'W' : 'L')).join('');
   return standings(w.clubs.length, results)
     .filter(s => w.clubs[s.club].tier === tier && w.clubs[s.club].group === group)
-    .map(s => ({ club: w.clubs[s.club].tag, played: s.played, won: s.won, lost: s.lost, diff: s.diff, points: s.points }));
+    .map(s => ({ club: w.clubs[s.club].tag, played: s.played, won: s.won, lost: s.lost, diff: s.diff, points: s.points, form: formOf(s.club) }));
 }
 
 /** Boot a world, kick its Premier (division 0) off live *now*, and serve it. The

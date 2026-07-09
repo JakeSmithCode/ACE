@@ -2114,7 +2114,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div class="lv-trow lv-thead"><span class="r">#</span><span class="c">Club</span><span>P</span><span>W</span><span>L</span><span>Δ</span><span class="pts">Pts</span></div>
           <div v-for="(s, rank) in table" :key="s.club" class="lv-trow" :class="[{ mine: mine(s.club) }, zoneOf(rank) ? 'zone-' + zoneOf(rank) : '']">
             <span class="r">{{ rank + 1 }}</span>
-            <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i><i v-if="clinchOf[rank]" class="lv-clinch" :class="clinchOf[rank]" :title="CLINCH_LABEL[clinchOf[rank]]">{{ clinchOf[rank] === 'in' ? '✓' : clinchOf[rank] === 'rel' ? '⬇' : '✗' }}</i></span>
+            <span class="c"><i class="hq-dot" :style="{ background: `hsl(${hue(s.club)} 65% 55%)` }"></i><span class="lv-cname clickable" @click="openClub(s.club)">{{ s.club }}</span><i v-if="mine(s.club)" class="lv-youtag">YOU</i><i v-if="clinchOf[rank]" class="lv-clinch" :class="clinchOf[rank]" :title="CLINCH_LABEL[clinchOf[rank]]">{{ clinchOf[rank] === 'in' ? '✓' : clinchOf[rank] === 'rel' ? '⬇' : '✗' }}</i><span v-if="s.form" class="lv-form" :title="`recent form (oldest → newest): ${s.form}`"><i v-for="(r, i) in s.form.split('')" :key="i" :class="r === 'W' ? 'w' : 'l'">{{ r }}</i></span></span>
             <span>{{ s.played }}</span><span>{{ s.won }}</span><span>{{ s.lost }}</span>
             <span :class="s.diff >= 0 ? 'pos' : 'neg'">{{ s.diff >= 0 ? '+' : '' }}{{ s.diff }}</span>
             <span class="pts">{{ s.points }}</span>
