@@ -88,3 +88,35 @@ export function settleClub(opts: { rank: number; divSize: number; tier: number; 
  *  more); omit it for the meta-neutral bill. */
 export const squadWageBill = (players: Player[], patch?: Parameters<typeof playerWage>[1]): number =>
   players.reduce((s, p) => s + contractWage(p, patch), 0);   // contracted wage (locked) if any, else market
+
+export interface FinanceLine { label: string; amount: number; note?: string }
+export interface FinanceProjection { income: FinanceLine[]; expenses: FinanceLine[]; net: number; projectedBalance: number }
+
+/** A live "if the season ended today" P&L for an owned club — the ledger lines behind
+ *  the settle-net number, projected from the club's CURRENT division rank. Pure so the
+ *  store and server surface the same breakdown; the caller supplies the pieces it owns
+ *  (ticket income, the signed sponsor deal, the board bonus, the running bills). */
+export function projectFinance(opts: {
+  rank: number; divSize: number; tier: number; balance: number;
+  ticketIncome: number;
+  sponsorBase: number; sponsorBonus: number; sponsorOnTrack: boolean;
+  boardBonus: number; boardOnTrack: boolean;
+  wages: number; upkeep: number; staff: number;
+}): FinanceProjection {
+  const { sponsor, prize } = seasonIncome(opts.rank, opts.divSize);
+  const m = divMult(opts.tier);
+  const income: FinanceLine[] = [
+    { label: 'League sponsor', amount: Math.round(sponsor * m) },
+    { label: 'Placement prize', amount: Math.round(prize * m), note: `projected at ${opts.rank || '—'} of ${opts.divSize}` },
+  ];
+  if (opts.ticketIncome > 0) income.push({ label: 'Season tickets', amount: opts.ticketIncome, note: 'from your following' });
+  if (opts.sponsorBase > 0) income.push({ label: 'Sponsor deal', amount: opts.sponsorBase + (opts.sponsorOnTrack ? opts.sponsorBonus : 0), note: opts.sponsorBonus > 0 ? (opts.sponsorOnTrack ? 'goal on track (bonus incl.)' : `+${opts.sponsorBonus.toLocaleString()} if the goal is met`) : undefined });
+  if (opts.boardBonus > 0 && opts.boardOnTrack) income.push({ label: 'Board bonus', amount: opts.boardBonus, note: 'brief on track' });
+  const expenses: FinanceLine[] = [{ label: 'Squad wages', amount: opts.wages }];
+  if (opts.upkeep > 0) expenses.push({ label: 'HQ upkeep', amount: opts.upkeep });
+  if (opts.staff > 0) expenses.push({ label: 'Staff wages', amount: opts.staff });
+  const inc = income.reduce((s, l) => s + l.amount, 0);
+  const exp = expenses.reduce((s, l) => s + l.amount, 0);
+  const net = inc - exp;
+  return { income, expenses, net, projectedBalance: opts.balance + net };
+}

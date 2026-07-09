@@ -1881,6 +1881,27 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-confstatus{font-family:var(--label);font-size:11px;margin-top:5px}
 .lv-boardlast{margin-top:10px;padding:7px 12px;font-family:var(--label);font-size:11px;border-radius:3px;color:var(--def);background:rgba(255,92,110,.08)}
 .lv-boardlast.met{color:var(--win);background:rgba(59,209,127,.08)}
+/* finance panel — the P&L behind the settle net */
+.lv-finledger{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+.lv-fincol{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:5px;padding:10px 12px}
+.lv-finhd{font-family:var(--label);font-size:9.5px;letter-spacing:.09em;color:var(--muted-2);margin-bottom:7px}
+.lv-finrow{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:4px 0;font-size:12.5px;font-variant-numeric:tabular-nums}
+.lv-finlbl{color:var(--muted);display:flex;flex-direction:column}
+.lv-finlbl i{font-style:normal;font-size:10px;color:var(--muted-2);margin-top:1px}
+.lv-finamt{font-weight:600;white-space:nowrap}
+.lv-finamt.pos,.lv-finfoot b.pos{color:var(--win)}
+.lv-finamt.neg,.lv-finfoot b.neg{color:var(--def)}
+.lv-finsub{border-top:1px solid var(--line);margin-top:4px;padding-top:7px}
+.lv-finsub .lv-finlbl{color:var(--ink);font-weight:600}
+.lv-finnet{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:11px 14px;border-radius:5px;font-family:var(--display);font-size:16px}
+.lv-finnet span{font-family:var(--label);font-size:11px;letter-spacing:.05em;color:var(--muted)}
+.lv-finnet.pos{background:rgba(59,209,127,.08);border:1px solid rgba(59,209,127,.25)}
+.lv-finnet.pos b{color:var(--win)}
+.lv-finnet.neg{background:rgba(255,92,110,.08);border:1px solid rgba(255,92,110,.25)}
+.lv-finnet.neg b{color:var(--def)}
+.lv-finfoot{display:flex;align-items:center;gap:12px;margin-top:9px;font-family:var(--label);font-size:11.5px;color:var(--muted)}
+.lv-finfoot b{color:var(--ink);font-variant-numeric:tabular-nums}
+.lv-finarrow{color:var(--muted-2)}
 .lv-scoutbtn.ghost{padding:3px 6px;color:var(--muted-2)}
 .lv-mktrow.squad{align-items:center}
 /* profile card extras (reuses .pc-* from the single-player card) */

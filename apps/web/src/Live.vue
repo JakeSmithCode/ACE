@@ -548,6 +548,7 @@ const trophies = computed(() => {
 
 // --- the board: the season brief + confidence (a survival narrative) ----------------
 const boardOpen = ref(false);
+const financeOpen = ref(false);
 const onTrack = () => myClub.value?.objective ? (myClub.value.objectiveRank || 99) <= myClub.value.objective.needRank : false;
 
 // --- squad page enrichments: players are PEOPLE, and a roster-at-a-glance ----------
@@ -633,7 +634,7 @@ const academy = computed(() => myClub.value?.academy ?? null);
 
 // club-management panels are an ACCORDION — opening one closes the rest (no messy stacking).
 // One coordinator drives all seven toggles; it also lazy-loads the market board on first open.
-const PANEL_REFS: Record<string, { value: boolean }> = { tactics: planOpen, market: marketOpen, academy: academyOpen, hq: hqOpen, staff: staffOpen, sponsor: sponsorOpen, board: boardOpen, trophies: trophiesOpen };
+const PANEL_REFS: Record<string, { value: boolean }> = { tactics: planOpen, market: marketOpen, academy: academyOpen, hq: hqOpen, staff: staffOpen, sponsor: sponsorOpen, board: boardOpen, finance: financeOpen, trophies: trophiesOpen };
 async function showPanel(which: string) {
   const target = PANEL_REFS[which]; const wasOpen = target.value;
   for (const r of Object.values(PANEL_REFS)) r.value = false;
@@ -1354,6 +1355,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <button class="lv-planbtn staff" :class="{ on: staffOpen }" @click="showPanel('staff')">♦ staff</button>
             <button class="lv-planbtn spon" :class="{ on: sponsorOpen }" @click="showPanel('sponsor')">◈ sponsor</button>
             <button class="lv-planbtn board" :class="{ on: boardOpen }" @click="showPanel('board')">⚑ board</button>
+            <button class="lv-planbtn fin" :class="{ on: financeOpen }" @click="showPanel('finance')">💰 finance</button>
             <button class="lv-planbtn trophies" :class="{ on: trophiesOpen }" @click="showPanel('trophies')">🏆 trophies</button>
           </span>
           <span v-if="myClub.balance != null" class="lv-bank">bank {{ kfmt(myClub.balance) }}</span>
@@ -1782,6 +1784,41 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         </div>
         <div v-if="myClub.boardOutcome" class="lv-boardlast" :class="{ met: myClub.boardOutcome.met }">
           Last season: {{ myClub.boardOutcome.met ? '✓ brief met' : '✗ brief missed' }} — finished {{ ord(myClub.boardOutcome.finish) }}<template v-if="myClub.boardOutcome.met"> (+{{ kfmt(myClub.boardOutcome.bonus) }})</template>
+        </div>
+      </div>
+
+      <!-- finance — a live "if the season ended today" P&L (the lines behind the settle net) -->
+      <div v-if="myClub && financeOpen && myClub.finance" class="lv-mktpanel finance">
+        <div class="lv-mkth">
+          <span class="lv-kicker">Finance</span>
+          <span class="lv-mktsub">projected at your current position — income vs the wage bill and upkeep. Win to climb the placement money; overspend and you bleed.</span>
+        </div>
+        <div class="lv-finledger">
+          <div class="lv-fincol">
+            <div class="lv-finhd">INCOME</div>
+            <div v-for="l in myClub.finance.income" :key="l.label" class="lv-finrow">
+              <span class="lv-finlbl">{{ l.label }}<i v-if="l.note">{{ l.note }}</i></span>
+              <span class="lv-finamt pos">+{{ kfmt(l.amount) }}</span>
+            </div>
+            <div class="lv-finrow lv-finsub"><span class="lv-finlbl">Total income</span><span class="lv-finamt pos">+{{ kfmt(myClub.finance.income.reduce((s, l) => s + l.amount, 0)) }}</span></div>
+          </div>
+          <div class="lv-fincol">
+            <div class="lv-finhd">EXPENSES</div>
+            <div v-for="l in myClub.finance.expenses" :key="l.label" class="lv-finrow">
+              <span class="lv-finlbl">{{ l.label }}<i v-if="l.note">{{ l.note }}</i></span>
+              <span class="lv-finamt neg">−{{ kfmt(l.amount) }}</span>
+            </div>
+            <div class="lv-finrow lv-finsub"><span class="lv-finlbl">Total expenses</span><span class="lv-finamt neg">−{{ kfmt(myClub.finance.expenses.reduce((s, l) => s + l.amount, 0)) }}</span></div>
+          </div>
+        </div>
+        <div class="lv-finnet" :class="myClub.finance.net >= 0 ? 'pos' : 'neg'">
+          <span>Projected season net</span>
+          <b>{{ myClub.finance.net >= 0 ? '+' : '−' }}{{ kfmt(Math.abs(myClub.finance.net)) }}</b>
+        </div>
+        <div class="lv-finfoot">
+          <span>Bank <b>{{ kfmt(myClub.balance || 0) }}</b></span>
+          <span class="lv-finarrow">→</span>
+          <span>Projected <b :class="myClub.finance.projectedBalance >= (myClub.balance || 0) ? 'pos' : 'neg'">{{ kfmt(myClub.finance.projectedBalance) }}</b> at season end</span>
         </div>
       </div>
 
