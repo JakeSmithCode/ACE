@@ -887,8 +887,9 @@ const CLINCH_LABEL: Record<string, string> = {
 };
 async function refreshTable() { if (server.value && world.value) try { table.value = (await server.value.standings(world.value.season, tableTier.value, tableGroup.value)).table; } catch { /* transient */ } }
 // the Hall of Fame — the world's champions (the legacy engine)
-const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }>({ honors: [], allTime: [] });
+const hof = ref<{ honors: { season: number; champion: string }[]; allTime: { tag: string; name: string; titles: number }[]; awards?: { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null; tots?: { handle: string; club: string; role: string; kills: number; kd: number }[] }[]; legends?: { handle: string; club: string; kills: number; seasons: number; mvps: number }[] }>({ honors: [], allTime: [] });
 async function loadHonors() { if (server.value) try { hof.value = await server.value.honors(); } catch { /* transient */ } }
+const latestTots = computed(() => hof.value.awards?.find(a => a.tots?.length)?.tots ?? []);
 
 // the world news feed — a live ticker of transfers + champions (the world feels alive)
 const newsFeed = ref<NewsItem[]>([]);
@@ -2154,6 +2155,16 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
                 <span v-if="a.mvp" :title="`${a.mvp.kills} kills across the season`">★ MVP <b class="clickable" title="open player profile" @click="openPlayer(a.mvp.handle)">{{ a.mvp.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.mvp.club)">{{ a.mvp.club }}</i></span>
                 <span v-if="a.youngGun && a.youngGun.handle !== a.mvp?.handle" :title="`the best under-22 — ${a.youngGun.kills} kills at ${a.youngGun.age}`">☄ Young Gun <b class="clickable" title="open player profile" @click="openPlayer(a.youngGun.handle)">{{ a.youngGun.handle }}</b> <i class="lv-hofname clickable" @click="openClub(a.youngGun.club)">{{ a.youngGun.club }}</i></span>
               </div>
+              <template v-if="latestTots.length">
+                <div class="lv-hofsec">⭐ Team of Season {{ hof.awards.find(a => a.tots?.length)?.season }}</div>
+                <div class="lv-tots">
+                  <div v-for="t in latestTots" :key="t.handle" class="lv-totpick" :title="`${t.kills} kills · ${t.kd} K/D`">
+                    <span class="rs-role" :class="t.role">{{ t.role.slice(0,3).toUpperCase() }}</span>
+                    <b class="clickable" @click="openPlayer(t.handle)">{{ t.handle }}</b>
+                    <i class="clickable" @click="openClub(t.club)">{{ t.club }}</i>
+                  </div>
+                </div>
+              </template>
             </template>
           </template>
           <div v-else class="lv-hofempty">No champions crowned yet.<br />Advance a full season to make history.</div>

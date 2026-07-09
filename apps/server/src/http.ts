@@ -499,7 +499,8 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   let transferSeq = 0;
   // season individual honours (MVP + Young Gun), crowned at each rollover from
   // the real stat tallies — the Hall of Fame remembers people, not just clubs
-  interface SeasonAward { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null }
+  interface TotsPick { handle: string; club: string; role: string; kills: number; kd: number }
+  interface SeasonAward { season: number; mvp: { handle: string; club: string; kills: number } | null; youngGun: { handle: string; club: string; kills: number; age: number } | null; tots?: TotsPick[] }
   const seasonAwards: SeasonAward[] = [];
   // ALL-TIME player careers: each rollover folds the finishing season's stat tally
   // into this ledger, so legends accumulate across seasons (handles are globally
@@ -839,9 +840,25 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     }
     if (mvp) pushNews('award', `Season ${roll.season} MVP: ${mvp.handle} (${mvp.club}) — ${mvp.kills} kills, ${mvp.mvp} POTMs`, roll.season, liveDay, mvp.club);
     if (yg && yg.handle !== mvp?.handle) pushNews('award', `Season ${roll.season} Young Gun: ${yg.handle} (${yg.club}), ${ageOf(yg.handle)} — ${yg.kills} kills. A star is forming.`, roll.season, liveDay, yg.club);
+    // TEAM OF THE SEASON — the division's standout five by role (the comp shape:
+    // 2 duelists + 1 initiator/controller/sentinel), ranked by a kills+K-D score
+    // (min 3 games so a one-off doesn't sneak in). A season's honour roll.
+    const totsScore = (s: PlayerStat) => s.kills + (s.deaths ? (s.kills - s.deaths) : s.kills) * 0.5;
+    const eligible = [...mvpAcc.values()].filter(s => s.matches >= 3);
+    const pickRole = (role: string, n: number, taken: Set<string>) => eligible
+      .filter(s => s.role === role && !taken.has(s.handle))
+      .sort((a, b) => totsScore(b) - totsScore(a)).slice(0, n);
+    const totsTaken = new Set<string>();
+    const tots: TotsPick[] = [];
+    for (const [role, n] of [['duelist', 2], ['initiator', 1], ['controller', 1], ['sentinel', 1]] as const) {
+      for (const s of pickRole(role, n, totsTaken)) { totsTaken.add(s.handle); tots.push({ handle: s.handle, club: s.club, role: s.role, kills: s.kills, kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills }); }
+    }
+    // notify an owner whose player made the cut (a real badge of the season)
+    for (const t of tots) { const oc = w.clubs.find(c => c.roster.some(p => p.handle === t.handle) && c.owner); if (oc?.owner) notify(oc.owner, 'award', `⭐ ${t.handle} named in the Season ${roll.season} Team of the Season (${t.role})`, roll.season, liveDay); }
     seasonAwards.push({ season: roll.season,
       mvp: mvp ? { handle: mvp.handle, club: mvp.club, kills: mvp.kills } : null,
-      youngGun: yg ? { handle: yg.handle, club: yg.club, kills: yg.kills, age: ageOf(yg.handle) } : null });
+      youngGun: yg ? { handle: yg.handle, club: yg.club, kills: yg.kills, age: ageOf(yg.handle) } : null,
+      tots: tots.length ? tots : undefined });
     for (const r2 of mvpAcc.values()) {
       const c2 = careerStats[r2.handle] ?? { handle: r2.handle, club: r2.club, role: r2.role, kills: 0, deaths: 0, matches: 0, fb: 0, mvp: 0, hs: 0, clutch: 0, seasons: 0 };
       careerStats[r2.handle] = { ...c2, club: r2.club, role: r2.role, kills: c2.kills + r2.kills, deaths: c2.deaths + r2.deaths, matches: c2.matches + r2.matches, fb: c2.fb + r2.fb, mvp: c2.mvp + r2.mvp, hs: c2.hs + r2.hs, clutch: c2.clutch + r2.clutch, seasons: c2.seasons + 1 };
