@@ -803,6 +803,18 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (changed) await store.saveWorld(id, { ...nw, clubs });
     }
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay, roll.champion); await persistSocial(); }
+    // promotion/relegation drama — the marquee movements into and out of the Premier
+    // (tier 0), diffed pre→post rollover, so the whole world's season has a headline
+    {
+      const post = (await store.loadWorld(id))!;
+      const tierOf = new Map(post.clubs.map(c => [c.id, c.tier]));
+      for (const c of w.clubs) {
+        const nt = tierOf.get(c.id);
+        if (nt == null) continue;
+        if (c.tier > 0 && nt === 0) pushNews('season', `▲ ${c.tag} PROMOTED to the Premier — a seat at the top table`, roll.season, liveDay, c.tag);
+        else if (c.tier === 0 && nt > 0) pushNews('season', `▼ ${c.tag} RELEGATED from the Premier`, roll.season, liveDay, c.tag);
+      }
+    }
     // retirements: the age-curve loop closing in public — legends get a send-off,
     // owners get told who left and who was called up, the career ledger closes
     for (const rt of roll.retirements ?? []) {
