@@ -908,6 +908,19 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         if (!log.some(e => e.season === entry.season)) careers.set(c.owner, [...log, entry]);   // idempotent per season
         if (promoted) notify(c.owner, 'season', `▲ ${c.tag} PROMOTED to ${tierName(post!.tier)}!`, roll.season, liveDay);
         else if (relegated) notify(c.owner, 'season', `▼ ${c.tag} relegated to ${tierName(post!.tier)}`, roll.season, liveDay);
+        // INSOLVENCY nudge: project next season CONSERVATIVELY (a mid-table finish, no
+        // sponsor/board bonuses) on the post-rollover squad; if the books can't survive
+        // it (bank runs dry), warn the owner to trim wages before it bites.
+        if (post) {
+          const proj = projectFinance({
+            rank: Math.ceil(w.size / 2), divSize: w.size, tier: post.tier, balance: post.balance,
+            ticketIncome: post.fans ? Math.round(post.fans * FAN_TICKET) : 0,
+            sponsorBase: post.sponsor?.base ?? 0, sponsorBonus: 0, sponsorOnTrack: false,
+            boardBonus: 0, boardOnTrack: false,
+            wages: squadWageBill(post.roster), upkeep: post.facilities ? facilityUpkeep(post.facilities) : 0, staff: post.staff ? staffWageBill(post.staff) : 0,
+          });
+          if (proj.projectedBalance < 0) notify(c.owner, 'system', `⚠ Finances: at a mid-table finish you're projected to run out of money next season (−$${Math.abs(proj.net).toLocaleString()} net) — trim the wage bill or sell before it bites`, roll.season + 1, 0);
+        }
         // the SEASON RECAP card — the whole story in one place (the client shows it once)
         {
           // the cup run: the last round this club PLAYED (round-1 byes don't count as a run)
