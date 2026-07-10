@@ -2553,6 +2553,11 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span v-if="clubModal.wcTitles" class="lv-hon gold">🌍 <b>{{ clubModal.wcTitles }}×</b> World Cup mgr</span>
         </div>
         <!-- franchise legends: careers that finished wearing this tag -->
+        <!-- recent headlines about this club — signings, cup draws, titles (scouting intel) -->
+        <div v-if="clubModal.headlines?.length" class="lv-headlines">
+          <i class="lv-hdlabel">📰 RECENT</i>
+          <span v-for="(h, i) in clubModal.headlines" :key="i" class="lv-headline" :title="`season ${h.season} · match-day ${h.day + 1}`">{{ h.text }}</span>
+        </div>
         <div v-if="clubModal.clubLegends?.length" class="lv-honstrip" title="retired players whose careers ended at this club — the franchise's history">
           <span v-for="l in clubModal.clubLegends" :key="l.handle" class="lv-hon">
             {{ l.inducted ? '🏛' : '🎙' }} <b class="clickable" title="open player profile" @click="openPlayer(l.handle)">{{ l.handle }}</b> <i style="opacity:.75">{{ l.kills.toLocaleString() }}k · {{ l.seasons }}s</i>
@@ -2578,7 +2583,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <div v-for="p in clubModal.five" :key="p.handle" class="lv-fiverow">
             <span class="rs-role" :class="p.role">{{ roleAbbr(p.role) }}</span>
             <span class="lv-fivehandle">
-              <span class="lv-fivetop"><b class="clickable" title="open player profile" @click="openPlayer(p.handle)">{{ p.handle }}</b><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span><span v-for="a in p.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — the market prices the proof' : 'season Young Gun (best U22)'">★ {{ a }}</span></span>
+              <span class="lv-fivetop"><b class="clickable" title="open player profile" @click="openPlayer(p.handle)">{{ p.handle }}</b><button v-if="myClub && !mine(clubModal!.tag)" class="lv-star" :class="{ on: watched(p.handle) }" :title="watched(p.handle) ? 'unstar — stop tracking' : 'star — get told when he moves'" @click="toggleWatch(p.handle)">★</button><i v-if="p.igl" class="lv-igltag">IGL</i><span v-if="p.trait" class="lv-fivetrait" :title="`personality: ${p.trait}`">✦ {{ p.trait }}</span><span v-for="a in p.accolades ?? []" :key="a" class="lv-acc" :title="a.startsWith('MVP') ? 'season MVP — the market prices the proof' : 'season Young Gun (best U22)'">★ {{ a }}</span></span>
               <span v-if="p.name" class="lv-fiveperson" :title="p.country"><span class="lv-flag">{{ p.flag }}</span> {{ p.name }}<i v-if="p.age"> · {{ p.age }}</i></span>
             </span>
             <span v-if="p.agent" class="lv-fiveagent">{{ p.agent }}</span>

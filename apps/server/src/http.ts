@@ -1313,6 +1313,9 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       }
       return json(res, 200, {
         ...publicClub(w, c),
+        // RECENT HEADLINES about this club (signings, cup draws, titles, retirements)
+        // — scouting intel from the bounded world-news feed, newest first
+        headlines: news.filter(n => n.tag === c.tag).slice(-5).reverse(),
         // FRANCHISE legends — retired careers that finished wearing this tag (the
         // club-level bar sits below world induction: 300+ career kills means
         // something here; ⚑ marks the world-inducted)
