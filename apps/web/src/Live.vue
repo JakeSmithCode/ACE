@@ -290,7 +290,22 @@ function notifGo(n: { text: string; link?: Notif['link'] }) {
 // the Premier playoffs — the season climax, engine-simmed + watchable
 const playoffsOpen = ref(false);
 const playoffViews = ref<PlayoffView[]>([]);
-async function loadPlayoffs() { if (server.value) try { playoffViews.value = (await server.value.playoffs()).history; } catch { /* transient */ } }
+const premierTable = ref<StandingRow[]>([]);
+async function loadPlayoffs() {
+  if (!server.value) return;
+  try {
+    playoffViews.value = (await server.value.playoffs()).history;
+    if (world.value) premierTable.value = (await server.value.standings(world.value.season, 0, 0)).table;
+  } catch { /* transient */ }
+}
+// the PROJECTED bracket — "if the season ended today": the Premier top 4 seeded
+// 1v4 / 2v3, shown while the live season's real bracket doesn't exist yet
+const projBracket = computed(() => {
+  const t = premierTable.value;
+  if (t.length < 4 || !t[0].played) return null;
+  if (playoffViews.value.some(pv => pv.season === world.value?.season)) return null;
+  return [[t[0].club, t[3].club], [t[1].club, t[2].club]] as [string, string][];
+});
 async function togglePlayoffs() { playoffsOpen.value = !playoffsOpen.value; if (playoffsOpen.value) await loadPlayoffs(); }
 async function watchPlayoff(pseason: number, seed: number, hi: string, lo: string, score: [number, number], map: string) {
   if (!server.value) return;
@@ -2277,6 +2292,14 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span class="lv-note">top-4 bracket at each season's end — Bo3 semis, Bo5 final, real map veto, every game watchable</span>
         </div>
         <template v-if="playoffsOpen">
+          <!-- the run-in: who'd make it if the season ended today -->
+          <div v-if="projBracket" class="lv-poproj">
+            <i class="lv-poprojlab">⑂ PROJECTED — if the season ended today</i>
+            <span v-for="(sm, i) in projBracket" :key="i" class="lv-poprojser">
+              <em>{{ i === 0 ? '①' : '②' }}</em> <b class="clickable" @click="openClub(sm[0])">{{ sm[0] }}</b>
+              vs <em>{{ i === 0 ? '④' : '③' }}</em> <b class="clickable" @click="openClub(sm[1])">{{ sm[1] }}</b>
+            </span>
+          </div>
           <div v-for="pv in playoffViews" :key="pv.season" class="lv-pobracket">
             <div class="lv-pohead">Season {{ pv.season }} — <b class="lv-pochamp">🏆 {{ pv.champion }}</b> <i class="lv-poq">({{ pv.qualified.join(' · ') }})</i></div>
             <div class="lv-porounds">
