@@ -801,6 +801,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const allHandles = new Set(nw.clubs.flatMap(c => c.roster.map(p => p.handle)));
       for (const h of nw.retired ?? []) allHandles.add(h);   // retired handles are closed careers
       let changed = false;
+      const touched = new Set<string>();   // watcher accounts to persist after the sync map
       const clubs = nw.clubs.map(c => {
         if (!c.owner) return c;
         const faSeed = (nw.seed ^ (nw.season * 0x9e3779b1) ^ (c.tier * 131 + 7)) >>> 0;
@@ -809,10 +810,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         // season or lose him free next off-season (the warning BEFORE the loss).
         const expiring = r.roster.filter(p => p.contract?.years === 1).map(p => p.handle);
         if (expiring.length) notify(c.owner!, 'system', `📑 ${expiring.length} contract${expiring.length > 1 ? 's' : ''} up this season — renew or lose ${expiring.length > 1 ? 'them' : 'him'} free: ${expiring.slice(0, 4).join(', ')}${expiring.length > 4 ? '…' : ''}`, nw.season, 0);
+        // WATCHLIST: a watched player on a RIVAL's books entering his final year is a
+        // signing opportunity — his owner renews or he walks free next off-season
+        for (const h of expiring) for (const acct of watchersOf(h)) {
+          if (acct === c.owner) continue;
+          notify(acct, 'system', `⭐ Watched: ${h} (${c.tag}) is in his FINAL contract year — bid now, or he could walk free next off-season`, nw.season, 0);
+          touched.add(acct);
+        }
         if (r.departed.length) {
           r.signed.forEach(p => allHandles.add(p.handle));
           for (const d of r.departed) notify(c.owner!, 'system', `📄 ${d.handle} left on a free — his contract expired unrenewed`, nw.season, 0);
           for (const s of r.signed) notify(c.owner!, 'system', `✍ ${s.handle} signed to fill the gap (free agent, ${CONTRACT_YEARS}y deal)`, nw.season, 0);
+          // WATCHLIST: a watched player walking free is THE moment — no fee, first come
+          for (const d of r.departed) for (const acct of watchersOf(d.handle)) {
+            if (acct === c.owner) continue;
+            notify(acct, 'system', `⭐ Watched: ${d.handle} left ${c.tag} on a FREE — he's on the market for nothing but his wage`, nw.season, 0);
+            touched.add(acct);
+          }
         }
         // always persist the ticked roster (contract years decrement every season, not
         // only when someone expires — the previous early-return dropped the tick)
@@ -820,6 +834,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         return { ...c, roster: r.roster };
       });
       if (changed) await store.saveWorld(id, { ...nw, clubs });
+      for (const acct of touched) await persistAccount(acct);   // durable watcher notifications
     }
     if (roll.champion) { honors.push({ season: roll.season, champion: roll.champion }); pushNews('champion', `${roll.champion} are crowned Season ${roll.season} champions 🏆`, roll.season, liveDay, roll.champion); await persistSocial(); }
     // promotion/relegation drama — the marquee movements into and out of the Premier
@@ -840,6 +855,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const career = careerStats[rt.handle];
       if (career) careerStats[rt.handle] = { ...career, retired: true } as typeof career & { retired: boolean };
       if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay, rt.club);
+      // WATCHLIST: a watched player hanging it up closes that pursuit — and unstars him
+      for (const acct of watchersOf(rt.handle)) {
+        notify(acct, 'system', `⭐ Watched: ${rt.handle} (${rt.club}) has RETIRED at ${rt.age} — removed from your watchlist`, roll.season, liveDay);
+        const set = watchlists.get(acct); set?.delete(rt.handle);
+        await persistAccount(acct);
+      }
       // induction fires the moment a qualifying career completes — front-page news,
       // and the last club's owner gets the moment too
       const done = careerStats[rt.handle];
