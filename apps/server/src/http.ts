@@ -413,7 +413,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // results, season outcomes, your player's awards). In-memory keyed by account (the
   // PgStore per-account table is the same follow-up as academy/scout state).
   type NotifKind = 'fixture' | 'result' | 'season' | 'award' | 'system';
-  type NotifLink = { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string };
+  type NotifLink = { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string } | { kind: 'player'; handle: string };
   interface Notif { id: number; kind: NotifKind; text: string; season: number; day: number; read: boolean; at: number; link?: NotifLink }
   const notifs = new Map<string, Notif[]>();
   let notifSeq = 0;
@@ -631,7 +631,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         emit('market', { sold: signings.map(s => s.handle) });   // boards refresh live
         // WATCHLIST: anyone tracking a signed player hears he's gone (the urgency loop)
         for (const s of signings) for (const acct of watchersOf(s.handle)) {
-          notify(acct, 'system', `⭐ Watched: ${s.handle} was snapped up by ${s.club} for $${(s.fee / 1000).toFixed(1)}k — off the board`, w0.season, liveDay);
+          notify(acct, 'system', `⭐ Watched: ${s.handle} was snapped up by ${s.club} for $${(s.fee / 1000).toFixed(1)}k — off the board`, w0.season, liveDay, { kind: 'player', handle: s.handle });
           await persistAccount(acct);
         }
       }
@@ -814,7 +814,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         // signing opportunity — his owner renews or he walks free next off-season
         for (const h of expiring) for (const acct of watchersOf(h)) {
           if (acct === c.owner) continue;
-          notify(acct, 'system', `⭐ Watched: ${h} (${c.tag}) is in his FINAL contract year — bid now, or he could walk free next off-season`, nw.season, 0);
+          notify(acct, 'system', `⭐ Watched: ${h} (${c.tag}) is in his FINAL contract year — bid now, or he could walk free next off-season`, nw.season, 0, { kind: 'player', handle: h });
           touched.add(acct);
         }
         if (r.departed.length) {
@@ -824,7 +824,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
           // WATCHLIST: a watched player walking free is THE moment — no fee, first come
           for (const d of r.departed) for (const acct of watchersOf(d.handle)) {
             if (acct === c.owner) continue;
-            notify(acct, 'system', `⭐ Watched: ${d.handle} left ${c.tag} on a FREE — he's on the market for nothing but his wage`, nw.season, 0);
+            notify(acct, 'system', `⭐ Watched: ${d.handle} left ${c.tag} on a FREE — he's on the market for nothing but his wage`, nw.season, 0, { kind: 'player', handle: d.handle });
             touched.add(acct);
           }
         }
@@ -857,7 +857,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       if (career && (career.kills >= 300 || career.mvp >= 5)) pushNews('award', `🎙 ${rt.handle} (${rt.club}, ${rt.age}) retires — ${career.kills} career kills over ${career.seasons} season(s). A legend hangs it up.`, roll.season, liveDay, rt.club);
       // WATCHLIST: a watched player hanging it up closes that pursuit — and unstars him
       for (const acct of watchersOf(rt.handle)) {
-        notify(acct, 'system', `⭐ Watched: ${rt.handle} (${rt.club}) has RETIRED at ${rt.age} — removed from your watchlist`, roll.season, liveDay);
+        notify(acct, 'system', `⭐ Watched: ${rt.handle} (${rt.club}) has RETIRED at ${rt.age} — removed from your watchlist`, roll.season, liveDay, { kind: 'player', handle: rt.handle });
         const set = watchlists.get(acct); set?.delete(rt.handle);
         await persistAccount(acct);
       }

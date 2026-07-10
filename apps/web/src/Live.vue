@@ -225,11 +225,13 @@ function jump(id: string) {
   if (id === 'sec-playoffs' && !playoffsOpen.value) { playoffsOpen.value = true; void loadPlayoffs(); }
   if (id === 'sec-offers' && !transfersOpen.value) { transfersOpen.value = true; void loadTransfers(); }
   if (id === 'sec-friendlies' && !friendliesOpen.value) { friendliesOpen.value = true; void loadFriendlies(); }
+  if (id === 'sec-cup' && !cupOpen.value) { void toggleCup(); }
   // double-tap: async panels above the target can grow after the first scroll
   // fires (anchor drift on a long page) — re-align once things settle
   const go = () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   requestAnimationFrame(go);
   setTimeout(go, 450);
+  setTimeout(go, 1200);   // slow async panels (cup bracket, playoffs) settle late
 }
 async function loadUpcoming() {
   if (!server.value || !myClub.value) { upcoming.value = []; return; }
@@ -279,6 +281,7 @@ function notifGo(n: { text: string; link?: Notif['link'] }) {
   // opens the club page — the notification IS the shortcut to the moment
   if (n.link?.kind === 'replay') { void watchAt(n.link.season, n.link.day, n.link.slot); notifOpen.value = false; return; }
   if (n.link?.kind === 'club') { void openClub(n.link.tag); notifOpen.value = false; return; }
+  if (n.link?.kind === 'player') { void openPlayer(n.link.handle); notifOpen.value = false; return; }
   if (n.text.includes('Playoffs')) { playoffsOpen.value = true; void loadPlayoffs(); }
   else if (n.text.startsWith('⇄') || n.text.startsWith('✓')) { transfersOpen.value = true; void loadTransfers(); }
   else if (n.text.startsWith('⚔')) { friendliesOpen.value = true; void loadFriendlies(); }
@@ -1999,6 +2002,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
         <button @click="jump('sec-leaders')">players</button>
         <button @click="jump('sec-stats')">stats</button>
         <button @click="jump('sec-playoffs')">🏆 playoffs</button>
+        <button @click="jump('sec-cup')">🎱 cup</button>
         <template v-if="myClub">
           <button @click="jump('sec-offers')">⇄ offers</button>
           <button @click="jump('sec-friendlies')">⚔ friendlies</button>
@@ -2349,7 +2353,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
       </div>
 
       <!-- the ACE Cup — every club in the world, open draw; a minnow can knock out a giant -->
-      <div class="lv-leaders">
+      <div id="sec-cup" class="lv-leaders">
         <div class="lv-tableh">
           <button class="lv-kicker btn" @click="toggleCup">🏆 ACE Cup <i class="lv-disc" :class="{ open: cupOpen }">▾</i></button>
           <span class="lv-note">every club in the world · open draw · giant-killing welcome</span>

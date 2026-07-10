@@ -64,7 +64,7 @@ export interface PlayerProfile {
   awards: { season: number; mvp: boolean; youngGun: boolean }[];
   legend: boolean;
 }
-export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number; link?: { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string } }
+export interface Notif { id: number; kind: 'fixture' | 'result' | 'season' | 'award' | 'system'; text: string; season: number; day: number; read: boolean; at: number; link?: { kind: 'replay'; season: number; day: number; slot: number } | { kind: 'club'; tag: string } | { kind: 'player'; handle: string } }
 export interface MailMsg { id: number; threadId: number; fromTag: string; fromName: string; toTag: string; subject: string; body: string; season: number; day: number; read: boolean; mine: boolean; at: number }
 export interface ChatMsg { id: number; room: string; fromTag: string; fromName: string; text: string; at: number }
 export interface TransferOffer { id: number; fromTag: string; toTag: string; handle: string; amount: number; status: 'pending' | 'accepted' | 'declined' | 'withdrawn'; season: number; day: number }
