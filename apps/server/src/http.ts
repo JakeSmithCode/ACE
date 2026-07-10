@@ -329,6 +329,12 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
   // handles already signed this session (a regenerated board would shift, so cache it)
   let board: Player[] | undefined;
   const sold = new Set<string>();
+  // the WATCHLIST: per-account shortlist of player handles an owner is tracking —
+  // starring a player anywhere means "tell me when he moves" (hits the market,
+  // gets signed by a rival). Private per-account state, persisted like scouting.
+  const watchlists = new Map<string, Set<string>>();
+  const watchersOf = (handle: string): string[] =>
+    [...watchlists.entries()].filter(([, set]) => set.has(handle)).map(([acct]) => acct);
   // scouting reports: per-account private knowledge (account → handle → level 0..MAX).
   // Knowledge is the owner's session state; only the money it costs is world state.
   const scoutReports = new Map<string, Map<string, number>>();
@@ -460,6 +466,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     mail: mailboxes.get(account) ?? [],
     career: careers.get(account) ?? [],
     recap: recaps.get(account) ?? null,
+    watchlist: [...(watchlists.get(account) ?? [])],
   });
   for (const { account, data } of await store.listAccountData(id)) {
     if (data.academy) academies.set(account, data.academy as Academy);
@@ -468,6 +475,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
     if (Array.isArray(data.mail)) mailboxes.set(account, data.mail as MailMsg[]);
     if (Array.isArray(data.career)) careers.set(account, data.career as CareerEntry[]);
     if (data.recap && typeof data.recap === 'object') recaps.set(account, data.recap as SeasonRecap);
+    if (Array.isArray(data.watchlist)) watchlists.set(account, new Set(data.watchlist as string[]));
   }
   for (const list of notifs.values()) for (const n of list) notifSeq = Math.max(notifSeq, n.id);
   for (const box of mailboxes.values()) for (const m of box) mailSeq = Math.max(mailSeq, m.id);
@@ -621,6 +629,11 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         await store.saveWorld(id, nw);
         signings.forEach(s => { sold.add(s.handle); pushNews('transfer', `${s.club} signed ${s.handle} ($${(s.fee / 1000).toFixed(1)}k)`, w0.season, liveDay, s.club); });
         emit('market', { sold: signings.map(s => s.handle) });   // boards refresh live
+        // WATCHLIST: anyone tracking a signed player hears he's gone (the urgency loop)
+        for (const s of signings) for (const acct of watchersOf(s.handle)) {
+          notify(acct, 'system', `⭐ Watched: ${s.handle} was snapped up by ${s.club} for $${(s.fee / 1000).toFixed(1)}k — off the board`, w0.season, liveDay);
+          await persistAccount(acct);
+        }
       }
       return signings.length;
     };
@@ -1665,6 +1678,20 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       });
     }
     // GET /notifications  → your targeted inbox (your fixtures/results/season events) + unread
+    // POST /watchlist { handle }  → toggle a player on your shortlist (capped 20 —
+    // a shortlist, not a database). Starring means "tell me when he moves".
+    if (path[0] === 'watchlist' && req.method === 'POST') {
+      if (!account) return json(res, 401, { error: 'no account' });
+      const b = (await readBody(req)) as { handle?: string };
+      const h = (b.handle ?? '').trim();
+      if (!h) return json(res, 400, { error: 'no handle' });
+      const set = watchlists.get(account) ?? new Set<string>();
+      if (set.has(h)) set.delete(h);
+      else { if (set.size >= 20) return json(res, 400, { error: 'watchlist full (20) — unstar someone first' }); set.add(h); }
+      watchlists.set(account, set);
+      await persistAccount(account);
+      return json(res, 200, { watchlist: [...set] });
+    }
     if (path[0] === 'notifications' && path.length === 1 && (req.method ?? 'GET') === 'GET') {
       if (!account) return json(res, 401, { error: 'no account' });
       const list = notifs.get(account) ?? [];
@@ -1986,7 +2013,7 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
         boardBonus: c.boardObjective?.bonus ?? 0, boardOnTrack: objOnTrack,
         wages: squadWageBill(c.roster), upkeep: facilityUpkeep(facilities), staff: staffWageBill(staff),
       });
-      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, finance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null, recap: recaps.get(account) ?? null, plays: c.plays ?? {}, planFive: planFive(c).map(p => ({ id: p.id, handle: p.handle, role: p.role, utility: p.attr.utility })) });
+      return json(res, 200, { ...publicClub(wm, c), plan: planOf(c), balance: c.balance, finance, squad: squadView(wm, c), academy, facilities, facilityUpkeep: facilityUpkeep(facilities), staff, staffMarket: staffMarket(wm.seed, wm.season), staffWageBill: staffWageBill(staff), sponsor: c.sponsor ? { ...c.sponsor, goalText: sponsorGoalText(c.sponsor) } : null, sponsorOffers: sponsorList, objective: c.boardObjective ?? null, objectiveRank, boardConfidence: conf, boardStatus: confidenceStatus(conf), boardOutcome: c.boardOutcome ?? null, teamTalk: c.teamTalk ?? null, talkReads, squadMood: mood, favourite: favEdge > 0.02 ? 'fav' : favEdge < -0.02 ? 'dog' : 'even', rival, derbyRecord: c.derby ?? { w: 0, l: 0 }, nextDerby, camp: c.camp ?? null, campOpen: canPickCamp(wm.day), cohesion: Math.round(teamCohesion(planFive(c).map(p => p.tenure)) * 100), career: careers.get(account) ?? [], leagueTitles: c.titles, cupTitles: c.cupTitles ?? 0, intlTitles: c.intlTitles ?? 0, vip, vipUntil: acct?.vipUntil ?? null, recap: recaps.get(account) ?? null, watchlist: [...(watchlists.get(account) ?? [])], plays: c.plays ?? {}, planFive: planFive(c).map(p => ({ id: p.id, handle: p.handle, role: p.role, utility: p.attr.utility })) });
     }
     // POST /me/sponsor  { index }  → sign one of the three offered multi-season deals (base
     // cheque + a bonus if its goal is met; paid at the season settle). Only when unsigned.

@@ -1257,6 +1257,19 @@ async function openPlayer(handle: string) {
 const kdOf = (t: { kills: number; deaths: number } | null) => !t ? '—' : t.deaths ? (t.kills / t.deaths).toFixed(2) : String(t.kills);
 const hsPctOf = (t: { kills: number; hs: number } | null) => !t || !t.kills ? '—' : Math.round((t.hs / t.kills) * 100) + '%';
 
+// the WATCHLIST — a shortlist of players you're tracking. ⭐ anywhere a player
+// renders; the server notifies you when a watched player is signed off the board.
+const watchBusy = ref(false);
+const watched = (h: string) => !!myClub.value?.watchlist?.includes(h);
+async function toggleWatch(h: string) {
+  if (!server.value || !token.value || !myClub.value || watchBusy.value) return;
+  watchBusy.value = true;
+  try {
+    const r = await server.value.toggleWatch(h, token.value);
+    myClub.value = { ...myClub.value, watchlist: r.watchlist };
+  } catch (e) { errMsg.value = (e as Error).message; } finally { watchBusy.value = false; }
+}
+
 // --- the public club page (click any club tag to browse its squad) ----------
 const clubModal = ref<ClubPage | null>(null);
 const clubBusy = ref(false);
@@ -1637,11 +1650,19 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
           <span class="lv-mktsub">a bid must clear the asking price <b>and</b> beat the top rival club — a 🔥 contested player goes above value</span>
           <span v-if="wireNote" class="lv-wire">⇄ {{ wireNote }}</span>
         </div>
+        <div v-if="myClub.watchlist?.length" class="lv-watchstrip">
+          <i class="lv-wslabel">⭐ WATCHLIST</i>
+          <span v-for="h in myClub.watchlist" :key="h" class="lv-wschip">
+            <b class="clickable" title="open player profile" @click="openPlayer(h)">{{ h }}</b>
+            <button class="lv-wsx" title="unstar" @click="toggleWatch(h)">✕</button>
+          </span>
+        </div>
         <div class="lv-mktboard">
           <template v-for="e in board" :key="e.handle">
           <div class="lv-mktrow">
             <span class="rs-role" :class="e.role">{{ e.role.slice(0, 3).toUpperCase() }}</span>
             <b class="lv-mkthandle clk" :class="{ open: expanded.has('m:'+e.handle) }" title="per-skill scouting" @click="toggleExpand('m:'+e.handle)">{{ e.handle }}<i class="lv-disc">▾</i></b>
+            <button class="lv-star" :class="{ on: watched(e.handle) }" :title="watched(e.handle) ? 'unstar — stop tracking' : 'star — get told when he moves'" @click="toggleWatch(e.handle)">★</button>
             <span class="lv-mktage">age {{ e.age }}</span>
             <span class="lv-mktovr">{{ e.overall }} <i>OVR</i>
               <span v-if="vsMine(e)" class="lv-vschip" :class="vsMine(e)!.d > 0 ? 'up' : vsMine(e)!.d < 0 ? 'down' : ''"
@@ -2439,7 +2460,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <span class="lv-cresttag">{{ playerModal.handle.slice(0, 5) }}</span>
           </div>
           <div class="lv-clubid">
-            <b class="lv-clubname">{{ playerModal.handle }}<i v-if="playerModal.igl" class="lv-igl" style="margin-left:8px">IGL</i><i v-if="playerModal.legend" class="lv-legendtag" title="inducted into the Hall of Fame">🏛 LEGEND</i></b>
+            <b class="lv-clubname">{{ playerModal.handle }}<button v-if="myClub" class="lv-star lg" :class="{ on: watched(playerModal.handle) }" :title="watched(playerModal.handle) ? 'unstar — stop tracking' : 'star — get told when he moves'" @click="toggleWatch(playerModal.handle)">★</button><i v-if="playerModal.igl" class="lv-igl" style="margin-left:8px">IGL</i><i v-if="playerModal.legend" class="lv-legendtag" title="inducted into the Hall of Fame">🏛 LEGEND</i></b>
             <div class="lv-clubtags">
               <span v-if="playerModal.name" class="lv-playerreal">{{ playerModal.flag }} {{ playerModal.name }}<template v-if="playerModal.age != null"> · {{ playerModal.age }}</template></span>
               <span v-if="playerModal.role" class="rs-role" :class="playerModal.role">{{ playerModal.role.toUpperCase() }}</span>
