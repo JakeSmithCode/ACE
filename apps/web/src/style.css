@@ -2204,6 +2204,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
   .lv-scoutbtn,.lv-sellbtn,.lv-mktbid,.lv-capb{min-height:34px;min-width:34px}
   .ace-controls .play,.ace-controls .nav,.ace-controls .speed{min-height:40px}
   .lv-quicknav button{min-height:34px}
+
+  /* the broadcast scorebar: full team names at 25px nowrap drove 232px of page
+     overflow at 390px — compress and ellipsize so the bar always FITS */
+  .ace-team{padding:8px 8px;gap:8px;min-width:0}
+  .ace-team .tg{font-size:14px;max-width:104px;overflow:hidden;text-overflow:ellipsis}
+  .ace-team .tmark{width:28px;height:28px;font-size:11px}
+  .ace-team .tside{font-size:8px;letter-spacing:.12em}
+  .ace-scorebar{overflow:hidden}
 }
 /* the server-owned world clock: countdown to the scheduled tick */
 .lv-nexttick{font-size:11px;letter-spacing:.05em;color:#8fd3e8;border:1px solid #2f6c7e;border-radius:10px;padding:3px 11px;white-space:nowrap}
