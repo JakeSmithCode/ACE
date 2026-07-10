@@ -1197,6 +1197,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font
 .lv-clinch.in{color:#7ee2a0}
 .lv-clinch.out{color:var(--muted-2)}
 .lv-clinch.rel{color:var(--def)}
+/* pre-match head-to-head strip */
+.lv-pvh2h{display:flex;align-items:baseline;gap:10px;margin:2px 0 8px;padding:8px 13px;background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:5px;font-size:12.5px;color:var(--muted)}
+.lv-pvh2h i{font-style:normal;font-family:var(--label);font-size:9px;letter-spacing:.08em;color:var(--muted-2);flex:none}
+.lv-pvh2h b{font-variant-numeric:tabular-nums;color:var(--ink)}
+.lv-pvh2h.up b{color:var(--win)}
+.lv-pvh2h.down b{color:var(--def)}
 /* form guide — the last-5 W/L strip in the standings club cell */
 .lv-form{display:inline-flex;gap:2px;margin-left:auto}
 .lv-form i{font-style:normal;font-family:var(--label);font-size:8.5px;font-weight:700;width:13px;height:13px;display:grid;place-items:center;border-radius:3px;color:#0e141b}

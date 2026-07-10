@@ -1259,15 +1259,23 @@ export async function startLiveServer(opts: LiveServerOpts = {}): Promise<LiveSe
       const table = standingsView(w, rows, c.tier, c.group, clock());
       const standing = table.findIndex(t => t.club === c.tag) + 1;
       // VS YOU: if a signed-in owner scouts another club, how they stack up — the power
-      // gap + this season's head-to-head series (resolved games only).
+      // gap + the CAREER head-to-head series (every season's resolved league games,
+      // so a rivalry accumulates across promotions and years).
       let vsYou: { tag: string; power: number; w: number; l: number; played: number } | undefined;
       const mine = account ? w.clubs.find(x => x.owner === account) : undefined;
       if (mine && mine.id !== c.id) {
         const myi = w.clubs.indexOf(mine);
-        const h2h = rows.filter(f => fixtureStatus(f, clock()) === 'resolved' && ((f.home === myi && f.away === ci) || (f.home === ci && f.away === myi)));
-        let hw = 0, hl = 0;
-        for (const f of h2h) { const meHome = f.home === myi, us = meHome ? f.homeScore : f.awayScore, them = meHome ? f.awayScore : f.homeScore; if (us > them) hw++; else hl++; }
-        vsYou = { tag: mine.tag, power: ranked.find(r => r.tag === mine.tag)?.power ?? Math.round(mine.strength * 100), w: hw, l: hl, played: h2h.length };
+        let hw = 0, hl = 0, hp = 0;
+        for (let s2 = 1; s2 <= w.season; s2++) {
+          const srows = s2 === w.season ? rows : await store.fixtures(id, s2);
+          for (const f of srows) {
+            if (fixtureStatus(f, clock()) !== 'resolved') continue;
+            if (!((f.home === myi && f.away === ci) || (f.home === ci && f.away === myi))) continue;
+            const meHome = f.home === myi, us = meHome ? f.homeScore : f.awayScore, them = meHome ? f.awayScore : f.homeScore;
+            hp++; if (us > them) hw++; else hl++;
+          }
+        }
+        vsYou = { tag: mine.tag, power: ranked.find(r => r.tag === mine.tag)?.power ?? Math.round(mine.strength * 100), w: hw, l: hl, played: hp };
       }
       return json(res, 200, {
         ...publicClub(w, c),

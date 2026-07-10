@@ -2408,6 +2408,12 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <span class="lv-pvhome">{{ side === 0 ? 'HOME' : 'AWAY' }}</span>
           </div>
         </div>
+        <!-- the career head-to-head series (vsYou on THEIR page is YOUR record vs them) -->
+        <div v-if="preview.them.vsYou" class="lv-pvh2h" :class="preview.them.vsYou.w > preview.them.vsYou.l ? 'up' : preview.them.vsYou.w < preview.them.vsYou.l ? 'down' : ''">
+          <i>⚔ HEAD-TO-HEAD</i>
+          <span v-if="!preview.them.vsYou.played">first meeting — no history between these clubs</span>
+          <span v-else>you {{ preview.them.vsYou.w > preview.them.vsYou.l ? 'lead' : preview.them.vsYou.w < preview.them.vsYou.l ? 'trail' : 'are level in' }} the series <b>{{ preview.them.vsYou.w }}–{{ preview.them.vsYou.l }}</b> over {{ preview.them.vsYou.played }} meeting{{ preview.them.vsYou.played > 1 ? 's' : '' }}</span>
+        </div>
         <div class="lv-pvready">
           <span class="lv-nmready" :class="pbBook[preview.map] ? 'ok' : 'warn'" @click="pbPick(preview.map as MapId); preview = null">▦ {{ pbBook[preview.map] ? 'your playbook is ready for this map' : 'no plays on this map — author before kickoff' }}</span>
           <span class="lv-nmtalk" :class="myClub?.teamTalk ? 'ok' : 'warn'" @click="showPanel('tactics'); preview = null">◆ {{ myClub?.teamTalk ? 'talk set: ' + myClub.teamTalk : 'set a team talk' }}</span>
