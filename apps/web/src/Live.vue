@@ -926,7 +926,10 @@ async function loadNotifs() {
 async function toggleNotifs() {
   notifOpen.value = !notifOpen.value;
   if (notifOpen.value && server.value && token.value && notifUnread.value) {
-    try { await server.value.markNotifsRead(token.value); notifUnread.value = 0; notifList.value = notifList.value.map(n => ({ ...n, read: true })); } catch { /* transient */ }
+    // clear the badge + mark read server-side, but KEEP the local read flags as
+    // fetched — the unread highlight should show you what's new while the panel
+    // is open (the next fetch returns them read)
+    try { await server.value.markNotifsRead(token.value); notifUnread.value = 0; } catch { /* transient */ }
   }
 }
 
