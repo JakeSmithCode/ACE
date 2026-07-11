@@ -939,6 +939,13 @@ const mailUnread = ref(0);
 const mailOpen = ref(false);
 const mailRecips = ref<{ tag: string; name: string }[]>([]);
 const mailTo = ref(''); const mailSubject = ref(''); const mailBody = ref(''); const mailMsg = ref('');
+/** Message a human rival straight from their club page — preset the recipient + open mail. */
+function composeTo(tag: string) {
+  mailTo.value = tag;
+  clubModal.value = null;
+  if (!mailOpen.value) void toggleMail();   // opens the panel + loads recipients
+  void loadMail();
+}
 async function loadMail() {
   if (!server.value || !token.value) return;
   try { const r = await server.value.mail(token.value); mailList.value = r.items; mailUnread.value = r.unread; } catch { /* transient */ }
@@ -1561,8 +1568,9 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
             <span>✎ tactics sets your site read + tempo; the ▦ playbook lets you draw real set-pieces per map — the engine resolves exactly what you author</span>
           </div>
           <div class="lv-obstep">
-            <i>4</i><b>Advance &amp; watch</b>
-            <span>▶ advance ticks the next match-day live (scores sealed until the broadcast ends) — then ▷ watch replays YOUR match on the 2D broadcast, byte-exact</span>
+            <i>4</i><b>{{ world?.manualAdvance ? 'Advance & watch' : 'Match night' }}</b>
+            <span v-if="world?.manualAdvance">▶ advance ticks the next match-day live (scores sealed until the broadcast ends) — then ▷ watch replays YOUR match on the 2D broadcast, byte-exact</span>
+            <span v-else>match-days resolve on the server clock (the ⏱ countdown above) — scores stay sealed until each broadcast ends, then ▷ watch replays YOUR match on the 2D broadcast, byte-exact</span>
           </div>
         </div>
         <div class="lv-obfoot">meanwhile the world is fully alive without you — scout the standings, club pages and leaderboards below</div>
@@ -2542,6 +2550,7 @@ onUnmounted(() => { stopStream?.(); stopEvents?.(); chatStop?.(); if (presenceTi
               <button v-if="myClub && !mine(clubModal.tag)" class="lv-challenge" :disabled="challengeBusy"
                       :title="clubModal.owned ? 'challenge this owner to a FRIENDLY — instant, engine-resolved, watchable; standings untouched' : 'scrim this AI club — instant, engine-resolved, watchable'"
                       @click="doChallenge(clubModal.tag)">⚔ {{ challengeBusy ? 'playing…' : clubModal.owned ? 'challenge' : 'scrim' }}</button>
+              <button v-if="myClub && clubModal.owned && !mine(clubModal.tag)" class="lv-challenge" title="message this club's owner — human-to-human mail" @click="composeTo(clubModal.tag)">✉ message</button>
               <span v-if="clubModal.phase" class="lv-phase" :class="'ph-' + clubModal.phase">{{ PHASE_LABEL[clubModal.phase] }}</span>
             </div>
             <span v-if="clubModal.style" class="lv-aistyle" :class="'ai-' + clubModal.style.archetype.toLowerCase()" :title="`AI manager style — ${clubModal.style.label}`">⚙ {{ clubModal.style.archetype }} · {{ clubModal.style.label }}</span>
